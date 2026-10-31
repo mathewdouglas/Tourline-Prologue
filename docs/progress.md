@@ -9,6 +9,24 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 174 - Tourline Prologue release workflow migration (2026-10-31)
+
+After promotion to main and the v0.2 tag in the older GT5P repository, main was
+copied with history into the independent public `mathewdouglas/Tourline-Prologue`
+repository. The copied release action was skipped because its repository guard
+still named GT5P. The workflow and private-input driver now trust only the new
+repository, with a separate `TOURLINE_LOCAL_RELEASE_ENABLED` variable and
+`tourline-prologue-release` runner label. Publishing already uses the triggering
+repository dynamically. No tags or releases are copied by this change.
+
+A separate local runner is registered, using its own checkout, runtime cache and
+incremental cache. Existing private inputs/notices are read from their provisioned
+directories. The old runner and its successful main/v0.2 builds were left alone.
+Repository/ref rejection tests, actionlint and the tracked game-file audit pass.
+The new main build is the integration check; until it finishes, packaging/upload
+on the new runner remain pending. No player rendering/preparation behavior changes.
+See `docs/local-release-ci.md` for provisioning and the disable switch.
+
 ## Phase 173 - Optional v0.2 player preparation candidate (2026-10-31)
 
 The user requested the release preparation steps: fix packaging, expose optional

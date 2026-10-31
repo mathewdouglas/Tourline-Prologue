@@ -29,6 +29,12 @@ def copy_file(source, destination):
     shutil.copy2(source, destination)
 
 
+def validate_trigger(repository, ref):
+    if repository != 'mathewdouglas/Tourline-Prologue' or not (
+            ref == 'refs/heads/main' or re.fullmatch(r'refs/tags/v\d+\.\d+(?:\.\d+)?', ref)):
+        raise ValueError('Only trusted main commits or numeric version tags may build')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--config', required=True, type=Path)
@@ -36,9 +42,7 @@ def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or Path(os.environ.get('GITHUB_WORKSPACE', '')).resolve() != ROOT:
         raise ValueError('Run only inside the dedicated GitHub Actions checkout')
     ref = os.environ.get('GITHUB_REF', '')
-    if os.environ.get('GITHUB_REPOSITORY') != 'mathewdouglas/GT5P' or not (
-            ref == 'refs/heads/main' or re.fullmatch(r'refs/tags/v\d+\.\d+(?:\.\d+)?', ref)):
-        raise ValueError('Only trusted main commits or numeric version tags may build')
+    validate_trigger(os.environ.get('GITHUB_REPOSITORY'), ref)
     if os.environ.get('VSCMD_ARG_TGT_ARCH', '').lower() != 'x64':
         raise ValueError('An x64 VS compiler environment is required')
     sha = os.environ['GITHUB_SHA']
@@ -77,6 +81,7 @@ def main():
         if (ROOT/name).exists():
             raise ValueError(f'Expected a fresh runner checkout; {name}/ already exists')
     run(sys.executable, 'scripts/check_no_game_files.py', '--tracked')
+    run(sys.executable, 'scripts/test/release_trigger.py')
     seed = paths['private_inputs']
     if not (seed/'CI-INPUTS.txt').is_file():
         raise ValueError('Private input directory must contain the CI-INPUTS.txt marker')

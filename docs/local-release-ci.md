@@ -23,7 +23,24 @@ took 17m21s; a cached build including checks, packaging and upload took 1m10s.
 The Windows runner uses private inputs and a private incremental cache outside
 the development worktrees.
 
-## Branch layout
+## Tourline Prologue repository binding
+
+The release workflow now belongs to `mathewdouglas/Tourline-Prologue`.
+Both the workflow and Python build driver reject other repositories. Register a
+separate repository runner with label `tourline-prologue-release` and enable
+`TOURLINE_LOCAL_RELEASE_ENABLED=true` in this repository. The runner uses its
+own workspace, runtime cache and incremental cache; existing private input and
+license directories can be read from the same provisioned location. Keep the
+internal `GT5P_CI_*` environment names; they remain the build interface.
+
+Main pushes and manual main dispatches build/upload a ZIP. Publishing requires
+a numeric version tag matching VERSION and authored release notes; `GH_REPO`
+uses the triggering repository. Tags/releases are not copied by this migration.
+Disable `TOURLINE_LOCAL_RELEASE_ENABLED` to stop future player builds.
+Do not run both repositories' heavyweight builds concurrently on this PC.
+The older runner's measurements below describe its original provisioning.
+
+## Branch layout (historical GT5P integration)
 
 The original `origin/main` is preserved at `65c75d61ade58efb4f6af5f099c3b78b64c0a8e6`
 as **`archive/original-main`**, already pushed.
@@ -66,7 +83,7 @@ is ready to switch; changing a remote ref does not require changing that worktre
 
 `.github/workflows/player-release.yml` triggers on pushes to `main` or a manual
 dispatch on main. It is disabled until repository variable
-`GT5P_LOCAL_RELEASE_ENABLED` equals `true` and a matching runner is online.
+`TOURLINE_LOCAL_RELEASE_ENABLED` equals `true` and a matching runner is online.
 
 1. A dedicated Windows x64 runner checks out the exact pushed commit.
 2. `scripts/release/ci_build.py` copies explicit local private build inputs into
@@ -117,7 +134,7 @@ dedicated `_work` checkout. Do not put the private inputs under `_work`.
 
 Install/configure the runner using this repository's **Settings > Actions >
 Runners > New self-hosted runner > Windows x64** instructions. Add the custom
-label **`gt5p-release`**; keep its standard `self-hosted`, `Windows`, `X64` labels.
+label **`tourline-prologue-release`**; keep its standard `self-hosted`, `Windows`, `X64` labels.
 Use GitHub's displayed download, checksum and short-lived registration token,
 not an old token stored in a script. The account running it needs access to
 the compiler, private inputs and cache. Running `run.cmd` manually gives control
@@ -153,12 +170,13 @@ The matching FFmpeg binary provenance/source/build instructions still need
 maintainer review; do not substitute invented or generic notices. Use the x64
 MSVC redistributable directory matching the toolchain, not DLLs from System32.
 
-Create local `C:\GT5P-CI\runner.json` (never commit this machine-specific file):
+Create local `C:\GT5P-CI\tourline-runner.json` (never commit this machine-specific file):
 
 ```json
 {
   "private_inputs": "C:/GT5P-CI/private-inputs",
-  "runtime_cache": "C:/GT5P-CI/runtime-cache",
+  "runtime_cache": "C:/GT5P-CI/tourline-runtime-cache",
+  "build_cache": "C:/GT5P-CI/tourline-build-cache",
   "vc_runtime_dir": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT",
   "notices_dir": "C:/GT5P-CI/notices",
   "elf_sha256": "REPLACE_WITH_SHA256_OF_YOUR_PRIVATE_EMAIN_ELF",
@@ -177,7 +195,7 @@ Add these environment variables to the runner installation's `.env` file
 
 ```text
 GT5P_CI_PYTHON=C:\GT5P-CI\venv\Scripts\python.exe
-GT5P_CI_CONFIG=C:\GT5P-CI\runner.json
+GT5P_CI_CONFIG=C:\GT5P-CI\tourline-runner.json
 GT5P_CI_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat
 ```
 
@@ -187,7 +205,7 @@ and clears developer lift overrides. Private/config directories must be outside
 the checkout and cannot be ancestors of it.
 
 Once integration is ready and the runner is provisioned, enable repository
-variable `GT5P_LOCAL_RELEASE_ENABLED=true` under **Settings > Secrets and
+variable `TOURLINE_LOCAL_RELEASE_ENABLED=true` under **Settings > Secrets and
 variables > Actions > Variables**. Run the workflow manually on main once;
 inspect the ZIP and test a fresh extraction on the Ally before treating it as
 release-ready. Later main pushes use the same process automatically.

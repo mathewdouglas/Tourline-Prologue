@@ -36,13 +36,18 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-10-31, Phase 173)
+## Start here: state of play (2026-10-31, Phase 174)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 173 is the latest).
+has the evidence, newest phase first (Phase 174 is the latest).
 
 ### What works now
+
+- **Tourline release CI (Phase 174):** release workflow/build guards target
+  `mathewdouglas/Tourline-Prologue`, with a separate enabled repository runner
+  and private caches. Local guard tests/lint pass; the first new-repository main
+  build validates packaging/upload. Internal GT5P CI environment names remain.
 
 - **Optional v0.2 player preparation (Phase 173):** standalone helper and native
   launcher progress/cancel/resume flow are implemented. Strict packaging accepts

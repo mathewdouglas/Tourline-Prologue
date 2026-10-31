@@ -13,10 +13,10 @@ jobs:
   player:
     # Deliberately never run PR/fork code on the PC holding private build inputs.
     if: >-
-      github.repository == 'mathewdouglas/GT5P' &&
+      github.repository == 'mathewdouglas/Tourline-Prologue' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
-      vars.GT5P_LOCAL_RELEASE_ENABLED == 'true'
-    runs-on: [self-hosted, Windows, X64, gt5p-release]
+      vars.TOURLINE_LOCAL_RELEASE_ENABLED == 'true'
+    runs-on: [self-hosted, Windows, X64, tourline-prologue-release]
     timeout-minutes: 180
     outputs:
       release_version: ${{ steps.build.outputs.release_version }}
