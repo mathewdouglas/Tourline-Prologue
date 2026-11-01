@@ -9,7 +9,7 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
-## Phase 182 - Tourline Prologue title and v0.2.1 release candidate (2026-11-01)
+## Phase 182 - Tourline Prologue title and v0.2.1 release (2026-11-01)
 
 The user requested the preparation window title **Tourline Prologue** and a
 v0.2.1 release containing the accumulated changes. Both the custom window and
@@ -39,6 +39,25 @@ this release. Development pushes retain `[skip ci]`; the versioned workflow is
 dispatched once after a fast-forward main promotion and tag validation. It uses
 the dedicated runner/private caches, strict packaging and authored release notes.
 Publication is recorded after the build rather than presumed by this preflight.
+
+Release result: main was fast-forwarded and annotated tag `v0.2.1` pins
+`4c346b23e78348754f58741e3b569920f7de24fc`. One explicit versioned
+[workflow run](https://github.com/mathewdouglas/Tourline-Prologue/actions/runs/41276412072)
+passed both the Windows build/validation/upload and GitHub-hosted publish jobs.
+The published [v0.2.1 release](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.1)
+is named exactly `v0.2.1`, is not a draft/prerelease, and is latest. It includes
+the 90,401,878-byte player ZIP and SHA-256 sidecar. Its digest is
+`846d4b213213c5db60e99a76747413d00a22b66874e1825905ea94d2a800d47c`.
+
+Independent checks of the completed ZIP pass CRC, all helper manifest hashes,
+engine/helper release hashes, exact template/source equality, 2,892 records /
+1,143 program locations, and game/cache/path exclusions across 206 selected
+files. Public sidecar and GitHub asset digest match the local package, and the
+published notes match the authored file. Evidence:
+`scratch/release-v021/{preflight,dispatch,workflow-status,package-verification,
+release-verification}.json`. These checks do not add a new real-game stutter or
+whole-starter fresh-compilation measurement. The tag/package are immutable;
+subsequent publication documentation uses `[skip ci]` without another build.
 
 ## Phase 181 - PC Settings-style preparation window (2026-11-01)
 

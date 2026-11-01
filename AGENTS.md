@@ -44,11 +44,13 @@ has the evidence, newest phase first (Phase 182 is the latest).
 
 ### What works now
 
-- **v0.2.1 candidate (Phase 182):** preparation window and legacy fallback use
-  the requested title `Tourline Prologue`. VERSION and authored update notes are
-  0.2.1. Sequential launcher/UI/package/trigger/volume/reuse checks pass. The user
-  explicitly authorized promotion to main, a v0.2.1 tag and one release build;
-  feature pushes still use `[skip ci]`. Publication evidence follows in progress.
+- **v0.2.1 released (Phase 182):** preparation window and legacy fallback use
+  the requested title `Tourline Prologue`. The user authorized main/tag/release;
+  tag `v0.2.1` pins `4c346b2`. One dedicated workflow built and published the ZIP
+  and checksum. Sequential launcher/UI/package/trigger/volume/reuse checks pass;
+  actual package hashes, helper files and metadata match, without game/cache data.
+  The release is named `v0.2.1` and marked latest. Development/documentation
+  pushes still use `[skip ci]`; no preparation-default or stutter claim.
 
 - **Preparation window (Phase 181):** optional preparation now has a native
   PC Settings-style window with real per-step status/counts, accessible controls

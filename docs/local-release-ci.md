@@ -81,8 +81,9 @@ is ready to switch; changing a remote ref does not require changing that worktre
 
 ## What runs
 
-`.github/workflows/player-release.yml` triggers on pushes to `main` or a manual
-dispatch on main. It is disabled until repository variable
+`.github/workflows/player-release.yml` triggers on pushes to `main`, numeric
+`v*` tags, or manual dispatches on those trusted refs. A version tag must match
+VERSION and name a commit in main history. It is disabled until repository variable
 `TOURLINE_LOCAL_RELEASE_ENABLED` equals `true` and a matching runner is online.
 
 1. A dedicated Windows x64 runner checks out the exact pushed commit.
@@ -95,7 +96,12 @@ dispatch on main. It is disabled until repository variable
    runtime DLLs, glyph assets and dependency notices. No game files are included.
 5. Only the finished `out/ci-player/*.zip` is uploaded as a GitHub Actions
    artifact, retained for 14 days. Download it from the workflow run's Artifacts
-   area. This does not automatically create or update a GitHub Release.
+   area. A main build does not publish a release.
+6. For a matching numeric tag, a GitHub-hosted publish job verifies the uploaded
+   ZIP/digest and uses authored `docs/release-v<version>.md` notes to publish the
+   ZIP and checksum. The Windows builder retains a read-only token. Existing
+   published versions cannot be overwritten. v0.2.1 used one explicit tag
+   dispatch after `[skip ci]` promotion/tag pushes to avoid duplicate builds.
 
 This uses a clean checkout with a private incremental build cache outside it.
 The initial cold build still compiles all translated code. Later runs restore
