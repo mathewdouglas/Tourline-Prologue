@@ -9,6 +9,85 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 191 - Composable environment absence and publication gate (2026-11-02)
+
+Developer `--environment-resource-path absent` selects only the environment
+callback's null-resource branch. It can combine with `--shadow-resource-path
+initialized-depth-lv`, unlike the older all-dynamic-resources-absent context.
+Unknown shadow/mirror bindings remain unresolved unless independently selected.
+The exact environment signature is `envMapSampler`, kind `0x901`, identifier 71;
+the supported record's callback selector is zero. Duplicate units and declared
+local/global conflicts still reject. This is an explicit binding-time condition,
+not an automatic inference from an unobserved resource or constructor.
+
+The extended native oracle executes real `00811FC8` initialization, `00811BD0`
+owner lookup, `00810F20` gate, framebuffer setup/getter, `0082E240` publication and
+`00D6CAA0` callback. Constructor owner `+8` is zero while gamma byte `+0x50` is 1.
+The gate clears environment slot 0 before returning on the absent owner. Even
+with a stale nonnull slot initially, the callback then emits the initialized
+non-depth cube fallback with address `0x60010101`, filter `0x02022000`, clear
+gamma and normalized coordinates. No rendering occurs in that branch.
+
+Controlled nonnull-owner tests use the real `00811BC0` setter, `008111F0` /
+`00811264` continuation and `00811688` gamma getter. The write at `00811448`-
+`00811474` clears address bits 20..27, then writes gamma field 7 for a nonzero
+byte or 0 otherwise, preserving bits 0..19 and 28..31. The filter is unchanged;
+another real framebuffer getter preserves the result. All 768 combinations of
+owner presence, four gamma bytes, three poisoned address words, two mip counts
+and sixteen sampler units pass. Allocation, scene rendering and scene-state
+boundaries are controlled. The original code is extracted into ignored scratch,
+never tracked. A first callback assertion exposed a selector left by an older
+test; the new probe now initializes its selector explicitly. A clean final run
+exits zero, including the earlier callback/framebuffer/shadow regressions.
+
+This validates the conditional writer, not a live active owner. The only named
+setter has no direct lifted caller; this investigation also finds no raw data
+reference to its OPD. Inlining, copying and indirect ownership remain possible.
+The store of a nonzero holder on the exact context passed by `00706398` remains
+unresolved. No active environment profile or guessed gamma variant is added.
+
+The new option uses the existing disc-ELF gate and pins environment rule version 1
+in resume identity. Omission restores previous construction in a separate output.
+Changing a resumed context or combining it with all-dynamic absence rejects
+without changing the output/cache. A real CLI identity/resume test with an empty
+synthetic catalogue passes; wrong ELF and missing audit inputs reject before
+output creation. The audit tool now preflights its input locations. An initial
+read-only audit with a mistaken trace path was stopped and rerun sequentially
+with the retained snapshot directory. No game/native compiler was overlapped.
+
+Asset-only CCW/RGBA16-MSAA2/active-dither enumeration finds 7,684 distinct
+conditional candidates; 58,683 eligible material definitions use the environment
+fallback. The eight explicit RGBA16 contexts deduplicate to 60,798 candidates.
+These are not all natively prepared or observed live. A fresh sample selects
+32 mixed shadow/environment requests by authored unit combinations and program
+pair diversity, with no capture input. Both stages rebuild; 29 distinct native
+pipelines persist and independent root-signature/key/envelope checks pass.
+The repeat uses cached driver blobs for all 32 requests.
+
+The complete asset-derived manifest is frozen before the retained HSR oracle
+is opened. Profile matches are 349/1,497 links, preserving all previous 345 and
+adding four. A separate fresh-cache proof retrieves programs from the original
+assets using the frozen manifest and verifies their hashes; captures select
+validation cases only. All four new cases reproduce both shaders and exact
+retained native keys with fresh numeric descriptors and supplied expected key
+zero. Independent key/persistence checks and all four driver-blob reuse calls
+pass. This is a small conditional reconstruction gain, not a starter expansion,
+whole-game coverage or evidence of stutter reduction. Material texture/profile/
+variant/shadow regressions and new environment conflict/unknown checks pass.
+
+Player packed-file integration, actual live resource/pass ownership, remaining
+shared contexts and runtime hit/stutter measurement remain. No renderer, queue,
+draw policy, starter, player default, main, tag or release changes. Feature push
+uses `[skip ci]`; original checkout and its processes stay untouched.
+
+Local evidence:
+
+- `scratch/global-registry-9bb1080d42d94c50a3c3250aa1630b3a/report.json`
+- `scratch/a191-mixed/{manifest,report}.json`, `native-first.log`, `native-reuse.log`
+- `scratch/a191-audit/{manifest,report}.json`
+- `scratch/a191-matches/{candidate-contract,manifest,report}.json`, native logs
+- `scratch/environment-191/{proof,prove_matches,cli_checks}.py`, logs and `cli/report.json`
+
 ## Phase 190 - Initialized LV shadow resource reconstruction (2026-11-02)
 
 Developer material preparation gains explicit `--shadow-resource-path

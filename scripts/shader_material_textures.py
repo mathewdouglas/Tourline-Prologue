@@ -144,19 +144,23 @@ def known_sampler_key(definition):
     return key, mask
 
 
-def with_global_sampler_path(definition, path=None, shadow_path=None, environment_path=None, mirror_path=None, environment_texture_path=None, dynamic_path=None):
+def with_global_sampler_path(definition, path=None, shadow_path=None, environment_path=None, mirror_path=None, environment_texture_path=None, dynamic_path=None, environment_resource_path=None):
     """Add measured global sampler candidates for explicitly chosen pass paths.
 
     Captures never choose the path here. Unknown signatures, duplicate global
     units and local/global overlaps stay unresolved. Dynamic absence is an explicit
     callback branch, never inferred from a captured descriptor or missing metadata.
     """
-    if path is None and shadow_path is None and environment_path is None and mirror_path is None and environment_texture_path is None and dynamic_path is None:
+    if path is None and shadow_path is None and environment_path is None and mirror_path is None and environment_texture_path is None and dynamic_path is None and environment_resource_path is None:
         return definition
     if dynamic_path not in (None, 'absent'):
         raise ValueError('unsupported dynamic resource path')
     if dynamic_path and any((shadow_path, environment_path, mirror_path, environment_texture_path)):
         raise ValueError('dynamic absence conflicts with active resource paths')
+    if environment_resource_path not in (None, 'absent'):
+        raise ValueError('unsupported environment resource path')
+    if environment_resource_path and any((dynamic_path, environment_path, environment_texture_path)):
+        raise ValueError('environment absence conflicts with another environment resource path')
     if path not in (None, 'active', 'fallback'):
         raise ValueError('unsupported global sampler path')
     if shadow_path not in (None, 'shadow-lv', 'shadow-lv-depth'):
@@ -185,9 +189,9 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
             ('realTimeShadowMap', 0x601, 87), ('realTimeShadowMapColor', 0x601, 96)}
         environment = environment_path is not None and signature == ('envMapSampler', 0x901, 71)
         mirror = mirror_path == 'scene-copy' and signature == ('mirrorMapSampler', 0x601, 115)
-        absent = dynamic_path == 'absent' and signature in {
+        absent = (environment_resource_path == 'absent' and signature == ('envMapSampler', 0x901, 71)) or (dynamic_path == 'absent' and signature in {
             ('envMapSampler', 0x901, 71), ('realTimeShadowMap', 0x601, 87),
-            ('realTimeShadowMapColor', 0x601, 96), ('mirrorMapSampler', 0x601, 115)}
+            ('realTimeShadowMapColor', 0x601, 96), ('mirrorMapSampler', 0x601, 115)})
         if not (dither or shadow or environment or mirror or absent) or counts[g['unit']] != 1 or g['unit'] in local_units:
             unresolved.append(g)
             continue
@@ -195,7 +199,7 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
             # Real callbacks select initialized non-depth built-ins: BA6B40
             # supplies the cube (environment/mirror); BA6C68 supplies the 2D
             # shadow fallback. BA6998/BA6590 fix normalized coordinates/gamma.
-            address, filtering, selected_path = 0x60010101, 0x02022000, dynamic_path
+            address, filtering, selected_path = 0x60010101, 0x02022000, 'absent'
         elif mirror:
             # Linear filtering fixes bank bits 2..3. Wrap bits 0..1 remain unknown.
             address, filtering, selected_path = 0, 0x02020000, mirror_path

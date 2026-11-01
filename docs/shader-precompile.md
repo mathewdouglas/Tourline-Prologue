@@ -42,9 +42,10 @@ The remaining work is:
    pass ownership/state so valid pipelines can be derived without observing every
    draw. Keep unknown bindings unresolved. This remains the main scaling path
    toward GT5; GT5 also needs its own asset formats and rendering contexts verified.
-   Phases 189-190 add built-in fallbacks and an explicit initialized LV depth
-   resource context. Active environment state and complete live ownership are
-   still unresolved; these rules do not enlarge the shipped observed starter.
+   Phases 189-191 add built-in fallbacks, explicit initialized LV depth resources
+   and separately selectable environment absence. The environment publication
+   gate/gamma write is measured; its live nonnull-owner assignment and complete
+   pass ownership remain unresolved. These rules do not enlarge the shipped starter.
 4. **Complete settings and context support.** Cover remaining MSAA, anisotropy,
    precision, root-signature, branching-vertex and pass/attachment combinations.
    Automatic selection currently handles supported translation modes only; custom
@@ -66,6 +67,44 @@ settings, followed by the observed misses and costs it identifies. Stable featur
 should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
+
+### Separate environment absence (Phase 191)
+
+Developer `--environment-resource-path absent` selects only the environment
+callback's null-resource branch. It can combine with initialized LV shadows;
+it leaves unselected shadow/mirror bindings unresolved. The older
+`--dynamic-resource-path absent` still means all supported dynamic resources
+are absent, so combining that broader choice with separate resource choices rejects.
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/mixed-resource-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --shadow-resource-path initialized-depth-lv `
+  --environment-resource-path absent --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/mixed-resource-proof
+```
+
+The verified disc ELF is required. Resume pins environment rule version 1.
+Omit the environment option and use a separate output to roll back; changing an
+existing generation rejects without changing its cache. The explicit condition
+is environment slot 0 null at binding time, unchanged built-in fallback and no
+later publisher. This is not inferred automatically from a fresh constructor,
+missing capture or missing shader metadata. Local/global conflicts and unknown
+signatures remain unresolved. Existing shadow alias/compare prerequisites apply.
+
+The real constructor/gate clears a stale environment binding with a null owner.
+The controlled active continuation writes gamma field 7 for a nonzero byte, but
+its actual live owner assignment is still untraced. No active environment recipe
+or player default is introduced. The eight-context constructor produces 60,798
+conditional candidates; this does not justify preparing them all at player startup.
+A fresh authored-diversity sample passes 32 mixed-resource requests / 29 distinct
+native keys, with both shaders and persisted driver verification. Four additional
+retained HSR keys reproduce exactly. The profile audit is 349/1,497 retained links,
+not a whole-game percentage or live stutter result. The starter stays unchanged.
+See Phase 191 [progress](progress.md) and [reconstruction](shader-reconstruction.md).
 
 ### Asset-derived dynamic fallback context (Phase 189)
 

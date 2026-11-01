@@ -5,6 +5,29 @@ extended by a capture-free conditional subset preparer in Phase 157 below.
 This is not complete player first-run setup or a complete shader catalogue. It follows the
 [coverage/provenance work](shader-coverage.md).
 
+## Environment publication and separate absence (Phase 191)
+
+`--environment-resource-path absent` composes the verified environment fallback
+with initialized LV shadows. It requires environment slot 0 to be null at binding
+time with no later publisher; it does not infer that state from missing evidence.
+The original constructor's owner is null even though its gamma byte is nonzero.
+The real dynamic renderer clears the slot before its owner gate, so that branch
+uses the built-in cube. Native checks cover stale-slot clearing and all units.
+
+The active continuation's gamma writer is now measured: it clears address bits
+20..27 and inserts field 7 for a nonzero gamma byte, or 0 otherwise. Its filter
+and remaining address bits survive. The getter does not undo this write. The
+native oracle passes 768 controlled constructor/gate/publication cases, including
+the real explicit owner setter. The live assignment of a nonnull owner on the
+scene context remains unknown; no active environment profile is introduced.
+
+A fresh mixed-resource sample passes 32 requests / 29 distinct native pipelines.
+Four newly matched retained keys independently reproduce both stages and exact
+fresh native state, persist and reuse driver blobs. The conditional profile
+audit reaches 349/1,497 retained links; it does not grow the observed starter.
+See the [workflow](shader-precompile.md#separate-environment-absence-phase-191)
+and Phase 191 [evidence](progress.md). Live use/stutter remains unmeasured.
+
 ## Initialized LV depth resource (Phase 190)
 
 The explicit developer `--shadow-resource-path initialized-depth-lv` closes a

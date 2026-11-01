@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 190)
+## Start here: state of play (2026-11-02, Phase 191)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 190 is the latest).
+has the evidence, newest phase first (Phase 191 is the latest).
 
 ### What works now
+
+- **Separate environment absence (Phase 191):** explicit developer
+  `--environment-resource-path absent` composes the null environment fallback
+  with initialized LV shadows. The real constructor/publication gate and controlled
+  gamma continuation pass 768 native cases. A fresh 32-request mixed-resource
+  proof creates 29 distinct pipelines and reuses all driver calls. Four additional
+  retained HSR keys reproduce exactly, giving 349/1,497 conditional profile
+  matches; the shipped starter is unchanged. Active gamma writes are measured,
+  but the live nonzero-owner assignment remains untraced, so no active environment
+  profile is added. Resume/rollback/build rejection and focused regressions pass
+  sequentially. No live stutter or player-default change; push `[skip ci]`.
 
 - **Initialized LV depth resources (Phase 190):** explicit developer
   `--shadow-resource-path initialized-depth-lv` derives depth shape, gamma,
