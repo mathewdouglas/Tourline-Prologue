@@ -34,6 +34,9 @@ The remaining work is:
    frame-time hitches, loading time and memory on repeatable routes, and inspect
    screenshots. Existing trials have not established a consistent stutter benefit;
    blanket startup scanning must not become a default on assumption alone.
+   Phase 192 measures 99.7% prepared-key coverage on one HSR route; native
+   first-use readiness, early rendering transients and consistent stutter
+   reduction remain open.
 2. **Broaden representative coverage.** Add useful missing tracks, cars,
    dealerships, menus, cameras and effects. Rank observed misses/shared programs
    so collection targets gaps rather than every car-track combination. The starter
@@ -67,6 +70,57 @@ settings, followed by the observed misses and costs it identifies. Stable featur
 should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
+
+### Measuring requested native keys (Phase 192)
+
+The optional development patch `patches/ps3recomp-pipeline-use-coverage.patch`
+applies after the normal compatibility overlay in an isolated runtime. It is
+not part of the release/default patch. Check before applying: the local
+`ps3recomp-gt5p-provenance` tree already contains it. Build an isolated engine
+against that runtime. Exactly `RSX_PSO_COVERAGE=1` enables collection; unset,
+`0` or other values disable it. Draw/queue policy is unchanged.
+
+The diagnostic records complete native keys for executing guest VP/FP draws.
+Prepass/prewarm/offline work and no-guest-FP fallback draws are excluded.
+Shader-pending submissions are a separate repeated-draw count. Do not add them
+to unique keys. Overflow beyond 16,384 keys or inconsistent/incomplete evidence
+withholds coverage. First-key/snapshot IO can affect frame timing.
+First overflow emits an invalid snapshot immediately. Shutdown is not instrumented;
+a consistent snapshot proves neither orderly shutdown nor completion of a route.
+
+```powershell
+python scripts/pipeline_runtime_coverage.py `
+  --log <completed-route-stderr> --report <successful-preparation-report.json> `
+  --output scratch/coverage-result
+python scripts/test/shader_stutter.py `
+  --fixture <private-game-fixture> --engine <isolated-diagnostic-engine> `
+  --prepared <generation/shadercache> --coverage-report <generation/report.json> `
+  --output scratch/coverage-pair --trials 2 --startup-policy demand
+```
+
+`--condition prepared` selects a single diagnostic route instead of a pair.
+The benchmark requires the report beside its prepared cache, records hashes
+and conditions, captures frames/screenshots, and cleans only disposable game
+copies. Every shadercache remains. Tests are sequential; another game prevents
+launch. Owned graceful close retains existing timeout cleanup.
+
+Coverage is an intersection with successful native preparation rows, not mere
+template membership. The standalone analyzer cannot prove the game selected
+that cache; capture the launch configuration too. Bad schemas, failed native
+keys/inventories, incompatible or inconsistent snapshots reject. Translation rows need
+their own successful batch evidence. Driver calls can differ from created-key
+counts because of memory hits and rejected-blob retries. Residency, actual driver acceptance of a
+cached hint and avoided hitches remain separate measurements.
+
+The final HSR 1080p/2x trial matches **1,036/1,039 keys (99.7%)**, with 17 runtime
+shader compiles. Three observed keys are outside the prepared set. This is one
+save/car/camera/route/settings combination, not whole-game coverage, and it does
+not replace the independent 349/1,497 asset-reconstruction metric. The earlier
+empty-cache trial compiles 1,731 shaders, but early/later frame times are mixed
+and black/overexposure transients remain. Native driver creation still happens
+during play. Prioritize targeted loading-time readiness and actual phase ownership,
+then broader representative tests. No zero-stutter claim follows.
+See Phase 192 in [progress](progress.md) for timing, memory, evidence and limitations.
 
 ### Separate environment absence (Phase 191)
 

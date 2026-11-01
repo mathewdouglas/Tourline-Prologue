@@ -9,6 +9,132 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 192 - Runtime pipeline-key coverage measurement (2026-11-02)
+
+The user selected `GT5P` as the working checkout. Local continuation branch
+`feature/shader-runtime-coverage` starts at `e600f96`; the previous player-setup
+worktree and unrelated files are preserved. Two Grok tasks implemented the
+collector/report tool; parent integration, fixes, builds and tests are sequential.
+
+The separate `ps3recomp-pipeline-use-coverage.patch` adds default-off
+`RSX_PSO_COVERAGE=1`. Its pre-diagnostic backend blob is `e573d203`, matching the
+tracked compatibility overlay. It is not wired into the release/default patch.
+Only executing guest-fragment draws record complete `guest_pso_hash` keys with
+the existing root-signature policy. Prepass, warmup, offline preparation and
+renderer fallbacks without a guest fragment are excluded. Shader-incomplete
+submissions are counted separately, repeatedly across frames; they are not keys.
+
+The collector stores at most 16,384 keys in 32,768 slots (about 288 KiB).
+Overflow invalidates the percentage. Initialization is atomic; set/snapshot
+access shares an SRW lock. Shutdown has no diagnostic instrumentation, preserving
+its existing wait/ownership policy. Native cap rejection without a final callback,
+deduplication, zero-key, concurrent-snapshot, pending and disabled-mode checks pass.
+The shutdown check is a source invariant, not a simulated join-timeout test.
+
+The initial prepared log had new keys after its last five-second summary.
+The parser correctly withheld its full-route ratio. Each new key now also emits
+a snapshot under the same lock, alongside periodic snapshots. First overflow
+also immediately emits an invalid snapshot, even with no later callback. No summary
+was fabricated or raw log edited. First-key/snapshot IO can affect frame timing.
+
+`pipeline_runtime_coverage.py` joins only successful preparation rows with
+matching native results and validated driver inventory. Translation rows need
+consistent derived/parent-key and native-batch evidence. Templates alone, bad
+schemas, failed HRESULTs, nonfinite completion times, counter resets, malformed,
+inconsistent or truncated snapshots cannot produce a reassuring percentage. Counts
+are bounded, large native counters work, inputs stay unchanged and output must
+be a fresh ignored directory. Parser/rejection/CLI tests pass. This is a report
+key-set intersection; the tool alone does not prove selected-cache provenance,
+GPU residency, actual driver acceptance of a cached hint, or an avoided hitch.
+
+The existing benchmark gains optional `--coverage-report` paired with its cache,
+and `--condition` for a single diagnostic trial. It records launch conditions and
+report hashes; a control reference intersection does not mean its empty cache
+contained those files. Optional graceful close addresses only the owned window,
+then retains existing owned-process cleanup. Async draw policy is unchanged.
+Window close does not guarantee backend shutdown; the harness can still need its
+owned-process kill. A consistent snapshot alone proves neither orderly shutdown
+nor route completion. Sampling completion is recorded separately by the harness.
+Disposable game copies are removed by existing guarded cleanup; every cache,
+log and screenshot remains. The private fixture materializes the known PDIPFS
+junction into copied install data; source saves/game files are not written.
+
+The diagnostic engine verifies all 1,143 original programs from GT.VOL/ELF and
+prepares all 2,892 starter records in a new private generation, using verified
+local hints. A final-engine revalidation matches every native key and uses cached
+driver hints on all 2,892 native batch calls. An initial command omitted its
+location map and rejected safely. An initial incremental link selected the older
+runtime library; pending result sentinels were rejected. The corrected link uses
+the isolated library and a separate successful generation. All game-derived
+outputs stay local. The shipped template and player defaults are unchanged.
+An initial compiler output path also touched the primary backend object; that
+object was restored by recompiling its configured baseline. The primary EXE
+was not relinked. Diagnostic engine/library outputs are in ignored scratch.
+
+The 1080p/2x MSAA/VSync HSR route uses private saves/install data, 90 seconds of
+grid/race sampling, `PS3_VERBOSE=0`, existing async policy and demand startup
+without a blanket recipe scan. OS/driver caches remain warm and uncontrolled.
+An early banked-corner shot was initially misidentified as Daytona; subsequent
+HSR signage and matching minimaps establish High Speed Ring in both trials.
+
+| Measurement | Empty application cache | Initial prepared trial |
+| --- | ---: | ---: |
+| Runtime shader compiles, last sample | 1,731 | 16 |
+| Driver calls / cached-hint calls | 853 / 0 | 2,345 / 2,338 |
+| Demand queued / completed | 853 / 853 | 2,345 / 2,345 |
+| Grid arrival, seconds from launch | 65.56 | 65.75 |
+| Early 45-second p99, ms | 65.3 | 220.3 |
+| Later 45-second p99, ms | 56.3 | 21.2 |
+
+The control's 465/468 complete keys match the reference set (99.36%), although
+that run selected an empty cache. Its 3,510,917 shader-pending submissions and
+initial black scene/HUD show why this is not a complete draw-workload comparison.
+The scene later recovers. The initial prepared trial reaches many more complete
+keys but its incomplete final summary withholds the percentage; it also briefly
+shows overexposure before recovery. This pair does not establish a consistent
+stutter improvement. Warm-set hit/resident counters stay zero under this demand
+policy; that is not a count of actual GPU-resident pipelines. Driver calls also
+include prepass work, so they need not equal distinct executing-draw keys.
+
+The final single prepared route with per-key snapshots passes complete accounting:
+**1,036/1,039 keys match (99.7113%)**, excluding 80 shader-pending submissions.
+The final five-second sample reports 17 shader compiles, 2,224 driver calls
+(2,221 supplied cached hints) and 2,224 completed demand jobs. Grid arrival is
+66.74 s. Sampled peak working set/private bytes are 3,319,054,336/3,492,528,128.
+Early/later p99 are 161.9/22.1 ms. This follow-up is not a new controlled pair;
+later images show track, cars/mirror, scenery and HUD, but early transients
+prevent a clean rendering/stutter claim. It is one save/car/camera/route/settings
+combination, not 99.7% of the game or the independent asset-reconstruction metric.
+
+Three keys miss in both conditions. Their recipes share one vertex bytecode
+identity; it and the three fragment bytecode identities are absent from the
+starter. This metadata lookup does not prove branching or independent recovery.
+Next identify these programs/contexts and target loading-time native readiness
+using actual phase ownership, then broaden content/settings/GPU trials. No broad
+scan or synchronous-draw default is introduced. Main/tag/release stay unchanged;
+development pushes use `[skip ci]`.
+
+Final Grok review found and parent fixes address three defects: overflow needed
+an immediate invalid snapshot rather than depending on a final callback; valid
+translation batches can have zero driver calls (memory hits) or extra calls
+(cached-blob rejection/retry); and diagnostic shutdown locking could exceed the
+existing join wait. Shutdown instrumentation is removed rather than claiming a
+bounded diagnostic shutdown. Native tests now reject an overflowing log with no
+final callback, report the shutdown source check accurately, and parser tests
+accept valid zero-call/retry batches while still requiring every key created.
+The measured 1,039-key route stayed below the cap; its saved evidence is unchanged.
+The corrected backend compiles separately in `review-build` (existing backend
+warnings remain), and the revised parser reproduces 1,036/1,039 from the saved
+inputs. No new gameplay/performance result is claimed for these collector fixes.
+
+Local evidence under `scratch/runtime-coverage-192/`: `prepared-verified/report.json`,
+`runtime-revalidated-report.json`, `prepared-route/report.json`, the final
+`1-prepared/coverage/coverage.json`, original `paired/report.json`, all route
+shots/logs, `miss-analysis.json`, `fixture.json`, build and revalidation logs.
+Final native checks: `scratch/pipeline-runtime-native-0145855986594a739a3cf6d48692d0c5/report.json`.
+The earlier native report's `shutdown_timeout_invalidates` field was only a source
+assertion and must not be interpreted as an exercised join-timeout test.
+
 ## Phase 191 - Composable environment absence and publication gate (2026-11-02)
 
 Developer `--environment-resource-path absent` selects only the environment

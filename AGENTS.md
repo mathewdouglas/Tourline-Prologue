@@ -36,13 +36,27 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 191)
+## Start here: state of play (2026-11-02, Phase 192)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 191 is the latest).
+has the evidence, newest phase first (Phase 192 is the latest).
 
 ### What works now
+
+- **Runtime coverage measurement (Phase 192):** development diagnostic
+  `RSX_PSO_COVERAGE=1` records bounded distinct complete guest pipeline keys;
+  the source patch is separate and default-off. New reporting joins only
+  successful native preparation rows, rejecting inconsistent/truncated snapshots.
+  All 2,892 starter pipelines revalidate with the diagnostic engine. A completed
+  1080p/2x High Speed Ring prepared route matches 1,036/1,039 observed keys
+  (99.7%), with 17 runtime shader compiles; this is one route/settings/save,
+  not whole-game coverage or GPU residency. Three missing keys remain.
+  The earlier empty-cache run compiles 1,731 shaders; early/late frame-time
+  results are mixed and rendering transients remain. No consistent stutter win.
+  Current user-selected checkout is GT5P, local branch
+  `feature/shader-runtime-coverage`; push development only with `[skip ci]`.
+  Player defaults, starter, main, tag and release remain unchanged.
 
 - **Separate environment absence (Phase 191):** explicit developer
   `--environment-resource-path absent` composes the null environment fallback

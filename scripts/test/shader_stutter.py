@@ -81,6 +81,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('fixture','engine','prepared','output'):
         ap.add_argument('--'+name,type=Path,required=True)
+    ap.add_argument('--coverage-report',type=Path,
+                    help='Optional successful preparation report paired with --prepared; enables bounded draw-key diagnostics')
+    ap.add_argument('--condition',choices=('control','prepared'),
+                    help='Single-condition diagnostic route; does not establish a paired performance result')
     ap.add_argument('--trials',type=int,choices=(2,4),default=4)
     ap.add_argument('--keep-game-copies',action='store_true',
                     help='Retain disposable game/save copies for debugging (about 4 GiB per trial)')
@@ -99,6 +103,13 @@ def main():
         ap.error('The copied fixture must be in ignored storage in this checkout')
     if not (prepared/'warmup-v1').is_dir():
         ap.error('--prepared must name the generated shadercache directory')
+    coverage_report = args.coverage_report.resolve() if args.coverage_report else None
+    if coverage_report:
+        from pipeline_runtime_coverage import parse_report, MAX_REPORT
+        if (coverage_report.parent != prepared.parent or not coverage_report.is_file()
+                or coverage_report.stat().st_size > MAX_REPORT):
+            ap.error('--coverage-report must be the bounded report.json beside the prepared cache')
+        parse_report(json.loads(coverage_report.read_text(encoding='utf-8-sig')))
     output.mkdir(parents=True)
     seed_keys = {p.stem[4:] for p in (prepared/'warmup-v1').glob('pso_*.recipe')}
     report = dict(engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
@@ -110,7 +121,8 @@ def main():
                                'Early grid/rolling-start and loading transitions are separate from later racing.',
                                'Scripted navigation is repeatable, but race progress/draw workloads can differ.',
                                'Original offline subset preparation time is outside these live trial timings.'])
-    order = ('control','prepared','prepared','control')[:args.trials]
+    order = (args.condition,) if args.condition else ('control','prepared','prepared','control')[:args.trials]
+    if args.condition:report['limitations'].append('Single-condition diagnostic run; no paired performance conclusion.')
     for number,condition in enumerate(order,1):
         if b'gt5p.exe' in subprocess.run(['tasklist','/FI','IMAGENAME eq gt5p.exe','/NH'],capture_output=True).stdout.lower():
             raise SystemExit('Another gt5p.exe is running; nothing was stopped')
@@ -147,10 +159,12 @@ def main():
                    RSX_SHADER_WARMUP_BACKGROUND='1',RSX_PSO_ASYNC='1',RSX_SHADER_ASYNC='1',
                    RSX_RACE_PREWARM='0',RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
         env['RSX_PIPELINE_METRICS'] = '1'
+        if coverage_report:env['RSX_PSO_COVERAGE'] = '1'
         cmd = ['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(ROOT/'scripts/test/race.ps1'),
                '-Track','HighSpeedRing','-Tag',tag,'-FrameTest','-Seconds','90','-SampleDelay','0',
                '-RaceShots','20','-Engine',str(engine),'-GameRoot',str(game),'-OutputDirectory',str(logs),
                'GT5P_RESOLUTION=1080p']
+        if coverage_report:cmd.append('-GracefulClose')
         print('Running',tag,flush=True)
         with (trial/'runner.log').open('wb') as stream:
             proc = subprocess.Popen(cmd,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
@@ -162,6 +176,12 @@ def main():
                     subprocess.run(['taskkill','/PID',str(proc.pid),'/T','/F'],capture_output=True)
                     proc.wait(timeout=15)
         result = dict(tag=tag,condition=condition,**analyze_run(logs,tag,seed_keys))
+        if coverage_report:
+            from pipeline_runtime_coverage import evaluate_files
+            result['reference_pipeline_coverage'] = evaluate_files(logs/f'{tag}.err', coverage_report, trial/'coverage')
+            result['coverage_condition'] = dict(prepared_cache_selected=condition=='prepared',
+                reference_report_sha256=hashlib.sha256(coverage_report.read_bytes()).hexdigest(),
+                note='Set intersection with the supplied successful preparation report; control runs select an empty cache. This is not a resident-hit or avoided-hitch count.')
         report['trials'].append(result)
         (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         if not args.keep_game_copies:
@@ -169,7 +189,7 @@ def main():
             result['game_copy_retention'] = 'Disposable game copy removed; logs/screenshots/shadercache retained'
             (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(result['periods']),flush=True)
-    print('Completed paired benchmark:',output/'report.json',flush=True)
+    print('Completed benchmark:',output/'report.json',flush=True)
 
 
 if __name__ == '__main__':
