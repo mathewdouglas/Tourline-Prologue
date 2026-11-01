@@ -338,7 +338,10 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch'):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default'):
+    from pipeline_translation import MODES
+    if translation not in MODES:
+        raise ValueError('Unsupported preparation translation')
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -372,22 +375,46 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
         if volume_map is None and template.is_dir():volume_map=template/'volume-map.json'
         contract['volume_map']=sha(json.dumps(read_volume(volume_map),sort_keys=True,separators=(',',':')).encode())
     from preparation_checkpoint import Checkpoint
+    from preparation_reuse import handoff_enabled, seed_cache, shaders_for_locked_pass
     from cache_hash import statistics
+    use_handoff=handoff_enabled()
     started=time.perf_counter()
     hash_before=statistics()
     with Checkpoint(output,contract,resume,progress=progress) as checkpoint:
         checkpoint.stage('checking-cache')
-        checked=time.perf_counter()
-        reused=cached_shaders(document,output/'shadercache') if resume else {}
+        reused={}
         seed_report=None
         if reuse_cache is not None:
-            from preparation_reuse import seed_cache
             checkpoint.stage('reusing-cache')
             cache=output/'shadercache';cache.mkdir(exist_ok=True)
-            seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
-            reused=cached_shaders(document,cache)
-        return prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before,volume,volume_map,vertex_mode)
+            if use_handoff:
+                seed_report,verified=seed_cache(document,reuse_cache,cache,checkpoint.progress,handoff=True)
+                checked=time.perf_counter()
+                reused=shaders_for_locked_pass(document,cache,verified)
+            else:
+                seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
+                checked=time.perf_counter()
+                reused=cached_shaders(document,cache)
+            seed_report['shader_handoff']=use_handoff
+        else:
+            checked=time.perf_counter()
+            if resume:reused=cached_shaders(document,output/'shadercache')
+        cache_seconds=time.perf_counter()-checked
+        report=prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
+                                asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report,hash_before,volume,volume_map,vertex_mode)
+        if translation != 'default':
+            if report['counts'] != {'prepared':len(document['records'])}:
+                raise ValueError('Default preparation must succeed before additional translation')
+            reused.clear()
+            from pipeline_translation import prepare as prepare_translation
+            vertices,fragments,_=locate(document['records'],catalog,elf,asset_map,assets,volume,volume_map,progress)
+            report['additional_translation']=prepare_translation(document,decoder,engine,game_root,output,
+                contract,vertices,fragments,translation,run_offline,progress,vertex_mode)
+            report['default_preparation_seconds']=report['preparation_seconds']
+            report['preparation_seconds']=time.perf_counter()-started
+            report['hashing']=statistics(hash_before)
+            save_report(output/'report.json',report)
+        return report
 
 
 def _prepare_vertex_batch(document, vertices, fragments, reused, decoder, cache, output, checkpoint, report, opener=None):
@@ -623,6 +650,8 @@ def main():
     p = sub.add_parser('prepare')
     p.add_argument('--fragment-mode',choices=('batch','legacy'),default='batch',help='Exact-request batching by default; legacy rollback')
     p.add_argument('--vertex-mode',choices=('serial','batch'),default='batch',help='Bounded exact vertex batches by default; serial restores the serial compiler')
+    p.add_argument('--translation',choices=('default','native-scaled','ultrawide-native'),default='default',
+                   help='Add one explicit translation to the default prepared set')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
     p.add_argument('--volume',type=Path,help='Read directly from the original GT.VOL without unpacking')
@@ -642,7 +671,7 @@ def main():
         return
     if args.command == 'prepare':
         result = prepare(*(getattr(args, k).resolve() if getattr(args,k) is not None else None for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode)
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode,translation=args.translation)
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

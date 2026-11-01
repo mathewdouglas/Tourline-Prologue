@@ -134,11 +134,11 @@ gameplay stutter improvement.
 
 The next useful targets are:
 
-- **Repeated cache I/O and verification.** The Phase 180 expansion spends
-  27.55 s copying verified hints and 30.50 s verifying its existing cache.
-  Investigate a bounded per-run inventory that reuses verified bytes and avoids
-  reading/hashing the same file repeatedly. Retain ownership, file-change and
-  compatibility checks; do not trust a prior manifest alone.
+- **Repeated cache I/O and verification.** Phase 180's 30.50 s cache-setup timer
+  includes its 27.55 s copying verified hints; these are overlapping measurements.
+  The transient shader handoff described below avoids an immediate reread of
+  accepted copies. Broader inventory and duplicate staging work remain useful;
+  retain ownership, file-change and compatibility checks.
 - **Duplicate native-request shader files.** Current request staging writes two
   DXBC files per pipeline, even when many records share code. A shared immutable
   content-addressed staging store could reduce small-file writes/reads and
@@ -158,6 +158,36 @@ stage observations, not additive predictions of a new total or fresh-run
 bottleneck. Prefer avoiding repeated I/O over removing integrity/native checks.
 Evidence: `scratch/c180-player/validation.json` and its generation's `native.log`.
 
+### Transient verified shader handoff
+
+Incremental preparation can pass the bytes it just verified and copied directly
+to the same locked preparation pass, avoiding a second file read/hash. Existing
+destination files are still read and verified. The handoff checks template source
+and bytecode identity, file identity, size, timestamps, regular-file/reparse/link
+shape and the shared 128 MiB shader budget. Changed files fall back to a full
+verified read. It is a transient object, not a trusted persistent manifest, and
+is not protection against another process deliberately forging file metadata.
+No driver-blob verification or native pipeline creation is removed.
+
+`GT5P_PREPARE_REUSE_HANDOFF=0` restores destination rereads; unset/1 enables the
+handoff. Other values fail before output generation changes. This development
+change does not alter the published v0.2.1 helper. Source cache generations remain
+read-only and accepted complete files survive cancellation for verified resume.
+
+The report's `cache_reuse.shader_handoff` identifies the selected path. As of this
+change, `resume.cache_verification_seconds` measures only the final shader loader;
+older reports include seed/reuse time in that field. `cache_reuse.seconds` remains
+the copy/seed stage. Do not compare old/new timer values as the same operation.
+
+Twenty-five synthetic checks cover source preservation, bounds, cancellation,
+corruption, pre-existing files and same-size mutation/replacement. Separate empty
+application-cache 32-pipeline reuse proofs pass both modes with identical shaders,
+zero shader compiler launches and all native driver calls using verified hints.
+An I/O-only whole-starter pair verifies 2,663 shader files: the handoff avoids
+their immediate destination rereads. Copy stages have different warm-cache/budget
+outcomes, so total wall times are not a controlled speedup measurement. Evidence:
+`scratch/settings-preparation-185/{handoff-native32/validation.json,handoff-io/validation.json}`.
+
 ### Resolution, ultrawide and first-use visibility (Phase 184)
 
 Pixel width/height and viewport/scissor are not fields in the native graphics
@@ -167,14 +197,12 @@ pipelines. Guest display modes can also select different passes. Do not infer
 complete settings coverage from preparation completing the starter template.
 
 Ultrawide is a concrete translation exception: `rsx_vp_decompiler.c` conditionally
-emits an edge-adjustment epilogue when `RSX_ULTRAWIDE` is enabled. The game maps
-the ultrawide setting to that environment before translation. A production-decoder
-probe of the same original vertex program in separate default/ultrawide processes
-confirms different generated source and DXBC. The current default-translation
-starter/helper does not generate that additional variant or read the player's
-display settings to derive a new template. Repeating default preparation does
-not close that gap. Settings-aware vertex/fragment identity generation and exact
-native-key validation remain roadmap work, not implemented by Phase 184.
+emits an edge-adjustment epilogue when `RSX_ULTRAWIDE` is enabled. Native scaling
+also conditionally rewrites WPOS in qualifying fragment programs. The game maps
+display settings to these environment switches before translation. Per-draw
+constants supply actual sizes/aspect. The Phase 184 default-only helper does not
+generate those additional variants; the explicit development modes below add
+them. Repeating default-only preparation does not close that gap.
 
 Offline preparation leaves verified shader/driver files on disk. A later game
 process still creates live GPU pipelines, possibly on the background worker.
@@ -183,6 +211,101 @@ The newest player log inspected in Phase 184 is a 1080p/16:9 run with MSAA 4,
 not the reported ultrawide-1440p occurrence; it cannot identify that occurrence's
 cause. Asset/scene loading remains another possibility. No async policy change
 or ultrawide rendering/stutter fix is claimed.
+
+### Additional local translation modes
+
+Development `pipeline_template.py prepare --translation ultrawide-native` first
+verifies the ordinary template preparation, then adds locally derived vertex,
+fragment and native pipeline variants. `--translation native-scaled` adds the
+scaled fragment path with unchanged default vertex programs. `default` remains
+the default and rollback, and does not read/write translation sidecars.
+
+The development player helper accepts the same fixed mode through
+`GT5P_PREPARE_TRANSLATION=ultrawide-native` or `native-scaled`. Unset or `default`
+restores default-only preparation; other values fail before cache selection.
+This is an explicit opt-in, not automatic detection of the player's settings.
+The already-published v0.2.1 helper does not implement these modes.
+
+| Mode | Vertex translator | Fragment translator |
+| --- | --- | --- |
+| `default` | Ultrawide off | Native scaling off |
+| `native-scaled` | Ultrawide off | Scaled WPOS gate on via render height 1440 |
+| `ultrawide-native` | Ultrawide epilogue on | Scaled WPOS gate on via native ultrawide |
+
+The scaling gate represents generated shader text, not a new shader for each
+pixel dimension. The current game enables it for native 1440p/4K and native
+ultrawide. Some fragments do not use WPOS and retain their default code. Only
+explicit modes are generated; anamorphic ultrawide remains outside this helper.
+
+Each vertex worker receives a sanitized UTF-16 environment for one mode,
+including surrogate pairs. Mutable decoder globals never change mode in-process.
+Derive requests carry original program identity/GPU-input mode; the parent
+recomputes returned source and DXBC ids. Two workers remain the maximum, with the
+existing private kill-on-close jobs, byte/memory limits, deadlines and owned
+shutdown. `--vertex-mode serial` uses one owned worker for additional translations
+to avoid the decoder latch. Default serial preparation retains its existing path.
+Fragments use the production exact-request batch with a fixed mode overlay after
+case-insensitive environment sanitization. Original fragment instruction
+identities normalize inline constants, while batch payload checksums cover the
+actual asset bytes. No changed shader is saved under an old default source id.
+
+Before writing derived shaders, `native_pipeline_key.py` serializes the current
+five-parameter/16-sampler root signature through system D3D12 and calibrates every
+default record against its verified shader bytes and expected native key. Its
+anisotropy remains the pinned 16. Derivation changes only shader ids, the native
+key and descriptor bytecode-length words 4/5 and 8/9. Input layout, target/depth
+formats, MSAA count and all other recorded state stay unchanged. Fresh native
+creation then independently checks every derived key and persisted driver blob.
+This does not enumerate new MSAA/pass combinations or recover unknown bindings.
+
+The parent preparation lock covers both modes' writes to the shared cache.
+Separate versioned checkpoints at `tr/uw` and `tr/rs` pin the parent contract,
+translation mode and calibrated root signature. Content-addressed local manifests
+retain accepted shader ids across cancellation. Resume verifies manifest digests,
+shader bytes/lengths, root calibration and native pipelines. Each shader-stage
+pool is bounded to 128 MiB; manifests are capped at 4 MiB and native batches stay
+within the template record bound. Compact staging paths stay within the existing
+native request path-length budget. Default files and the shipped template bundle
+are preserved. The player changes its selected cache only after every requested
+stage succeeds. New programs, source and DXBC remain local.
+
+Reports include `additional_translation`, its mode/record and unique-key counts,
+shader work/reuse, driver calls/cache-hint calls and time. Primary `counts` still
+describes default records; `default_preparation_seconds` isolates that stage,
+while `preparation_seconds` includes the requested translation. Disk coverage is
+distinct from resident pipelines: the existing background policy and resident
+limit remain, so live first-use visibility is still a separate validation task.
+
+Sequential tests: `shader_translation.py`, `shader_vertex_batch.py`,
+`shader_fragment_batch.py`, `native_pipeline_key.py`, `pipeline_translation.py`
+and `pipeline_translation_native.py` under `scripts/test/`. The native test uses
+original `--assets`/`--elf`, current `--engine`/`--decoder` and a fresh ignored
+`--output`. It verifies both modes, unchanged descriptor fields/default bytes,
+native keys/persistence, cancellation/resume and default rollback. The frozen
+`player_vertex_batch_native.py` accepts `--translation` for the same player path.
+No live stutter reduction or complete settings/whole-game coverage follows.
+
+Phase 185's complete frozen-helper proof reads the original packed game in place
+and starts with an empty application cache. All 2,892 default records and all
+2,892 distinct ultrawide-derived pipelines pass exact native keys and persisted
+driver-blob verification. The extra pass compiles 351 vertex variants with two
+workers. Its fragment batch has 2,312 unique requests and 2,260 actual new shader
+compiles; request counts are not compile counts. Its 2,892 native driver calls
+use no supplied application-cache blobs. OS/driver caches remain warm. Total
+default-plus-ultrawide preparation takes 905.66 seconds on this machine; this is
+one preparation run, not a speed or gameplay-stutter comparison. Worker-job peak
+commit is 119,017,472 bytes; this excludes the parent and native pipeline process.
+Evidence: `scratch/settings-preparation-185/full/ultrawide-validation.json`.
+
+Both additional modes separately pass frozen 32-record cancellation/resume,
+zero-worker reuse, serial rollback and invalid-mode cache-pointer preservation.
+The full native-scaled starter has not been measured. Nested owner-death and
+default-root calibration of all 2,892 records also pass. Fragment manifests are
+published after a completed batch, so cancellation can repeat fragment work;
+vertex progress is incremental. Resume's conservative vertex accounting can
+count shared bytes more than once against its budget. Neither limitation permits
+accepting unverified code. A static integration review finds no actionable
+correctness, ownership, integrity or bounds defect.
 
 ### Preparation window (Phase 181)
 

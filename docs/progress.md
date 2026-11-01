@@ -9,6 +9,64 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 185 - Calibrated local translation variants and verified reuse (2026-11-01)
+
+Development preparation now accepts `--translation default|native-scaled|ultrawide-native`;
+the player helper uses explicit `GT5P_PREPARE_TRANSLATION`. Unset/default retains
+default-only preparation. Invalid values fail before generation/cache selection.
+No automatic settings-file detection or shipped-template revision is introduced.
+
+The default set must finish before an additive stage under the same preparation
+lock. Vertex workers receive one sanitized explicit environment per process;
+derive-frame results are independently hashed by the parent. Fragment requests
+verify normalized instruction identity and checksum the actual asset payload.
+The production D3D12 root signature is serialized locally and every default key
+calibrated before deriving keys. Only shader identifiers/native keys and descriptor
+bytecode-length words change. All other observed state, including MSAA, stays
+fixed. Versioned bounded local sidecars retain/revalidate progress. Accepted shader
+bytes, generated sources and driver data remain ignored and local. Demand policy
+and worker/process ownership remain unchanged.
+
+A complete fresh application-cache proof through the frozen helper reads the
+original GT.VOL/ELF without another asset copy. All 2,892 default records and all
+2,892 unique ultrawide-derived pipelines pass reconstruction, exact keys, native
+creation and persisted driver-blob verification. The additional vertex stage
+compiles all 351 variants with two workers, no failures. Its fragment stage has
+2,312 unique requests and 2,260 actual new shader compiles. Its 2,892 native driver
+calls use no supplied application-cache blobs. Total wall time is 905.66 seconds;
+worker-job peak commit is 119,017,472 bytes (not total application memory). This
+is one GPU with warm OS/driver caches, not a timing comparison or live-draw proof.
+Evidence: `scratch/settings-preparation-185/full/ultrawide-validation.json` and
+the adjacent logs. Root calibration separately matches all 2,892 default keys.
+
+Sequential frozen 32-record proofs for each additional mode pass cancellation,
+resume, zero-new-worker reuse, serial rollback and invalid-mode prior-pointer
+preservation. Source proofs check unchanged descriptor fields/default shaders,
+native keys and native-scaled reuse of default vertices. Nested owner death
+retires both frozen vertex workers. Initial failures exposed a normalized-FP
+identity mismatch in the new coordinator and overlong native fragment staging
+paths; both are corrected and covered by regression checks. Evidence remains
+under `scratch/settings-preparation-185/{native32-final,frozen32-uw-final,
+frozen32-rs-final,nested-owner-final}`. Full native-scaled coverage is unmeasured.
+
+The reuse optimization publishes only bytes just validated/copied in this locked
+pass. File identity, size, link shape and timestamps must still match; otherwise
+the consumer rereads/hashes. Pre-existing shaders are always verified. Combined
+shader memory remains bounded. `GT5P_PREPARE_REUSE_HANDOFF=0` restores rereads.
+Twenty-five synthetic checks and separate 32-record native parity/source-cache
+preservation checks pass. A full-starter I/O probe eliminates 2,663 destination
+shader rereads, but copy timing/order/driver-blob budget differ, so it establishes
+no controlled total speedup. Old Phase 180 verification timing overlapped copying;
+new loader timing is exclusive and docs distinguish the fields.
+
+Final synthetic protocol/environment/key/calibration/reuse/template/checkpoint,
+package and release-trigger suites pass sequentially. A Grok static integration
+review finds no actionable correctness/integrity/ownership/bounds bug. Known
+limits include batch-end fragment manifests and conservative duplicate vertex
+budget accounting on resume. No rendering/stutter, unknown-binding, whole-game,
+all-settings or release claim follows. Feature commits/pushes use `[skip ci]`;
+main, tags and published v0.2.1 remain unchanged.
+
 ## Phase 184 - Default vertex batches and settings coverage audit (2026-11-01)
 
 At the user's request, developer CLI/API and development player helpers now

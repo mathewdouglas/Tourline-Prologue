@@ -1,10 +1,15 @@
-"""Bounded exact vertex preparation. Workers are owned compiler processes.
+"""Bounded vertex preparation. Workers are owned compiler processes.
 
 Each worker loads one production decoder and runs jobs one at a time. The
 decoder's C globals are not shared across workers or threads. Branch-base
-setters stay unused, matching the serial translator. The parent checks every
-returned program, source key and bytecode id before any cache write. Workers
-never see the selected cache, the game, or gt5p.exe.
+setters stay unused, matching the serial translator. Exact jobs still require
+the caller's expected source and bytecode ids. Derive jobs carry only the
+program, its sha256 and the GPU flag; the parent recomputes source_key and
+fnv64 itself. Workers never see the selected cache, the game, or gt5p.exe.
+
+RSX_ULTRAWIDE latches inside a process, so every worker is started with one
+explicit shader_translation environment. The default is ultrawide off and no
+render height, even when the parent shell says otherwise.
 """
 import hashlib
 import os
@@ -14,16 +19,19 @@ import subprocess
 import sys
 import time
 
+import shader_translation
 from shader_coverage import MAX_FP, fnv64
 
 
 SENTINEL = '--gt5p-vertex-worker'
 READY = b'GT5P_VP_WORKER_READY_V1\n'
 REQUEST = b'GT5P_VP_REQUEST_V1\n'
+DERIVE = b'GT5P_VP_DERIVE_V1\n'
 RESULT = b'GT5P_VP_RESULT_V1\n'
 FAIL = b'GT5P_VP_FAIL_V1\n'
 END = b'GT5P_VP_END_V1\n'
 DONE = b'GT5P_VP_DONE_V1\n'
+VERTEX_TARGET = b'vs_5_0'
 MAX_PROGRAM = MAX_FP
 MAX_SOURCE = 262144  # NativeCompiler decoder output buffer
 MAX_BYTECODE = 4 * 1024 * 1024
@@ -36,6 +44,7 @@ SHUTDOWN_SECONDS = 10
 POLL_SECONDS = 0.1
 CREATE_SUSPENDED = 0x00000004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_UNICODE_ENVIRONMENT = 0x00000400
 CREATE_NO_WINDOW = 0x08000000
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 EXTENDED_STARTUPINFO_PRESENT = 0x00080000
@@ -97,13 +106,31 @@ def _echo(sha256, gpu, source, code):
     return sha256, int(gpu), source, code
 
 
-def encode_request(job):
+def _translated_ids(source, code):
+    """Parent and worker share this. The echoed hex is not the stored identity."""
+    from prepare_material_shaders import source_key
+    if (not isinstance(source, (bytes, bytearray)) or not source or len(source) > MAX_SOURCE or
+            not isinstance(code, (bytes, bytearray)) or not code.startswith(b'DXBC') or len(code) > MAX_BYTECODE):
+        raise ValueError('Vertex source or bytecode exceeds its bound')
+    source_id = f'{source_key(bytes(source), VERTEX_TARGET):016x}'
+    code_id = f'{fnv64(bytes(code)):016x}'
+    if int(source_id, 16) == 0 or int(code_id, 16) == 0:
+        raise ValueError('Vertex source or bytecode identifier is empty')
+    return source_id, code_id
+
+
+def encode_request(job, derive=False):
     program = job['program']
     if not isinstance(program, (bytes, bytearray)):
         raise ValueError('Vertex program is not bytes')
+    program = bytes(program)
+    if derive:
+        # No expected source or bytecode id. The worker computes those and the parent recomputes them.
+        header = f"{job['sha256']} {int(job['gpu'])} {len(program)}\n".encode('ascii')
+        return DERIVE + header + program
     header = (f"{job['sha256']} {int(job['gpu'])} {job['expected_source']} "
               f"{job['expected_code']} {len(program)}\n").encode('ascii')
-    return REQUEST + header + bytes(program)
+    return REQUEST + header + program
 
 
 def _parse_echo(line):
@@ -118,7 +145,14 @@ def _parse_echo(line):
     return _echo(parts[0], parts[1], parts[2], parts[3]), rest
 
 
-def try_take(buf):
+def _parse_derive_header(line):
+    parts = line.split(' ')
+    if len(parts) != 3 or not SHA256.fullmatch(parts[0]) or parts[1] not in ('0', '1') or not parts[2].isdigit():
+        return None
+    return parts[0], int(parts[1]), int(parts[2])
+
+
+def try_take(buf, derived=False):
     """Return one complete parent-side frame, or None when more bytes are required."""
     if len(buf) > LIMITS['inflight_bytes']:
         raise ProtocolError('Vertex result exceeds its bound')
@@ -140,6 +174,14 @@ def try_take(buf):
         if len(rest) > 512:
             raise ProtocolError('Vertex result exceeds its bound')
         return None, buf
+    if magic == FAIL and derived:
+        # Derive failures have no expected ids to echo. Sha and gpu still have to name the job.
+        header = rest[:header_end].decode('ascii', errors='replace')
+        parts = header.split(' ', 2)
+        if (len(parts) != 3 or not SHA256.fullmatch(parts[0]) or parts[1] not in ('0', '1') or
+                not parts[2] or len(parts[2]) > 200):
+            raise ProtocolError('Malformed vertex worker failure')
+        return ('fail', (parts[0], int(parts[1]), None, None), parts[2]), rest[header_end + 1:]
     echoed, tail = _parse_echo(rest[:header_end].decode('ascii', errors='replace'))
     body = rest[header_end + 1:]
     if magic == FAIL:
@@ -174,6 +216,22 @@ def accept_result(job, echoed, source, code):
     code_id = f'{fnv64(code):016x}'
     if source_id != job['expected_source'] or code_id != job['expected_code']:
         raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
+    return source_id, code_id, code
+
+
+def accept_derived(job, echoed, source, code):
+    """Recompute the new identity. A matching echo is checked, not trusted as the source of it."""
+    sha, gpu = echoed[0], int(echoed[1])
+    if sha != job['sha256'] or gpu != int(job['gpu']):
+        raise ProtocolError('Vertex result does not match the requested program')
+    program = job['program']
+    if hashlib.sha256(program).hexdigest() != job['sha256']:
+        raise ValueError('Vertex program changed before acceptance')
+    source_id, code_id = _translated_ids(source, code)
+    echo_source = echoed[2] if len(echoed) > 2 else None
+    echo_code = echoed[3] if len(echoed) > 3 else None
+    if echo_source != source_id or echo_code != code_id:
+        raise ProtocolError('Vertex derive identity does not match the returned bytes')
     return source_id, code_id, code
 
 
@@ -271,6 +329,11 @@ def encode_fail(echoed, message):
     return FAIL + f'{sha256} {int(gpu)} {source_id} {code_id} '.encode('ascii') + text + b'\n'
 
 
+def encode_derive_fail(sha, gpu, message):
+    text = _clean(message).encode('ascii')
+    return FAIL + f'{sha} {int(gpu)} '.encode('ascii') + text + b'\n'
+
+
 def serve(compiler, stdin, stdout):
     """Serial jobs on one decoder. No cache, filesystem shader output, or child process."""
     while True:
@@ -281,30 +344,44 @@ def serve(compiler, stdin, stdout):
         if magic == END:
             _write_frame(stdout, DONE)
             return 0
-        if magic != REQUEST:
+        if magic not in (REQUEST, DERIVE):
             return 1
+        derived = magic == DERIVE
         echoed = None
         try:
             header = _read_line(stdin, 256).decode('ascii')
-            echoed, tail = _parse_echo(header.rstrip('\n'))
-            if not tail.isdigit():
-                return 1
-            length = int(tail)
+            if derived:
+                parsed = _parse_derive_header(header.rstrip('\n'))
+                if parsed is None:
+                    return 1
+                sha, gpu, length = parsed
+                echoed = (sha, gpu)
+            else:
+                echoed, tail = _parse_echo(header.rstrip('\n'))
+                if not tail.isdigit():
+                    return 1
+                length = int(tail)
             # Reject before consuming an unaligned body. The parent then sees the worker stop.
             if length <= 0 or length > MAX_PROGRAM or length % 16:
                 return 1
             program = _read_exact(stdin, length)
-            sha256, gpu, source_id, code_id = echoed
-            if hashlib.sha256(program).hexdigest() != sha256:
+            sha, gpu = echoed[0], int(echoed[1])
+            if hashlib.sha256(program).hexdigest() != sha or gpu not in (0, 1):
                 raise ValueError('Vertex payload differs from the requested program')
             source, code = compiler.vertex(program, bool(gpu))
-            if (not source or len(source) > MAX_SOURCE or not code.startswith(b'DXBC') or len(code) > MAX_BYTECODE):
+            if derived:
+                source_id, code_id = _translated_ids(source, code)
+                echoed = (sha, gpu, source_id, code_id)
+            elif (not source or len(source) > MAX_SOURCE or not code.startswith(b'DXBC') or len(code) > MAX_BYTECODE):
                 raise ValueError('Vertex source or bytecode exceeds its bound')
         except (ValueError, OSError, ProtocolError) as exc:
             # A header that never parsed leaves the stream unaligned. Stop.
             if echoed is None:
                 return 1
-            _write_frame(stdout, encode_fail(echoed, exc))
+            if derived:
+                _write_frame(stdout, encode_derive_fail(echoed[0], echoed[1], exc))
+            else:
+                _write_frame(stdout, encode_fail(echoed, exc))
             continue
         _write_frame(stdout, encode_result(echoed, source, code))
 
@@ -334,7 +411,44 @@ def _check_job(job):
         raise ValueError('Invalid bounded vertex request')
 
 
-def _drain(worker, buf):
+def _check_derive_job(job):
+    if 'expected_source' in job or 'expected_code' in job:
+        raise ValueError('Derive request cannot carry an expected shader identity')
+    program = job.get('program')
+    gpu = job.get('gpu')
+    if (not isinstance(job.get('sha256'), str) or not SHA256.fullmatch(job['sha256']) or type(gpu) is not int or
+            gpu not in (0, 1) or not isinstance(program, (bytes, bytearray)) or
+            hashlib.sha256(program).hexdigest() != job['sha256'] or not 16 <= len(program) <= MAX_PROGRAM or
+            len(program) % 16):
+        raise ValueError('Invalid bounded vertex request')
+
+
+def _select_jobs(jobs, derive):
+    """Exact requests stay in order. Derive requests collapse identical program/GPU pairs."""
+    if len(jobs) > MAX_JOBS:
+        raise ValueError('Vertex batch request limit exceeded')
+    if not derive:
+        for job in jobs:
+            _check_job(job)
+        return list(jobs), 0
+    unique = []
+    seen = {}
+    duplicates = 0
+    for job in jobs:
+        _check_derive_job(job)
+        identity = (job['sha256'], job['gpu'])
+        previous = seen.get(identity)
+        if previous is None:
+            seen[identity] = bytes(job['program'])
+            unique.append(job)
+            continue
+        if previous != bytes(job['program']):
+            raise ValueError('Conflicting vertex identity')
+        duplicates += 1
+    return unique, duplicates
+
+
+def _drain(worker, buf, derived=False):
     while True:
         chunk = worker.read_available()
         if not chunk:
@@ -342,7 +456,7 @@ def _drain(worker, buf):
         buf.extend(chunk)
         if len(buf) > LIMITS['inflight_bytes']:
             raise ProtocolError('Vertex result exceeds its bound')
-    frame, remaining = try_take(buf)
+    frame, remaining = try_take(buf, derived=derived)
     if frame is None:
         return None
     buf[:] = remaining
@@ -350,28 +464,40 @@ def _drain(worker, buf):
 
 
 def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, monotonic=None, sleep=None,
-                 job_seconds=JOB_SECONDS, startup_seconds=START_SECONDS):
-    """Compile unique variants. An empty job list starts no worker."""
+                 job_seconds=JOB_SECONDS, startup_seconds=START_SECONDS, translation='default',
+                 derive=False, workers=None):
+    """Compile one translation mode. An empty job list starts no worker.
+
+    derive=False keeps the exact expected-id contract. derive=True never calls
+    the decoder in this process: even one job uses a fresh worker, because the
+    ultrawide latch is process-wide. workers is 1 or 2 when the caller sets it.
+    """
+    if derive is not True and derive is not False:
+        raise ValueError('Vertex derive mode is not explicit')
+    if workers is not None and (type(workers) is not int or workers not in (1, 2)):
+        raise ValueError('Vertex compiler worker cap exceeded')
+    shader_translation.overlay(translation)
+    worker_limit = MAX_WORKERS if workers is None else workers
     monotonic = monotonic or time.monotonic
     sleep = sleep or time.sleep
     started = time.perf_counter()
-    report = dict(mode='batch', requested_variants=len(jobs), compiled_variants=0, failed_variants=0,
+    selected, duplicates = _select_jobs(jobs, derive)
+    report = dict(mode='batch', translation=translation, derive=derive, requested_variants=len(jobs),
+                  duplicate_variants=duplicates, compiled_variants=0, failed_variants=0,
                   workers=0, launches=0, seconds=0, limits=dict(LIMITS), inflight_jobs_max=0,
                   inflight_bytes_max=0, ownership=None)
     compiled, failures = {}, {}
-    if len(jobs) > MAX_JOBS:
-        raise ValueError('Vertex batch request limit exceeded')
-    for job in jobs:
-        _check_job(job)
     pool = None
     workers = []
     try:
-        if not jobs:
+        if not selected:
             return compiled, failures, report
         if work.exists() and (work.is_symlink() or getattr(work.lstat(), 'st_file_attributes', 0) & 0x400):
             raise ValueError('Vertex batch workspace must not be redirected')
         work.mkdir(parents=True, exist_ok=True)
-        pool, workers = (opener or open_workers)(min(MAX_WORKERS, len(jobs)), decoder, work)
+        def launch(count, decoder_path, workspace):
+            return open_workers(count, decoder_path, workspace, translation=translation)
+        pool, workers = (opener or launch)(min(worker_limit, len(selected)), decoder, work)
         report.update(workers=len(workers), launches=len(workers), ownership=getattr(pool, 'ownership', None))
         if len(workers) > MAX_WORKERS:
             raise ValueError('Vertex compiler worker cap exceeded')
@@ -391,7 +517,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                 if not READY.startswith(buf) or not worker.alive():
                     raise ProtocolError('Unknown vertex worker preamble')
                 sleep(POLL_SECONDS)
-        pending = list(jobs)
+        pending = list(selected)
         inflight = {}
         buffers = {}
         usable = set(id(worker) for worker in workers)
@@ -412,7 +538,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
             for worker in workers:
                 if id(worker) in usable and id(worker) not in inflight and pending and worker.alive():
                     job = pending.pop(0)
-                    payload = encode_request(job)
+                    payload = encode_request(job, derive=derive)
                     try:
                         worker.write(payload)
                     except OSError as exc:
@@ -439,7 +565,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     progressed = True
                     continue
                 try:
-                    frame = _drain(worker, buffers[id(worker)])
+                    frame = _drain(worker, buffers[id(worker)], derived=derive)
                 except ProtocolError as exc:
                     fail_inflight(worker, str(exc), protocol=True)
                     progressed = True
@@ -459,12 +585,18 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     if buffers[id(worker)]:
                         raise ProtocolError('Unexpected trailing vertex worker output')
                     if frame[0] == 'fail':
-                        if frame[1] != _echo(job['sha256'], job['gpu'], job['expected_source'], job['expected_code']):
+                        if derive:
+                            if (frame[1][0], frame[1][1]) != (job['sha256'], int(job['gpu'])):
+                                raise ProtocolError('Vertex result does not match the requested program')
+                        elif frame[1] != _echo(job['sha256'], job['gpu'], job['expected_source'], job['expected_code']):
                             raise ProtocolError('Vertex result does not match the requested program')
                         raise ValueError(frame[2])
                     if frame[0] != 'result':
                         raise ProtocolError('Unknown vertex worker result')
-                    source_id, code_id, code = accept_result(job, frame[1], frame[2], frame[3])
+                    if derive:
+                        source_id, code_id, code = accept_derived(job, frame[1], frame[2], frame[3])
+                    else:
+                        source_id, code_id, code = accept_result(job, frame[1], frame[2], frame[3])
                     if on_ready:
                         on_ready(job, source_id, code_id, code)
                     compiled[identity] = (source_id, code_id, code)
@@ -635,9 +767,9 @@ class _WinPool:
         self._closed = False
         self.workers = []
 
-    def spawn(self, slot, decoder, work):
+    def spawn(self, slot, decoder, work, environment):
         command = subprocess.list2cmdline(worker_command(decoder))
-        worker = _create_worker(self, slot, command, work)
+        worker = _create_worker(self, slot, command, work, environment)
         self.workers.append(worker)
         return worker
 
@@ -726,7 +858,43 @@ def _close_handles(kernel, handles):
             kernel.CloseHandle(handle)
 
 
-def _create_worker(pool, slot, command, work):
+def _environment_text(env):
+    """Unicode environment block text, including the final extra NUL."""
+    if not isinstance(env, dict) or not env:
+        raise ValueError('Vertex worker environment is not explicit')
+    seen = set()
+    items = []
+    for key in sorted(env, key=str.upper):
+        value = env[key]
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError('Vertex worker environment must be text')
+        if not key or '=' in key or any(ch in key or ch in value for ch in '\0\r\n'):
+            raise ValueError('Vertex worker environment contains an invalid entry')
+        marker = key.upper()
+        if marker in seen:
+            raise ValueError('Vertex worker environment contains a duplicate name')
+        seen.add(marker)
+        items.append(key + '=' + value)
+    return '\0'.join(items) + '\0\0'
+
+
+def _environment_block(env):
+    """UTF-16 environment block, including surrogate pairs and embedded NUL separators."""
+    import ctypes
+    return ctypes.create_string_buffer(_environment_text(env).encode('utf-16-le'))
+
+
+def _process_flags(private_job, explicit_environment):
+    """Kill-on-close job stays mandatory. The environment is an explicit Unicode block."""
+    flags = PROCESS_FLAGS
+    if flags & CREATE_BREAKAWAY_FROM_JOB or not explicit_environment:
+        raise ValueError('Could not own vertex compiler workers')
+    if private_job:
+        flags |= EXTENDED_STARTUPINFO_PRESENT
+    return flags | CREATE_UNICODE_ENVIRONMENT
+
+
+def _create_worker(pool, slot, command, work, environment):
     import ctypes
     kernel = pool.kernel
     log = work / f'worker-{slot}.log'
@@ -747,9 +915,9 @@ def _create_worker(pool, slot, command, work):
         extended_type, process_type, _security = _startup(ctypes)
         process = process_type()
         command_buffer = ctypes.create_unicode_buffer(command)
-        # Inherit the parent environment. The worker dispatches on its sentinel before any
-        # preparation mode is read, and a Unicode environment block needs an extra creation flag.
-        created, error = _create_process(pool, extended_type, process, command_buffer, None, work,
+        # Explicit Unicode environment. Only the three standard handles stay inheritable.
+        block = _environment_block(environment)
+        created, error = _create_process(pool, extended_type, process, command_buffer, block, work,
                                          stdin_read, stdout_write, stderr, True)
         if not created:
             # Being in some parent job does not prove workers die if this helper
@@ -783,13 +951,10 @@ def _create_process(pool, extended_type, process, command, environment, work, st
     startup.hStdInput = stdin
     startup.hStdOutput = stdout
     startup.hStdError = stderr
-    flags = PROCESS_FLAGS
-    if flags & CREATE_BREAKAWAY_FROM_JOB:
-        raise ValueError('Could not own vertex compiler workers')
+    flags = _process_flags(private_job, environment is not None)
     attribute = None
     jobs = None
     if private_job:
-        flags |= EXTENDED_STARTUPINFO_PRESENT
         size = ctypes.c_size_t()
         kernel.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
         attribute = ctypes.create_string_buffer(size.value)
@@ -803,7 +968,10 @@ def _create_process(pool, extended_type, process, command, environment, work, st
                 attribute, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, ctypes.cast(jobs, ctypes.c_void_p),
                 ctypes.sizeof(jobs), None, None):
             raise ValueError('Could not own vertex compiler workers')
-        ok = kernel.CreateProcessW(None, command, None, None, 1, flags, environment, str(work),
+        # bInheritHandles is 1 so the prepared standard handles are inherited. Pipe ends the
+        # parent still uses have HANDLE_FLAG_INHERIT cleared. lpEnvironment is the Unicode block.
+        env_ptr = ctypes.cast(environment, ctypes.c_void_p)
+        ok = kernel.CreateProcessW(None, command, None, None, 1, flags, env_ptr, str(work),
                                    ctypes.byref(info), ctypes.byref(process))
         error = ctypes.get_last_error() if not ok else 0
         return ok, error
@@ -812,14 +980,15 @@ def _create_process(pool, extended_type, process, command, environment, work, st
             kernel.DeleteProcThreadAttributeList(attribute)
 
 
-def open_workers(count, decoder, work):
+def open_workers(count, decoder, work, translation='default'):
     if not 1 <= count <= MAX_WORKERS:
         raise ValueError('Vertex compiler worker cap exceeded')
+    environment = shader_translation.environment(translation)
     pool = _WinPool()
     workers = []
     try:
         for slot in range(count):
-            workers.append(pool.spawn(slot, decoder, work))
+            workers.append(pool.spawn(slot, decoder, work, environment))
         return pool, workers
     except BaseException:
         pool.retire(workers)

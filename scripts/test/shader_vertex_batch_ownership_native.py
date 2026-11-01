@@ -43,7 +43,8 @@ def main():
     owner = None
     observed = []
     try:
-        owner = batch._create_worker(outer, 0, subprocess.list2cmdline(command), out)
+        owner = batch._create_worker(outer, 0, subprocess.list2cmdline(command), out,
+                                     batch.shader_translation.environment('default'))
         deadline = time.monotonic()+15
         while not (child_out/'workers.json').exists():
             assert owner.alive() and time.monotonic() < deadline

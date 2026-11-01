@@ -22,6 +22,7 @@ from preparation_checkpoint import preflight_tree
 from shader_coverage import ROOT
 from pipeline_asset_map import read as read_map
 from preparation_reuse import cache_root, regular_read
+from pipeline_translation import player_mode as translation_mode
 
 
 def safe_storage(storage):
@@ -57,6 +58,7 @@ def main():
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
     a=ap.parse_args()
+    translation=translation_mode(os.environ)
     storage=safe_storage(a.storage)
     install=a.install.resolve()
     def idle_for_player():
@@ -139,7 +141,7 @@ def main():
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
         output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
-        vertex_mode=shader_vertex_batch.player_mode())
+        vertex_mode=shader_vertex_batch.player_mode(),translation=translation)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     # Switch only after successful shader/native/persistence validation. Existing

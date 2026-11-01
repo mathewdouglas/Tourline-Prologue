@@ -151,8 +151,8 @@ class NativeCompiler:
 
 def offline_env(game_root, cache):
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))}
-    env.pop('PS3_HEADLESS', None)
+           if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
+           and k.upper() != 'PS3_HEADLESS'}
     env.update(GT5P_ROOT=str(game_root), GT5P_NO_SETTINGS='1', PS3_VERBOSE='0',
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',

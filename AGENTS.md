@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 184)
+## Start here: state of play (2026-11-01, Phase 185)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 184 is the latest).
+has the evidence, newest phase first (Phase 185 is the latest).
 
 ### What works now
+
+- **Additional translations and verified reuse (Phase 185):** explicit development
+  `GT5P_PREPARE_TRANSLATION=ultrawide-native|native-scaled` adds local variants
+  after default preparation; unset/default rolls back. A fresh packed-game frozen
+  proof passes all 2,892 default and 2,892 distinct ultrawide native pipelines,
+  including both shader stages and calibrated root-signature/native keys.
+  Native-scaled has a 32-record proof only. Frozen cancellation/resume, zero-worker
+  reuse, serial rollback and nested owner-death pass sequentially. Verified cache
+  handoff avoids rereading newly copied shaders; `GT5P_PREPARE_REUSE_HANDOFF=0`
+  restores rereads. No whole-game/MSAA enumeration, automatic settings selection,
+  live stutter or draw-policy claim. Feature pushes `[skip ci]`; release unchanged.
 
 - **Default vertex batching (Phase 184):** developer preparation and development
   helpers now default to the bounded two-worker path. `--vertex-mode serial` /

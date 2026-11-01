@@ -23,6 +23,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('zip', 'helper-dir', 'template', 'elf', 'assets', 'output'):
         ap.add_argument('--'+name, type=Path, required=True)
+    ap.add_argument('--translation', choices=('default', 'native-scaled', 'ultrawide-native'), default='default')
     a = ap.parse_args()
     idle()
     out = isolated(a.output)
@@ -54,6 +55,9 @@ def main():
     env = dict(os.environ, PS3_VERBOSE='0',
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_PREPARE_VERTEX_BATCH', None)  # Exercise the real unset default.
+    env.pop('GT5P_PREPARE_TRANSLATION', None)
+    if a.translation != 'default':
+        env['GT5P_PREPARE_TRANSLATION'] = a.translation
     started = time.perf_counter()
     with (out/'cancel.log').open('wb') as log:
         child = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -85,6 +89,9 @@ def main():
             creationflags=subprocess.CREATE_NO_WINDOW, check=True, timeout=900)
     first = json.loads((state.parent/'report.json').read_text())
     assert first['counts'] == {'prepared': len(document['records'])}
+    if a.translation != 'default':
+        assert first['additional_translation']['translation'] == a.translation
+        assert first['additional_translation']['counts'] == first['counts']
     assert first['vertex_preparation']['mode'] == 'batch'
     assert first['resume']['vertex_programs_reused'] >= kept
     assert first['vertex_preparation']['launches'] <= 2
@@ -100,6 +107,9 @@ def main():
     assert cached['vertex_preparation']['launches'] == 0
     assert cached['resume']['vertex_programs_compiled'] == 0
     assert cached['fragment_preparation']['processes'] == 0
+    if a.translation != 'default':
+        assert cached['additional_translation']['vertex_preparation']['launches'] == 0
+        assert cached['additional_translation']['fragment_jobs_reused'] == len(document['records'])
     assert pointer.read_text() == selected and marker.read_text().startswith('Prior selection')
     serial_env = env.copy()
     serial_env['GT5P_PREPARE_VERTEX_BATCH'] = '0'
@@ -114,10 +124,15 @@ def main():
         rejected = subprocess.run(command, env=dict(env, GT5P_PREPARE_VERTEX_BATCH='invalid'),
             stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30)
     assert rejected.returncode != 0 and pointer.read_text() == selected
+    with (out/'invalid-translation.log').open('wb') as log:
+        rejected_translation = subprocess.run(command, env=dict(env, GT5P_PREPARE_TRANSLATION='invalid'),
+            stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30)
+    assert rejected_translation.returncode != 0 and pointer.read_text() == selected
     result = dict(counts=first['counts'], kept_vertices=kept, resumed=first['vertex_preparation'],
         cached=cached['vertex_preparation'], cancellation_preserved_selection=True,
         invalid_mode_preserved_selection=True, source_preserved=True, clean_path=True,
         unset_default_batch_passed=True, explicit_serial_rollback_passed=True,
+        translation=a.translation, invalid_translation_preserved_selection=True,
         seconds=time.perf_counter()-started,
         limitation='Small original-asset proof, warm OS/driver caches; no gameplay/stutter measurement.')
     (out/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

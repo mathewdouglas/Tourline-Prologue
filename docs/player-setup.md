@@ -53,6 +53,15 @@ This switch is not in the published v0.2.1 helper; see
 [vertex batching](shader-precompile.md#exact-vertex-batching-phases-183-184).
 It changes offline preparation speed, not coverage or the game's draw policy.
 
+Development helpers also offer explicit additional translation preparation:
+`GT5P_PREPARE_TRANSLATION=ultrawide-native` adds native ultrawide variants;
+`native-scaled` adds the scaled fragment mode used by native 1440p/4K.
+Unset or `default` keeps default-only preparation. These modes do not infer your
+settings or generate every MSAA/pass combination. They are absent from published
+v0.2.1. See [translation modes](shader-precompile.md#additional-local-translation-modes).
+`GT5P_PREPARE_REUSE_HANDOFF=0` rolls back the development optimization that avoids
+rereading shaders just verified/copied during an incremental update.
+
 The next launch uses that cache, retaining demand compilation for missing keys.
 `tourline-prologue.exe --no-prepared` uses the ordinary cache for that launch without deleting
 anything. Failure/cancellation leaves any prior selection intact. Logs are

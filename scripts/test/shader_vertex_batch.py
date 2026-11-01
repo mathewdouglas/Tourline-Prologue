@@ -64,38 +64,67 @@ class ScriptWorker:
         self.retired = False
         self._alive = True
         self.requests = 0
+        self.kinds = []
     def write(self, payload):
         if self.retired:
             raise OSError('retired')
         self.inbox.extend(payload)
         self._drain()
+    def _kind(self):
+        if self.inbox.startswith(batch.END):
+            return 'end'
+        if self.inbox.startswith(batch.DERIVE):
+            return 'derive'
+        if self.inbox.startswith(batch.REQUEST):
+            return 'exact'
+        if any(magic.startswith(self.inbox) for magic in (batch.END, batch.DERIVE, batch.REQUEST)):
+            return 'partial'
+        return 'unknown'
     def _drain(self):
         while True:
-            if self.inbox.startswith(batch.END):
+            kind = self._kind()
+            if kind == 'partial':
+                return
+            if kind == 'end':
                 self.outbox.extend(batch.DONE)
                 self.inbox = self.inbox[len(batch.END):]
                 self._alive = False
                 return
-            if not self.inbox.startswith(batch.REQUEST):
+            if kind not in ('exact', 'derive'):
                 if len(self.inbox) >= len(batch.REQUEST):
                     self.outbox.extend(b'NOT-A-FRAME\n')
                     self.inbox.clear()
                 return
-            rest = self.inbox[len(batch.REQUEST):]
+            magic = batch.DERIVE if kind == 'derive' else batch.REQUEST
+            rest = self.inbox[len(magic):]
             newline = rest.find(b'\n')
             if newline < 0:
                 return
-            echoed, tail = batch._parse_echo(rest[:newline].decode('ascii'))
-            if not tail.isdigit():
-                self._alive = False
-                return
-            length = int(tail)
+            header = rest[:newline].decode('ascii')
+            if kind == 'derive':
+                parsed = batch._parse_derive_header(header)
+                if parsed is None:
+                    self._alive = False
+                    return
+                sha, gpu, length = parsed
+                echoed = (sha, gpu)
+            else:
+                try:
+                    echoed, tail = batch._parse_echo(header)
+                except batch.ProtocolError:
+                    self._alive = False
+                    return
+                if not tail.isdigit():
+                    self._alive = False
+                    return
+                length = int(tail)
             body = rest[newline + 1:]
             if len(body) < length:
                 return
             program_bytes = bytes(body[:length])
             self.inbox = body[length:]
             self.requests += 1
+            self.kinds.append(kind)
             reply = self.handler(echoed, program_bytes, self)
             if reply is None:
                 self._alive = False
@@ -161,6 +190,15 @@ assert batch.PROCESS_FLAGS & batch.CREATE_NO_WINDOW
 assert batch.PROCESS_FLAGS & batch.CREATE_SUSPENDED
 assert not batch.PROCESS_FLAGS & batch.CREATE_BREAKAWAY_FROM_JOB
 assert not batch.PROCESS_FLAGS & batch.EXTENDED_STARTUPINFO_PRESENT
+assert not batch.PROCESS_FLAGS & batch.CREATE_UNICODE_ENVIRONMENT
+assert batch.DERIVE != batch.REQUEST and batch.DERIVE.endswith(b'\n')
+flags = batch._process_flags(True, True)
+assert flags & batch.CREATE_UNICODE_ENVIRONMENT
+assert flags & batch.EXTENDED_STARTUPINFO_PRESENT
+assert flags & batch.CREATE_NO_WINDOW and flags & batch.CREATE_SUSPENDED
+assert not flags & batch.CREATE_BREAKAWAY_FROM_JOB
+assert_raises(lambda: batch._process_flags(True, False))
+assert_raises(lambda: batch._process_flags(False, False))
 if ctypes.sizeof(ctypes.c_void_p) == 8:
     extended_type, process_type, _security_type = batch._startup(ctypes)
     startup_type = extended_type._fields_[0][1]
@@ -256,7 +294,9 @@ compiled, failures, report = batch.compile_jobs([], 'decoder.dll', Path('unused'
                                                 monotonic=monotonic, sleep=sleep)
 assert compiled == {} and failures == {} and report['launches'] == 0 and launches == [] and report['workers'] == 0
 
+seen_kinds = []
 def answer(echoed, payload, worker):
+    seen_kinds.append(worker.kinds[-1])
     if echoed[0] == other_digest:
         return batch.encode_result(echoed, b'other-source', b'DXBC-other')
     return batch.encode_result(echoed, hlsl, dxbc)
@@ -277,6 +317,8 @@ assert compiled[(digest, 1)][2] == dxbc and compiled[(digest, 0)][2] == dxbc
 assert report['launches'] == 2 and report['workers'] == 2 and launches == [2]
 assert report['inflight_jobs_max'] <= 2 and report['compiled_variants'] == 3
 assert report['limits']['workers'] == 2
+assert seen_kinds == ['exact', 'exact', 'exact']
+assert report['translation'] == 'default' and report['derive'] is False and report['duplicate_variants'] == 0
 
 def garbage(echoed, payload, worker):
     return b'GT5P_VP_UNKNOWN_V1\n'
@@ -379,4 +421,108 @@ launches, report, jobs, _by_id, saved, stray = run_prepare([first, conflict], {}
 assert launches == [] and saved == {} and report['records']
 assert {item['status'] for item in report['records']} == {'incompatible'}
 
-print('Vertex batch dedup, protocol, parent acceptance, reuse bypass and worker bounds passed')
+# Derive jobs carry sha/gpu/program only. The parent recomputes ids and does not keep a lying echo.
+compile_signature = inspect.signature(batch.compile_jobs)
+assert compile_signature.parameters['translation'].default == 'default'
+assert compile_signature.parameters['derive'].default is False
+assert compile_signature.parameters['workers'].default is None
+
+def derived_ids(source, code):
+    return f'{source_key(source, batch.VERTEX_TARGET):016x}', f'{fnv64(code):016x}'
+
+def derive_reply(echoed, payload, worker):
+    assert len(echoed) == 2 and worker.kinds[-1] == 'derive'
+    source, code = (b'other-source', b'DXBC-other') if payload == other else (hlsl, dxbc)
+    source_hex, code_hex = derived_ids(source, code)
+    return batch.encode_result((echoed[0], echoed[1], source_hex, code_hex), source, code)
+
+derive_one = dict(sha256=digest, gpu=1, program=program)
+derive_two = dict(sha256=other_digest, gpu=0, program=other)
+derive_frame = batch.encode_request(derive_one, derive=True)
+assert derive_frame.startswith(batch.DERIVE)
+assert source_id.encode() not in derive_frame.split(b'\n', 1)[0]
+assert derive_frame[len(batch.DERIVE):].startswith(f'{digest} 1 {len(program)}\n'.encode('ascii'))
+exact_frame = batch.encode_request(job)
+assert exact_frame.startswith(batch.REQUEST) and source_id.encode() in exact_frame.split(b'\n', 2)[1]
+
+derive_compiler = Compiler()
+stdin = BytesIO(batch.encode_request(derive_one, derive=True) +
+                batch.encode_request(derive_two, derive=True) + batch.END)
+stdout = BytesIO()
+assert batch.serve(derive_compiler, stdin, stdout) == 0
+assert derive_compiler.calls == [(program, True), (other, False)]
+output = bytearray(stdout.getvalue())
+passed, output = batch.try_take(output, derived=True)
+accepted = batch.accept_derived(derive_one, passed[1], passed[2], passed[3])
+assert passed[0] == 'result' and accepted == (source_id, code_id, dxbc)
+failed, output = batch.try_take(output, derived=True)
+assert failed[0] == 'fail' and (failed[1][0], failed[1][1]) == (other_digest, 0) and failed[1][2] is None
+assert 'translation failed' in failed[2]
+done, output = batch.try_take(output, derived=True)
+assert done == ('done',) and output == b''
+assert_raises(lambda: batch.try_take(bytearray(
+    batch.encode_derive_fail(digest, 1, 'stopped'))), batch.ProtocolError)
+assert batch.serve(Compiler(), BytesIO(batch.DERIVE + b'not-a-header\n'), BytesIO()) == 1
+
+assert_raises(lambda: batch.compile_jobs(
+    [dict(derive_one, expected_source=source_id, expected_code=code_id)],
+    'decoder.dll', Path('unused'), derive=True, workers=1))
+assert_raises(lambda: batch.compile_jobs(
+    [dict(sha256=digest, gpu=1, program=program)], 'decoder.dll', Path('unused')))
+for bad_workers in (0, 3, True):
+    assert_raises(lambda: batch.compile_jobs([derive_one], 'decoder.dll', Path('unused'), derive=True, workers=bad_workers))
+assert_raises(lambda: batch.compile_jobs(
+    [derive_one], 'decoder.dll', Path('unused'), translation='1440p', derive=True, workers=1))
+assert_raises(lambda: batch.compile_jobs(
+    [derive_one], 'decoder.dll', Path('unused'), translation='ultrawide', derive=True, workers=1))
+assert_raises(lambda: batch.compile_jobs(
+    [dict(sha256=digest, gpu=True, program=program)], 'decoder.dll', Path('unused'), derive=True, workers=1))
+
+launches, compiled, failures, report = run_jobs(
+    [derive_one, derive_two, dict(derive_one)], derive_reply, derive=True, workers=1)
+assert launches == [1] and not failures and report['workers'] == 1 and report['duplicate_variants'] == 1
+assert report['translation'] == 'default' and report['derive'] is True and report['compiled_variants'] == 2
+assert report['inflight_jobs_max'] == 1
+assert compiled[(digest, 1)] == (source_id, code_id, dxbc)
+assert compiled[(other_digest, 0)][0] == derived_ids(b'other-source', b'DXBC-other')[0]
+
+def lie(echoed, payload, worker):
+    return batch.encode_result((echoed[0], echoed[1], 'ffffffffffffffff', 'eeeeeeeeeeeeeeee'), hlsl, dxbc)
+
+_launches, compiled, failures, report = run_jobs([derive_one], lie, derive=True, workers=1)
+assert compiled == {} and 'returned bytes' in next(iter(failures.values()))
+
+def wrong_sha(echoed, payload, worker):
+    source_hex, code_hex = derived_ids(hlsl, dxbc)
+    return batch.encode_result((other_digest, echoed[1], source_hex, code_hex), hlsl, dxbc)
+
+_launches, compiled, failures, report = run_jobs([derive_one], wrong_sha, derive=True, workers=1)
+assert compiled == {} and 'requested program' in next(iter(failures.values()))
+
+def not_dxbc(echoed, payload, worker):
+    source_hex, code_hex = derived_ids(hlsl, b'NOTDXBC-bytes')
+    return batch.encode_result((echoed[0], echoed[1], source_hex, code_hex), hlsl, b'NOTDXBC-bytes')
+
+_launches, compiled, failures, report = run_jobs([derive_one], not_dxbc, derive=True, workers=1)
+assert compiled == {} and 'bytecode' in next(iter(failures.values())).lower()
+
+launches, compiled, failures, report = run_jobs([derive_one, derive_two], derive_reply, derive=True, workers=2)
+assert launches == [2] and not failures and report['workers'] == 2 and report['launches'] == 2
+
+forwarded = {}
+def fake_open(count, decoder, work, translation='missing'):
+    forwarded['count'] = count
+    forwarded['translation'] = translation
+    return opener_for(derive_reply, [])(count, decoder, work)
+
+with patch.object(batch, 'open_workers', fake_open), patch(
+        'shader_reconstruct.NativeCompiler', side_effect=AssertionError('in-process latch')):
+    with tempfile.TemporaryDirectory() as folder:
+        compiled, failures, report = batch.compile_jobs(
+            [derive_one, derive_two], 'decoder.dll', Path(folder), derive=True, workers=1,
+            translation='ultrawide-native', monotonic=monotonic, sleep=sleep)
+        assert not list(Path(folder).rglob('*.dxbc'))
+assert forwarded == {'count': 1, 'translation': 'ultrawide-native'}
+assert not failures and report['launches'] == 1 and compiled[(digest, 1)][0] == source_id
+
+print('Vertex batch dedup, protocol, derive acceptance, reuse bypass and worker bounds passed')
