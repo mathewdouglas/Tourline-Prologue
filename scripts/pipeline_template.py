@@ -338,7 +338,7 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='serial'):
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -387,11 +387,101 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
             seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
             reused=cached_shaders(document,cache)
         return prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before,volume,volume_map)
+                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before,volume,volume_map,vertex_mode)
+
+
+def _prepare_vertex_batch(document, vertices, fragments, reused, decoder, cache, output, checkpoint, report, opener=None):
+    """Exact vertex batch. Reused variants never reach a worker; the parent saves cache files."""
+    from shader_vertex_batch import compile_jobs, plan_vertices
+    decisions, compile_list, identities, reused_variants = plan_vertices(document['records'], vertices, fragments, reused)
+    total = len(document['records'])
+    budget = 128 * 1024 * 1024
+    running = 0
+    for info in identities.values():
+        if info['kind'] == 'reused' and not info['poison']:
+            if running + len(info['code']) > budget:
+                info['poison'] = 'Vertex translation memory budget exceeded'
+            else:
+                running += len(info['code'])
+    reused_variants = sum(1 for info in identities.values() if info['kind'] == 'reused' and not info['poison'])
+    done = {'n': sum(info['records'] for info in identities.values() if info['kind'] == 'reused' and not info['poison'])}
+
+    def poll():
+        if checkpoint.progress:
+            checkpoint.progress('vertex', dict(completed=done['n'], total=total))
+
+    def on_ready(job, source_id, code_id, code):
+        nonlocal running
+        if source_id != job['expected_source'] or code_id != job['expected_code']:
+            raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
+        if running + len(code) > budget:
+            raise ValueError('Vertex translation memory budget exceeded')
+        save_code(cache / (source_id + '.dxbc'), code)
+        running += len(code)
+        done['n'] += identities[(job['sha256'], job['gpu'])]['records']
+
+    if compile_list:
+        print(f'Compiling exact vertex batch: {len(compile_list)} variants', flush=True)
+    else:
+        print(f'Vertex variants reused: {reused_variants}; compiler workers=0', flush=True)
+    compiled, failures, batch = compile_jobs(compile_list, decoder, output / 'requests' / 'vertex-batch',
+                                             poll=poll, on_ready=on_ready, opener=opener)
+    batch['reused_variants'] = reused_variants
+    batch['rejected_variants'] = sum(1 for info in identities.values() if info['poison'])
+    root = output / 'requests'
+    root.mkdir(exist_ok=True)
+    save_report(root / 'vertex-preparation-report.json', batch)
+    report['vertex_preparation'] = batch
+    jobs, by_id, cached = [], {}, {}
+    for number, decision in enumerate(decisions, 1):
+        poll()
+        if number % 128 == 0:
+            print(f"Vertex/state validation {number}/{total}; unique vertex variants {len(cached)}", flush=True)
+            checkpoint.stage('vertex', completed=number - 1, total=total)
+        kind = decision[0]
+        record = decision[1]
+        try:
+            if kind == 'unresolved':
+                raise KeyError
+            if kind == 'incompatible':
+                raise ValueError(decision[2])
+            identity, fragment = decision[2], decision[3]
+            info = identities[identity]
+            if info['poison']:
+                raise ValueError(info['poison'])
+            if identity not in cached:
+                if info['kind'] == 'reused':
+                    code = info['code']
+                    source_id, code_id = info['source'], info['code_id']
+                    report['resume']['vertex_programs_reused'] += 1
+                else:
+                    if identity in failures:
+                        raise ValueError(failures[identity])
+                    if identity not in compiled:
+                        raise ValueError('Missing vertex worker result')
+                    source_id, code_id, code = compiled[identity]
+                    report['resume']['vertex_programs_compiled'] += 1
+                if code_id != info['code_id'] or source_id != info['source']:
+                    raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
+                cached[identity] = (source_id, code_id, code)
+            source_id, code_id, code = cached[identity]
+            if code_id != record['vs'] or source_id != record['vp_source']:
+                raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
+            save_code(cache / (record['vp_source'] + '.dxbc'), code)
+            job_id = sha(record['key'].encode())
+            job = dict(id=job_id, fragment=fragment, fragment_sha256=sha(fragment), state=record['state'],
+                       used=fp_identity(fragment)['textures'])
+            jobs.append(job)
+            by_id[job_id] = (record, code)
+        except KeyError:
+            report['records'].append(dict(key=record['key'], status='unresolved-program'))
+        except ValueError as exc:
+            report['records'].append(dict(key=record['key'], status='incompatible', reason=str(exc)))
+    return jobs, by_id
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None,vertex_mode='serial'):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
@@ -409,42 +499,55 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
     compiler = None
     vs_cache, jobs, by_id = {}, [], {}
     vs_bytes=0
+    if vertex_mode not in ('serial', 'batch'):
+        raise ValueError('Unsupported vertex preparation mode')
     checkpoint.stage('vertex',completed=0,total=len(document['records']))
-    for number, r in enumerate(document['records'],1):
-        if checkpoint.progress:checkpoint.progress('vertex',dict(completed=number-1,total=len(document['records'])))
-        if number % 128 == 0:
-            print(f"Vertex/state validation {number}/{len(document['records'])}; unique vertex variants {len(vs_cache)}",flush=True)
-            checkpoint.stage('vertex',completed=number-1,total=len(document['records']))
-        try:
-            v = vertices[r['vp']['sha256']]
-            f = fragments[r['fp']['sha256']]
-            identity = (r['vp']['sha256'], r['vp_gpu'])
-            if identity not in vs_cache:
-                if r['vp_source'] in reused:
-                    code=reused[r['vp_source']]
-                    source_id,code_id=r['vp_source'],r['vs']
-                    report['resume']['vertex_programs_reused']+=1
-                else:
-                    if compiler is None:compiler=NativeCompiler(decoder)
-                    source,code=compiler.vertex(v,bool(r['vp_gpu']))
-                    source_id,code_id=f'{source_key(source):016x}',f'{fnv64(code):016x}'
-                    report['resume']['vertex_programs_compiled']+=1
-                vs_bytes+=len(code)
-                if vs_bytes > 128 * 1024 * 1024:
-                    raise ValueError('Vertex translation memory budget exceeded')
-                vs_cache[identity]=(source_id,code_id,code)
-            source_id,code_id,code = vs_cache[identity]
-            if code_id != r['vs'] or source_id != r['vp_source']:
-                raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
-            save_code(cache / (r['vp_source'] + '.dxbc'), code)
-            job_id = sha(r['key'].encode())
-            job = dict(id=job_id, fragment=f, fragment_sha256=sha(f), state=r['state'], used=fp_identity(f)['textures'])
-            jobs.append(job)
-            by_id[job_id] = (r, code)
-        except KeyError:
-            report['records'].append(dict(key=r['key'], status='unresolved-program'))
-        except ValueError as exc:
-            report['records'].append(dict(key=r['key'], status='incompatible', reason=str(exc)))
+    vertex_started = time.perf_counter()
+    if vertex_mode == 'batch':
+        jobs, by_id = _prepare_vertex_batch(document, vertices, fragments, reused, decoder, cache, output, checkpoint, report)
+    else:
+        for number, r in enumerate(document['records'],1):
+            if checkpoint.progress:checkpoint.progress('vertex',dict(completed=number-1,total=len(document['records'])))
+            if number % 128 == 0:
+                print(f"Vertex/state validation {number}/{len(document['records'])}; unique vertex variants {len(vs_cache)}",flush=True)
+                checkpoint.stage('vertex',completed=number-1,total=len(document['records']))
+            try:
+                v = vertices[r['vp']['sha256']]
+                f = fragments[r['fp']['sha256']]
+                identity = (r['vp']['sha256'], r['vp_gpu'])
+                if identity not in vs_cache:
+                    if r['vp_source'] in reused:
+                        code=reused[r['vp_source']]
+                        source_id,code_id=r['vp_source'],r['vs']
+                        report['resume']['vertex_programs_reused']+=1
+                    else:
+                        if compiler is None:compiler=NativeCompiler(decoder)
+                        source,code=compiler.vertex(v,bool(r['vp_gpu']))
+                        source_id,code_id=f'{source_key(source):016x}',f'{fnv64(code):016x}'
+                        report['resume']['vertex_programs_compiled']+=1
+                    vs_bytes+=len(code)
+                    if vs_bytes > 128 * 1024 * 1024:
+                        raise ValueError('Vertex translation memory budget exceeded')
+                    vs_cache[identity]=(source_id,code_id,code)
+                source_id,code_id,code = vs_cache[identity]
+                if code_id != r['vs'] or source_id != r['vp_source']:
+                    raise ValueError(f'Rebuilt vertex identifier differs: source={source_id}, bytecode={code_id}')
+                save_code(cache / (r['vp_source'] + '.dxbc'), code)
+                job_id = sha(r['key'].encode())
+                job = dict(id=job_id, fragment=f, fragment_sha256=sha(f), state=r['state'], used=fp_identity(f)['textures'])
+                jobs.append(job)
+                by_id[job_id] = (r, code)
+            except KeyError:
+                report['records'].append(dict(key=r['key'], status='unresolved-program'))
+            except ValueError as exc:
+                report['records'].append(dict(key=r['key'], status='incompatible', reason=str(exc)))
+        from shader_vertex_batch import LIMITS
+        report['vertex_preparation'] = dict(
+            mode='serial', reused_variants=report['resume']['vertex_programs_reused'],
+            compiled_variants=report['resume']['vertex_programs_compiled'],
+            failed_variants=sum(1 for item in report['records'] if item['status'] == 'incompatible'),
+            workers=0, launches=0, seconds=time.perf_counter() - vertex_started, limits=dict(LIMITS),
+            inflight_jobs_max=0, inflight_bytes_max=0, ownership=None)
     root = output / 'requests'
     root.mkdir(exist_ok=True)
     checkpoint.stage('fragment',requested=len(jobs))
@@ -519,6 +622,7 @@ def main():
     m.add_argument('templates', type=Path, nargs='+')
     p = sub.add_parser('prepare')
     p.add_argument('--fragment-mode',choices=('batch','legacy'),default='batch',help='Exact-request batching by default; legacy rollback')
+    p.add_argument('--vertex-mode',choices=('serial','batch'),default='serial',help='Serial vertex rollback by default; opt-in exact batch')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
     p.add_argument('--volume',type=Path,help='Read directly from the original GT.VOL without unpacking')
@@ -538,7 +642,7 @@ def main():
         return
     if args.command == 'prepare':
         result = prepare(*(getattr(args, k).resolve() if getattr(args,k) is not None else None for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map)
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode)
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

@@ -46,6 +46,12 @@ pipeline. `GT5P_PREPARE_REUSE=0` disables this optimization. Reuse leaves older
 cache generations intact. See
 [incremental preparation](shader-precompile.md#incremental-preparation-across-template-updates-phase-176).
 
+Development helpers after v0.2.1 also support optional vertex compilation batches:
+`GT5P_PREPARE_VERTEX_BATCH=1` uses at most two owned compiler workers. Unset or
+`0` retains serial compilation. This switch is not in the published v0.2.1
+helper; see [vertex batching](shader-precompile.md#opt-in-exact-vertex-batching-phase-183).
+It changes offline preparation speed, not coverage or the game's draw policy.
+
 The next launch uses that cache, retaining demand compilation for missing keys.
 `tourline-prologue.exe --no-prepared` uses the ordinary cache for that launch without deleting
 anything. Failure/cancellation leaves any prior selection intact. Logs are

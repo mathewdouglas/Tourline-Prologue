@@ -1,4 +1,10 @@
 """Standalone optional player preparation. Original assets and all outputs stay local."""
+import sys
+import shader_vertex_batch
+# Frozen or source workers must dispatch before preparation parsing, UI, or a second prepare.
+if __name__ == '__main__' and shader_vertex_batch.worker_requested(sys.argv):
+    sys.exit(shader_vertex_batch.worker_main(sys.argv))
+
 import argparse
 import csv
 import ctypes
@@ -8,7 +14,6 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import time
 
 import pipeline_template as template
@@ -42,6 +47,8 @@ def previous_cache(storage, output):
 
 
 def main():
+    if shader_vertex_batch.worker_requested(sys.argv):
+        sys.exit(shader_vertex_batch.worker_main(sys.argv))
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('install','storage'):ap.add_argument('--'+name,type=Path,required=True)
     source=ap.add_mutually_exclusive_group(required=True)
@@ -131,7 +138,8 @@ def main():
     shader_fragment_batch.run_offline=run_owned
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
-        output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map)
+        output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
+        vertex_mode=shader_vertex_batch.player_mode())
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     # Switch only after successful shader/native/persistence validation. Existing

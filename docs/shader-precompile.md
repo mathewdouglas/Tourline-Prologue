@@ -38,6 +38,7 @@ and a consistent live stutter benefit remain separate requirements.
    Phase 176 adds verified reuse across template/engine generations, so extending
    a catalogue need not recompile unchanged shaders. Cancellation/resume is also
    available through the optional Phase 173 player entry.
+   Phase 183 adds opt-in bounded vertex workers, with serial remaining the default.
 5. **Demonstrate consistent stutter reduction.** Fewer runtime shader compiles have
    not yet produced a consistent frame-time win. Separate driver creation, cache
    reads, scheduling and unrelated game work; load prepared resources at useful
@@ -58,6 +59,68 @@ and a consistent live stutter benefit remain separate requirements.
 The immediate order is broader coverage reporting/session merging, then fixing
 the measured performance bottleneck. GT5 additionally needs its asset formats
 and rendering contexts verified; GT5P's template does not supply GT5 coverage.
+
+### Opt-in exact vertex batching (Phase 183)
+
+Developer template preparation accepts `--vertex-mode batch`; `serial` remains
+the default and rollback. Development frozen helpers accept
+`GT5P_PREPARE_VERTEX_BATCH=1` for batch, with unset or `0` selecting serial.
+Other values fail safely. These switches are a feature-branch change and are
+not implemented by the already published v0.2.1 helper.
+
+`shader_vertex_batch.py` deduplicates exact program/GPU-input variants and
+checks reused shaders before starting workers. Each of at most two persistent
+hidden processes owns its decoder's mutable globals and compiles sequentially
+through the production decoder/system D3D compiler. It does not start gt5p.exe.
+The source and frozen entries dispatch the internal worker sentinel before
+ordinary preparation argument parsing. Workers receive only a bounded program,
+translation mode and expected identifiers over pipes; they receive no cache path.
+The parent verifies program identity, source key and bytecode hash before saving
+any result. Incorrect identity, extra output and unknown protocol frames retire
+that worker; no automatic worker replacement is attempted. Valid compiler
+failures remain failures, and exhausted workers leave demand fallback available.
+
+Limits are two in-flight jobs, 32 KiB per program, 256 KiB per generated source,
+4 MiB per bytecode and the existing 128 MiB aggregate vertex-bytecode budget.
+Private Windows jobs enforce 512 MiB committed memory per worker / 1 GiB for the
+worker job. Job-reported peak commit excludes the parent and subsequent
+fragment/native phases. Each job has an absolute 180-second deadline; startup
+has 60 seconds per worker. Cancellation is checked while waiting at 100 ms
+intervals, followed by bounded owned-process shutdown. A private non-inherited
+kill-on-close job is mandatory, including inside the launcher's existing job;
+job attachment failure refuses batching rather than relying on an arbitrary
+parent job. Termination uses only handles created by this module.
+
+No valid reused variant is queued, and a fully cached run starts zero compiler
+workers. The existing checkpoint/generation contract is unchanged because
+outputs must match serial preparation. Completed accepted files survive
+cancellation; resume revalidates them. Memory-budget exhaustion can reject a
+different variant from serial record order because batch completion order
+differs. Unsupported branching contexts remain excluded on export. Template
+schema, renderer settings/root signature, native creation, fragment batching
+and asynchronous live draws are unchanged.
+
+Reports add `vertex_preparation` and
+`requests/vertex-preparation-report.json` for batch work, including workers,
+launches, variants, wall time, limits and job peak commit where available.
+Serial reports identify the serial mode with zero worker launches. The serial
+`failed_variants` field counts incompatible records; batch failures count unique
+compile variants. Do not compare those failure fields as a coverage percentage.
+
+Sequential checks are `scripts/test/shader_vertex_batch.py`, then
+`scripts/test/shader_vertex_batch_native.py` with original `--assets`, `--elf`,
+`--engine`, `--decoder` and fresh ignored `--output`. Its default 32-record
+sample compares exact shaders, creates native pipelines in separate empty
+application caches, tests worker cancellation/owner death and resumes with zero
+workers. `--count 351 --vertex-only` compares all current starter vertex variants
+without claiming another whole-pipeline proof. Rebuild the frozen helper with
+`build_preparer.py`, then run `scripts/test/player_vertex_batch_native.py` with
+`--zip`, `--helper-dir`, the sampled `--template`, original `--elf`/`--assets`
+and a fresh `--output`. The ownership test
+`scripts/test/shader_vertex_batch_ownership_native.py` additionally kills a
+nested owner while an outer job survives. Run every executable check one at a
+time. Preparation timing is distinct from gameplay frame-time/stutter evidence;
+see Phase 183 progress for measured results and limitations.
 
 ### Preparation window (Phase 181)
 

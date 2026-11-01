@@ -9,6 +9,81 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 183 - Bounded exact vertex compilation batches (2026-11-01)
+
+The next efficiency step batches the previously serial vertex translation /
+D3D compilation phase. One requested Grok agent implemented the worker module,
+template/player integration and unexecuted protocol tests. The parent reviewed,
+hardened, built and performed every executable check sequentially. No original
+checkout/runtime source, generated output, shadercache or other process changed.
+
+Developer `pipeline_template.py prepare --vertex-mode batch` and development
+player `GT5P_PREPARE_VERTEX_BATCH=1` opt in. Serial remains the developer/player
+default and rollback; invalid player values fail without changing selection.
+At most two hidden persistent processes each own one production decoder and
+compile sequentially, preserving its mutable C globals. Source/frozen sentinel
+dispatch happens before normal preparation parsing. No vertex worker runs the
+game engine. The parent validates exact program identity, source key and DXBC
+hash before cache writes. Reused valid variants bypass workers entirely.
+
+Review removed the proposed arbitrary inherited-job fallback: being in some
+parent job does not guarantee cleanup when the helper dies. Workers require
+atomic attachment to a private non-inherited kill-on-close job, including when
+nested. Kernel commit caps are 512 MiB per worker / 1 GiB for the worker job.
+The existing 128 MiB aggregate vertex-bytecode budget remains. Two in-flight
+requests, bounded frames, a 180-second absolute per-job deadline and 60-second
+startup deadline bound work. Cancellation polls while waiting; cleanup retires
+and joins only owned process handles. Slow partial output cannot extend the
+deadline, incorrect identity/extra frames retire a worker, and partial pipe
+creation failure closes already-created handles. No worker respawn is attempted.
+The final source/frozen build includes these hardening changes.
+
+Original-asset lookup resolves all **351 starter vertex variants**; serial and
+batch match every source/bytecode identifier and byte sequence. One sequential
+local vertex-only comparison is **241.3568 s serial / 142.4041 s batch**. Batch
+includes worker startup/decoder loading/shutdown; the serial timer starts after
+in-process compiler initialization. Two workers compile all 351 with no failures.
+Their job-reported peak commit is 121,061,376 bytes (115.45 MiB), with largest
+worker peak 59,740,160 bytes. This is worker commit, not total application RSS.
+Lookup and subsequent fragment/native work are outside those timings. It is
+one hardware-local pair, not a multi-run or gameplay stutter result. Evidence:
+`scratch/vertex-batch-183/all351/validation.json` and `all351.log`.
+
+A separate 32-record sample (30 program identities, including CPU/GPU variants)
+resolves both stages from original assets, then prepares serial and batch in
+separate empty application caches. Both create/persist all 32 exact native keys;
+their DXBC files match byte for byte. The direct vertex sample measures
+11.0445 / 7.4607 s serial/batch; full sample preparation measures 21.3972 /
+17.0647 s. OS/driver caches are warm and order is serial then batch. Resume
+revalidates both stages/native keys with zero vertex/fragment compiler workers.
+Real cancellation preserves accepted results and retires workers; killing the
+test owner also retires its workers. The first attempt lacked the private fixture
+ELF needed by offline engine startup; the test fixture was corrected and rerun
+in a fresh output, preserving its earlier cache/evidence. Final evidence:
+`scratch/vertex-batch-183/native32-final/{validation.json,serial,batch}`.
+
+The final frozen helper is rebuilt with the unchanged production decoder and
+tested under System32-only PATH against original assets and a 32-record subset.
+Cancellation retains completed vertex files and the prior selection; resume
+reuses them, compiles pending variants through two frozen workers, and verifies
+all 32 native keys/persistence. A second run starts no shader compiler workers;
+serial-default rollback also revalidates the same cache without compilation.
+Invalid player mode leaves selection intact. An additional nested-owner proof
+kills the frozen workers' owner while its outer job deliberately remains open;
+both workers exit. Evidence: `frozen32-final/validation.json`, its logs,
+`nested-owner/validation.json` and `frozen-final-build.log` under the same root.
+
+Protocol/dedup/rejection/scheduler checks, template/bundle/contract checks,
+checkpoint ownership/link rejection, nine reuse tests and strict packaging
+checks pass sequentially. Helper builds also pass eight native checksum and nine
+packed-reader tests. No game entry or live route/screenshot test was needed for
+this offline compiler change. All supported shader bytes remain identical.
+Template schema/contract, settings/root signature, branching exclusions, fragment
+batching and asynchronous draw policy are unchanged. Coverage remains 2,892
+observed records / 1,143 programs. This does not prove a single fresh native
+batch of all 2,892 records or a gameplay stutter improvement. New helper/code is
+feature-only with `[skip ci]`; main, tag and published v0.2.1 are unchanged.
+
 ## Phase 182 - Tourline Prologue title and v0.2.1 release (2026-11-01)
 
 The user requested the preparation window title **Tourline Prologue** and a

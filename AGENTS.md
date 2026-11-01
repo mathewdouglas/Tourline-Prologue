@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 182)
+## Start here: state of play (2026-11-01, Phase 183)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 182 is the latest).
+has the evidence, newest phase first (Phase 183 is the latest).
 
 ### What works now
+
+- **Opt-in vertex batching (Phase 183):** two hidden persistent compiler workers
+  reproduce all 351 starter vertex variants exactly. One local vertex-only pair
+  measures 241.36 s serial / 142.40 s batch; worker-job peak commit is 115.45 MiB.
+  Separate empty-cache 32-pipeline proofs, frozen cancellation/resume, zero-worker
+  cache reuse, serial rollback and nested owner-death checks pass sequentially.
+  Private kill-on-close jobs, memory caps and timeouts bound workers. Developer
+  `--vertex-mode batch` / player `GT5P_PREPARE_VERTEX_BATCH=1` opt in; serial stays
+  default. No new coverage, live stutter or whole-starter native batch claim.
+  Feature pushes only with `[skip ci]`; main and published v0.2.1 stay unchanged.
 
 - **v0.2.1 released (Phase 182):** preparation window and legacy fallback use
   the requested title `Tourline Prologue`. The user authorized main/tag/release;

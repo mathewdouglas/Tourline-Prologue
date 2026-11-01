@@ -26,6 +26,7 @@ def main():
         '--name','GT5P-Prepare','--icon',str(ROOT/'launcher/tourline-prologue.ico'),
         '--distpath',str(out/'dist'),'--workpath',str(out/'work'),
         '--specpath',str(out),'--paths',str(ROOT/'scripts'),
+        '--hidden-import','shader_vertex_batch',
         '--add-data',str(ROOT/'config/ps3recomp.json')+os.pathsep+'config',
         '--add-data',str(ROOT/manifest['patch'])+os.pathsep+'patches',
         str(ROOT/'scripts/player_prepare.py')],cwd=ROOT,check=True)
