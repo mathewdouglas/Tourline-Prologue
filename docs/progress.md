@@ -9,6 +9,69 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 178 - Read the player's existing packed game directly (2026-11-01)
+
+The optional development launcher now passes its configured disc/PS3_GAME folder
+to `GT5P-Prepare --game`, which reads the existing `USRDIR/GT.VOL` and verified
+user ELF in place. Users need no GTToolsSharp installation or separate unpacked
+asset tree for the starter. `GT5P_PREPARE_VOLUME=0` restores the legacy folder
+picker; explicit `--prepare-assets` and helper `--assets` remain supported.
+Preparation stays optional. The published v0.2 package is unchanged.
+
+A repository-authored small native byte-rotation helper and bounded Python
+raw-deflate reader handle the measured BCUS98158 v03.00 archive. Per-game
+parameters are read from numeric locations in the verified user ELF. The bundled
+map contains only container/archive hashes, numeric member ranges, seed IDs,
+compression flags and ELF offsets: no keys, filenames or game-derived contents.
+The maintainer generator accepts a local archive listing and reference assets,
+then verifies every selected container/program directly against the original
+archive before emitting metadata. No external unpacker source is vendored.
+
+The complete ELF/volume must match SHA-256. Only requested members are decoded,
+in archive order; each complete decoded container must match SHA-256 before its
+selected program slices are accepted. Existing program identities, shader
+bytecode, exact native keys and driver persistence checks remain authoritative.
+Bounds are 128 KiB input/output chunks, 1 GiB per member, 4 GiB volume-member decode,
+128 MiB retained program data, 1 MiB/1,024-member maps and a 600-second deadline
+checked between chunks. Overlaps/unknown fields/ranges and changed input files
+are rejected. No extracted member is written to disk. The volume map joins the
+checkpoint identity. Renderer settings/root signatures and asynchronous draw
+policy are unchanged; unsupported inputs leave ordinary play available.
+
+Measured lookup verifies all 976 starter programs (293 vertex, 683 fragment),
+reading 101 volume containers plus the ELF. It hashes the 2,052,954,112-byte
+volume and decodes 1,045,098,600 bytes including the ELF, retaining only selected
+programs. The frozen full-player test measures 8.599 seconds for this lookup on
+this machine with warm OS caches. This is not a general scan-time guarantee.
+
+Validation is sequential: only one test runs at a time. Seven synthetic native
+reader tests cover raw/compressed members, chunk/offset parity, malformed maps,
+corruption, truncation, decompression overflow/trailing data and cancellation.
+Legacy asset lookup and strict package checks pass. The rebuilt launcher passes
+owned-process tests including configured-game forwarding without another folder
+picker, legacy cancellation, duplicate starts and job shutdown. A local package
+contains the manifest-verified volume DLL/map with an explicit allowlist and no
+game data (`scratch/v178-player-candidate.zip`, 202 files); it is not published.
+
+A fresh application cache with 64 template records rebuilds both shader stages
+from the packed inputs and passes exact native-key/creation/persistence checks
+(`scratch/v178-fresh/report.json`). This is the fresh compile proof for this
+reader, not a new full-2,334 first-run compile experiment. The frozen helper under
+System32-only PATH resolves all 976 programs and passes cancellation/resume plus
+all 2,334 exact native pipelines using verified prior shaders/driver blobs; zero
+shader compiles are expected in that reuse experiment. The old source cache and
+selection survive template rejection/cancellation (`scratch/v178-player/validation.json`).
+Additional frozen archive-stage cancellation and incompatible-volume rejection
+both stop before shader/native work and preserve the selected cache
+(`scratch/v178-volume-safety/validation.json`).
+
+This removes an installation/storage hurdle; starter coverage remains 2,334
+observed pipelines. Other builds/modded archives need independently verified
+maps. Broader contexts/settings, multi-GPU acceptance and consistent live stutter
+reduction remain open. All original/shared resources stay read-only; caches and
+private archive listings remain untracked. Push only the feature branch with
+`[skip ci]`, without creating a new release build.
+
 ## Phase 177 - Native offline checksum acceleration (2026-11-01)
 
 The optional standalone helper now builds a small repository-authored native

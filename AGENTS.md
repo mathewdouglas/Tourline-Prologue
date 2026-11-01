@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 177)
+## Start here: state of play (2026-11-01, Phase 178)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 177 is the latest).
+has the evidence, newest phase first (Phase 178 is the latest).
 
 ### What works now
+
+- **Direct game-file preparation (Phase 178):** the development launcher uses
+  the configured disc folder; a bounded reader locates all 976 starter programs
+  in the original GT.VOL/ELF without an unpacker or second asset copy. The map
+  ships hashes/numeric locations only; per-game parameters come from the user's
+  verified ELF. A fresh 64-record cache compiles both stages and passes exact
+  native keys; the frozen helper reuses/revalidates all 2,334 starter pipelines.
+  Archive cancellation and incompatible-volume rejection preserve selection.
+  `GT5P_PREPARE_VOLUME=0` restores legacy asset selection. Published v0.2 remains
+  unchanged; no new coverage/stutter claim. Tests run one at a time; push only
+  the feature branch with `[skip ci]`.
 
 - **Native offline checksums (Phase 177):** the frozen helper loads a tested
   repository-authored checksum DLL, with identical Python fallback and

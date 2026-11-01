@@ -37,3 +37,11 @@ catalogue. The smaller `asset-map.json` remains the supplemental developer map.
 Templates do not establish menu/race preload ownership; preparation
 does not fabricate those membership indices. No launcher/release default or
 zero-stutter claim is made.
+
+Development Phase 178 adds `volume-map.json`, numeric locations for 101 required
+archive members plus parameter locations in the user's verified ELF. It contains
+no keys or file names. The optional helper can read the original GT.VOL directly,
+verify each decoded container and all 976 programs, and avoid an unpacked asset
+copy. Both ELF and volume SHA-256 must match this supported disc build. The
+legacy unpacked-assets flow remains available. No pipeline records or expected
+keys change, and this does not expand observed-route coverage.

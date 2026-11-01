@@ -10,11 +10,13 @@ pipeline state, and preparation reconstructs/verifies both shaders and native
 pipelines from the user's own assets. Remaining work is breadth, performance and
 player integration; retained-route coverage is not whole-game coverage.
 
-The v0.2 candidate adds an optional standalone player entry point. See
+v0.2 added an optional standalone player entry point. See
 [player setup](player-setup.md#optional-shader-preparation-in-v02) and
 [release notes](release-v0.2.md). It uses a complete hash/offset map for this
-starter, rather than requiring a developer SHDS catalogue. Users currently need
-their own unpacked GT.VOL directory. Broader coverage, settings/GPU validation
+starter, rather than requiring a developer SHDS catalogue. Development Phase 178
+reads the user's original packed GT.VOL directly, using the configured game folder;
+the published v0.2 package retains its earlier unpacked-asset selection.
+Broader coverage, settings/GPU validation
 and a consistent live stutter benefit remain separate requirements.
 
 1. **Broaden representative coverage.** Merge templates from other tracks,
@@ -44,8 +46,8 @@ and a consistent live stutter benefit remain separate requirements.
    progress, support cancellation/resume, and handle cache compatibility. Ship
    metadata only; shader contents and GPU-specific binaries remain local.
    Phase 173 implements an optional standalone player path with manual unpacked
-   asset selection; automatic extraction, wider settings support and broader
-   acceptance remain open.
+   asset selection. Phase 178 removes that additional extraction for the supported
+   original disc volume; wider settings support and broader acceptance remain open.
 7. **Validate the complete player path.** Exercise fresh caches, multiple GPUs,
    settings changes and representative routes. Measure loading time, memory,
    actual preparation hits and hitches; inspect rendering before enabling any
@@ -90,6 +92,70 @@ it also does not prove that unvisited content is covered.
 Phase 160 adds [named shared-pass selection and isolated state checks](shader-reconstruction.md#named-shared-passes-phase-160).
 This is developer reconstruction work. CPU inputs and one conditional shared-pass
 rule are now independently constructed; other shared resource/pass contexts remain open.
+
+## Direct preparation from the configured game files (Phase 178)
+
+The development launcher passes its already verified disc/PS3_GAME folder to
+the standalone helper with `--game`. The helper reads `USRDIR/GT.VOL` in place;
+users do not install or run GTToolsSharp and do not create an unpacked asset copy.
+Ordinary disc setup and the verified user-supplied ELF are still used. This
+implements direct reading, not a bundled whole-volume extraction step.
+
+`volume-map.json` contains only archive/member hashes, sizes, byte offsets,
+numeric entry IDs/compression flags and locations of parameters in the user's
+ELF. It contains no file names, keys, shader bytes, source or compiled cache.
+The original ELF and complete volume must match SHA-256 before decoding. This
+map supports the measured original BCUS98158 v03.00 volume; other builds/modded
+volumes need separately verified maps. No unknown layout or parameter is guessed.
+
+The small repository-authored `volume_reader.dll` performs fixed-width byte
+rotations using parameters read from the user's verified ELF. ABI/known-vector
+tests gate its use. Python's bounded raw-deflate stream handles supported
+compressed members. Each complete decoded container must match its existing
+SHA-256 before selected program slices are accepted; every program identity is
+then checked, followed by the unchanged shader/native pipeline verification.
+No external unpacker code or key data is shipped. The format investigation used
+the public [GTToolsSharp readers](https://github.com/Nenkai/GTToolsSharp); original
+local volume bytes and existing container/program hashes are the acceptance oracles.
+
+Only requested containers are decoded, in archive order, with 128 KiB input/output
+chunks, a 1 GiB per-member / 4 GiB volume-member decode limit, a 128 MiB program-data limit
+and a 600-second deadline checked between chunks. Maps are capped at 1 MiB and
+1,024 members, reject overlaps/unknown fields and validate every byte range.
+All archive reads are read only. Cancellation is checked between hashing/decode
+chunks; status writes are throttled while cancellation checks remain immediate.
+No new background queue or game instance is introduced. The new map identity
+is checkpointed; completed bytecode/driver hints can be reused from earlier
+asset-based preparation. Failure/cancellation preserves the selected old cache.
+
+Rollback: `GT5P_PREPARE_VOLUME=0` restores the legacy folder selection, and
+`tourline-prologue.exe --prepare-assets <folder>` explicitly uses unpacked assets.
+The helper accepts mutually exclusive `--game` / `--assets` inputs. Source tools
+can pass `--volume`, `--volume-map` and `--asset-map` to `pipeline_template.py
+prepare` without `--catalog`; select the local native utility with
+`GT5P_PREPARE_VOLUME_LIBRARY=<absolute volume_reader.dll path>`.
+
+For a developer direct-volume run, use a fresh ignored output (or `--resume` for
+the same checkpoint):
+
+```powershell
+$env:GT5P_PREPARE_VOLUME_LIBRARY='<absolute volume_reader.dll path>'
+.venv/Scripts/python scripts/pipeline_template.py prepare `
+  --template assets/pipeline-templates/gt5p-disc-v2 `
+  --asset-map assets/pipeline-templates/gt5p-disc-v2/player-map.json `
+  --volume <configured-game/USRDIR/GT.VOL> --elf <verified-user-ELF> `
+  --engine <isolated-engine> --decoder <production-decoder.dll> `
+  --game-root <isolated-game-root> --output scratch/packed-preparation
+```
+
+Maintainers generate the numeric map using `scripts/release/build_volume_map.py`
+with a local archive listing (`GTToolsSharp listfiles`), their already extracted
+reference assets, the original ELF/volume, the player program map and independently
+located ELF parameter/data offsets. The generator refuses existing outputs and
+verifies all decoded containers/programs directly in the original volume before
+writing metadata. Listings, reference assets, parameters and unpacker files stay
+local. The strict packager checks that the numeric archive map covers exactly
+the non-ELF player-map containers and includes the required manifest-listed DLL.
 
 ## Identifier-only templates (Phase 173; optional preparation path)
 

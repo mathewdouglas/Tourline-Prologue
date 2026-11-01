@@ -141,11 +141,37 @@ def main():
         shutil.copyfile(args.probe,helper)
         with (install/'release.ini').open('a') as f:
             f.write('prepare_sha256='+hashlib.sha256(helper.read_bytes()).hexdigest()+'\n')
-        owner=subprocess.Popen([launcher,'--prepare-assets',str(disc)],env=dict(env,GT5P_PROBE_DELAY_MS='30000'))
         ui=ctypes.WinDLL('user32');callback=ctypes.WINFUNCTYPE(ctypes.c_bool,ctypes.c_void_p,ctypes.c_void_p)
         ui.GetWindowThreadProcessId.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_ulong)]
         ui.SendMessageW.argtypes=[ctypes.c_void_p,ctypes.c_uint,ctypes.c_size_t,ctypes.c_ssize_t]
         ui.EnumWindows.argtypes=[callback,ctypes.c_void_p]
+        ui.GetWindowTextW.argtypes=[ctypes.c_void_p,ctypes.c_wchar_p,ctypes.c_int]
+        ui.PostMessageW.argtypes=[ctypes.c_void_p,ctypes.c_uint,ctypes.c_size_t,ctypes.c_ssize_t]
+        packed_owner=subprocess.Popen([launcher,'--prepare'],env=dict(env,GT5P_PROBE_DELAY_MS='300',GT5P_PREPARE_VOLUME='1'))
+        packed_titles=set()
+        @callback
+        def packed_dialog(hwnd,unused):
+            pid=ctypes.c_ulong();ui.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+            title=ctypes.create_unicode_buffer(512);ui.GetWindowTextW(hwnd,title,len(title))
+            if pid.value==packed_owner.pid:packed_titles.add(title.value)
+            if pid.value==packed_owner.pid and title.value in ('Project Tourline Prologue - optional preparation','Project Tourline Prologue'):
+                ui.PostMessageW(hwnd,0x10,0,0)  # Dismiss only this fixture owner's information message boxes.
+            return True
+        try:
+            deadline=time.monotonic()+15
+            while packed_owner.poll() is None and time.monotonic()<deadline:
+                ui.EnumWindows(packed_dialog,None);time.sleep(.05)
+            if packed_owner.poll() is None:raise AssertionError('Packed preparation did not finish; owner windows: '+repr(packed_titles))
+            assert packed_owner.returncode==0
+            probe=dict(line.split('=',1) for line in (data/'probe.txt').read_text(encoding='utf-8-sig').splitlines())
+            arguments=[probe['arg'+str(i)] for i in range(1,int(probe['argc']))]
+            assert '--game' in arguments and '--assets' not in arguments
+            assert Path(arguments[arguments.index('--game')+1])==disc
+            assert (prepared/'keep.txt').read_text()=='cache preserved'
+        finally:
+            if packed_owner.poll() is None:packed_owner.terminate();packed_owner.wait(timeout=10)
+        print('default preparation uses the configured disc without an asset-folder picker: passed')
+        owner=subprocess.Popen([launcher,'--prepare-assets',str(disc)],env=dict(env,GT5P_PROBE_DELAY_MS='30000'))
         clicked=[]
         @callback
         def cancel_dialog(hwnd,unused):

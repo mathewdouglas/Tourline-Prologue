@@ -43,7 +43,10 @@ def previous_cache(storage, output):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    for name in ('install','storage','assets'):ap.add_argument('--'+name,type=Path,required=True)
+    for name in ('install','storage'):ap.add_argument('--'+name,type=Path,required=True)
+    source=ap.add_mutually_exclusive_group(required=True)
+    source.add_argument('--assets',type=Path,help='Legacy unpacked asset directory')
+    source.add_argument('--game',type=Path,help='The already configured disc/PS3_GAME folder')
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
     a=ap.parse_args()
@@ -79,7 +82,15 @@ def main():
     if document['compatibility']!=template.compatibility(engine,decoder,storage/'input/EMAIN.ELF'):
         raise ValueError('This template does not match the installed game/renderer')
     location_map=bundle/'player-map.json'
-    metadata=json.dumps([document,read_map(location_map)],sort_keys=True,separators=(',',':'))
+    metadata_items=[document,read_map(location_map)]
+    volume=volume_map=None
+    if a.game:
+        from game_volume import read as read_volume
+        game=a.game.resolve()
+        if (game/'PS3_GAME').is_dir():game=game/'PS3_GAME'
+        volume=game/'USRDIR/GT.VOL';volume_map=bundle/'volume-map.json'
+        metadata_items.append(read_volume(volume_map))
+    metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
     token=hashlib.sha256((metadata+hashlib.sha256(engine.read_bytes()).hexdigest()+
                           hashlib.sha256(decoder.read_bytes()).hexdigest()).encode()).hexdigest()[:24]
     parent=storage/'preparation'
@@ -88,11 +99,15 @@ def main():
     out=parent/token
     reuse=None if a.no_reuse or os.environ.get('GT5P_PREPARE_REUSE')=='0' else previous_cache(storage,out)
     cancel=storage/'prepare.cancel';status=storage/'prepare-status.txt'
+    last_status=['',0.0]
     def progress(phase,counts):
         if cancel.exists():raise KeyboardInterrupt('Preparation cancelled; completed files kept')
         text=phase.replace('-',' ').capitalize()
         if 'completed' in counts:text+=f" {counts['completed']}/{counts['total']}"
+        now=time.monotonic()
+        if phase==last_status[0] and now-last_status[1]<.1:return
         status.write_text(text,encoding='utf-8')
+        last_status[:]=[phase,now]
     def run_owned(exe,game_root,env,log,timeout=180):
         idle_for_player()
         begin=time.monotonic()
@@ -115,8 +130,8 @@ def main():
     template.run_offline=run_owned
     shader_fragment_batch.run_offline=run_owned
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
-        assets=a.assets.resolve(),asset_map=location_map,resume=out.exists(),
-        output_validator=lambda p:p,progress=progress,reuse_cache=reuse)
+        assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
+        output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     # Switch only after successful shader/native/persistence validation. Existing

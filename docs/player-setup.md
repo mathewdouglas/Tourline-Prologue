@@ -8,10 +8,19 @@ not the port release version. CI names ZIPs `tourline-prologue-v0.2-windows-x64-
 ## Optional shader preparation in v0.2
 
 Complete ordinary setup, close the game, then run **Prepare shaders.cmd**
-(`tourline-prologue.exe --prepare`). Select an original GT.VOL asset directory unpacked with
-GTToolsSharp. This additional extraction is currently required for preparation;
-normal play still uses the original disc selection. The helper is self-contained
-and requires no player Python/compiler installation. See [v0.2 notes](release-v0.2.md).
+(`tourline-prologue.exe --prepare`). Development builds from Phase 178 read the
+original `USRDIR/GT.VOL` from the game folder already configured for play. No
+additional volume extraction, unpacker installation or second asset copy is
+needed. The helper is self-contained and requires no player Python/compiler
+installation. The already published v0.2 package still uses its earlier unpacked
+asset selection; this source change needs a future package. See [v0.2 notes](release-v0.2.md).
+
+Direct preparation supports the verified BCUS98158 v03.00 volume. It verifies
+the original volume and game executable, derives its read parameters from that
+executable, and streams only the required containers in memory. Game files stay
+read only. Parameters/keys and decoded assets are not distributed. The existing
+`--prepare-assets <folder>` option, or `GT5P_PREPARE_VOLUME=0`, selects the legacy
+unpacked-asset flow if needed; unknown volumes fail safely rather than guessing.
 
 Progress and cancellation appear in a native dialog. Repeat the option to resume
 the same metadata/helper generation. Original assets are reverified, completed

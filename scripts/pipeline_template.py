@@ -252,8 +252,15 @@ def export(trace, cache, compat):
     return validate(dict(schema=SCHEMA, version=VERSION, compatibility=compat, records=list(records.values()))), dict(rejected)
 
 
-def locate(records, catalog, elf, asset_map=None, assets=None):
+def locate(records, catalog, elf, asset_map=None, assets=None, volume=None, volume_map=None, progress=None):
     """One bounded, read-only container pass, no address-space polling."""
+    if volume is not None:
+        from game_volume import read as read_volume,resolve
+        from pipeline_asset_map import read as read_map
+        if asset_map is None or volume_map is None:raise ValueError('Direct volume lookup requires both verified location maps')
+        wanted={(s,r[s]['sha256'],r[s]['size']) for r in records for s in ('vp','fp')}
+        vp,fp,stats=resolve(read_map(asset_map),read_volume(volume_map),volume,elf,wanted,progress)
+        return vp,fp,dict(volume=stats,vertex_found=len(vp),fragment_found=len(fp))
     if catalog is None:
         from pipeline_asset_map import read as read_map,resolve
         if asset_map is None or assets is None:raise ValueError('Asset-only lookup requires a verified location map and original assets')
@@ -331,7 +338,7 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None):
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -359,6 +366,11 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     contract=dict(template=sha(json.dumps(document,sort_keys=True,separators=(',',':')).encode()),
                   engine=sha(engine.read_bytes()),decoder=sha(decoder.read_bytes()),
                   asset_map=map_id)
+    if volume is not None:
+        from game_volume import read as read_volume
+        if assets is not None:raise ValueError('Select packed volume or unpacked assets, not both')
+        if volume_map is None and template.is_dir():volume_map=template/'volume-map.json'
+        contract['volume_map']=sha(json.dumps(read_volume(volume_map),sort_keys=True,separators=(',',':')).encode())
     from preparation_checkpoint import Checkpoint
     from cache_hash import statistics
     started=time.perf_counter()
@@ -375,15 +387,15 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
             seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
             reused=cached_shaders(document,cache)
         return prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before)
+                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before,volume,volume_map)
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
-    vertices, fragments, lookup = locate(document['records'], catalog, elf,asset_map,assets)
+    vertices, fragments, lookup = locate(document['records'], catalog, elf,asset_map,assets,volume,volume_map,checkpoint.progress)
     lookup['seconds'] = time.perf_counter() - lookup_started
     report = dict(schema=1, template_sha256=template_digest(template), lookup=lookup,
                   requested=len(document['records']), records=[], preparation_seconds=None,
@@ -509,10 +521,13 @@ def main():
     p.add_argument('--fragment-mode',choices=('batch','legacy'),default='batch',help='Exact-request batching by default; legacy rollback')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
+    p.add_argument('--volume',type=Path,help='Read directly from the original GT.VOL without unpacking')
+    p.add_argument('--volume-map',type=Path,help='Verified numeric archive member/ELF parameter locations')
     p.add_argument('--asset-map',type=Path,help='Optional verified hash/offset map for non-SHDS programs')
     p.add_argument('--assets',type=Path,help='Original unpacked asset root used with --asset-map')
     p.add_argument('--demand-fallback',action='store_true',help='Report incompatible templates and provide an empty demand cache')
-    for name in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game-root', 'output'):
+    p.add_argument('--catalog',type=Path,help='Optional developer SHDS catalogue; asset-only/volume lookup needs no catalogue')
+    for name in ('template', 'elf', 'engine', 'decoder', 'game-root', 'output'):
         p.add_argument('--' + name, type=Path, required=True)
     b = sub.add_parser('bundle',help='Write verified identifier/numeric metadata shards; no shader contents')
     b.add_argument('--template',type=Path,required=True)
@@ -522,8 +537,8 @@ def main():
         bundle(read(args.template),args.output)
         return
     if args.command == 'prepare':
-        result = prepare(*(getattr(args, k).resolve() for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache)
+        result = prepare(*(getattr(args, k).resolve() if getattr(args,k) is not None else None for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map)
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

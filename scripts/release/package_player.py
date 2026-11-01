@@ -28,8 +28,14 @@ def template_files():
     if {(r['stage'],r['id'],r['size']) for r in locations['records']}!=wanted:
         raise ValueError('Player location map must cover exactly the bundled programs')
     read_map(folder/'asset-map.json')
+    from game_volume import read as read_volume
+    volume=read_volume(folder/'volume-map.json')
+    if (volume['elf_sha256']!=document['compatibility']['elf_sha256'] or
+            {(r['container'],r['size']) for r in volume['records']} !=
+            {(r['container'],r['container_size']) for r in locations['records'] if r['container']!=volume['elf_sha256']}):
+        raise ValueError('Volume locations must cover exactly the player map containers')
     index=json.loads((folder/'index.json').read_text())
-    names={'README.md','index.json','asset-map.json','player-map.json'}|{p['file'] for p in index['parts']}
+    names={'README.md','index.json','asset-map.json','player-map.json','volume-map.json'}|{p['file'] for p in index['parts']}
     if {p.name for p in folder.iterdir()}!=names:raise ValueError('Unreviewed template file')
     return {'assets/pipeline-templates/gt5p-disc-v2/'+n:regular(folder/n) for n in names}
 
@@ -40,7 +46,7 @@ def preparation_files(folder):
             not isinstance(manifest['files'],dict) or not 1<=len(manifest['files'])<=512):
         raise ValueError('Invalid standalone preparer manifest')
     files={};total=0
-    required={'GT5P-Prepare.exe','decoder.dll','licenses/Python-LICENSE.txt','licenses/PyInstaller-COPYING.txt'}
+    required={'GT5P-Prepare.exe','decoder.dll','volume_reader.dll','licenses/Python-LICENSE.txt','licenses/PyInstaller-COPYING.txt'}
     if not required<=manifest['files'].keys():raise ValueError('Incomplete standalone preparer')
     for name,digest in manifest['files'].items():
         if (not isinstance(name,str) or '\\' in name or ':' in name or

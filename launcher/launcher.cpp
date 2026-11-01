@@ -478,12 +478,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
             if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
                 fail(L"The preparation helper is missing or does not match this release. Re-extract the full ZIP.");
-            if (prepare_assets.empty()) MessageBoxW(nullptr,L"Experimental preparation covers known menu/HSR/Daytona pipelines, not the whole game.\n\nSelect your own GT.VOL unpacked with GTToolsSharp. This is separate from the extracted disc folder used for play. Preparation may take several minutes and stores local shader/driver files. No consistent stutter reduction is established. You can cancel and resume, or close this and launch Project Tourline Prologue normally.",L"Project Tourline Prologue - optional preparation",MB_OK|MB_ICONINFORMATION);
-            auto assets=prepare_assets.empty()?pick(true,L"Choose your unpacked GT.VOL asset folder"):prepare_assets;
-            if (assets.empty()) { CoUninitialize();return 0; }
+            bool packed=prepare_assets.empty() && env(L"GT5P_PREPARE_VOLUME")!=L"0";
+            if (prepare_assets.empty()) MessageBoxW(nullptr,packed?
+                L"Experimental preparation covers known menu/HSR/Daytona pipelines, not the whole game.\n\nPreparation reads your already selected game files in place. No separate GT.VOL extraction is needed. It may take several minutes and stores local shader/driver files. No consistent stutter reduction is established. You can cancel and resume, or launch normally without preparation.":
+                L"Legacy preparation: choose your already unpacked GT.VOL asset folder. Preparation remains partial and optional.",L"Project Tourline Prologue - optional preparation",MB_OK|MB_ICONINFORMATION);
+            auto assets=packed?fs::path{}:prepare_assets.empty()?pick(true,L"Choose your unpacked GT.VOL asset folder"):prepare_assets;
+            if (!packed && assets.empty()) { CoUninitialize();return 0; }
             fs::remove(data/L"prepare.cancel");
             std::ofstream(data/L"prepare-status.txt") << "Starting preparation...";
-            DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+L" --assets "+quote(assets)+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
+            auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
+            DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
             if (result==2) { CoUninitialize();return 0; }
             if (result) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
             if (prepare_assets.empty()) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);

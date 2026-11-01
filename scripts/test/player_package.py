@@ -48,7 +48,7 @@ def main():
         put(package.ROOT / 'launcher/Change storage.cmd', b'@echo off\n')
         put(package.ROOT / 'launcher/Prepare shaders.cmd', b'@echo off\n')
         helper=root/'helper'
-        payloads={'GT5P-Prepare.exe':pe,'decoder.dll':pe,'licenses/Python-LICENSE.txt':b'Synthetic license',
+        payloads={'GT5P-Prepare.exe':pe,'decoder.dll':pe,'volume_reader.dll':pe,'licenses/Python-LICENSE.txt':b'Synthetic license',
                   'licenses/PyInstaller-COPYING.txt':b'Synthetic license'}
         for name,content in payloads.items():put(helper/name,content)
         put(helper/'files.json',json.dumps(dict(schema=1,files={n:package.sha(helper/n) for n in payloads})).encode())

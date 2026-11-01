@@ -45,6 +45,11 @@ def main():
         str(ROOT/'src/preparation_hash.c')],check=True)
     subprocess.run([sys.executable,str(ROOT/'scripts/test/cache_hash.py'),
         '--library',str(folder/'cache_hash.dll')],check=True)
+    subprocess.run([a.clang_cl,'/nologo','/O2','/MT','/LD',
+        '/Fo'+str(out/'volume_reader.obj'),'/Fe'+str(folder/'volume_reader.dll'),
+        str(ROOT/'src/preparation_volume.c')],check=True)
+    subprocess.run([sys.executable,str(ROOT/'scripts/test/game_volume.py'),
+        '--library',str(folder/'volume_reader.dll')],check=True)
     # Import library/EXP are build outputs, not player inputs. Leave them in the
     # build directory; list only required distribution files below.
     licenses=folder/'licenses';licenses.mkdir()

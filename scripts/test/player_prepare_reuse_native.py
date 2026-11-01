@@ -24,8 +24,11 @@ def hashes(root):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    for name in ('helper-dir','zip','previous-cache','elf','assets','output'):
+    for name in ('helper-dir','zip','previous-cache','elf','output'):
         ap.add_argument('--'+name,type=Path,required=True)
+    source_args=ap.add_mutually_exclusive_group(required=True)
+    source_args.add_argument('--assets',type=Path)
+    source_args.add_argument('--game',type=Path)
     ap.add_argument('--expect-hash-backend',choices=('native','python'))
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():ap.error('Use a fresh ignored test output')
@@ -48,7 +51,7 @@ def main():
     previous=source.relative_to(storage).as_posix();pointer.write_text(previous)
     helper=install/'preparation/GT5P-Prepare.exe'
     command=[str(helper.resolve()),'--install',str(install.resolve()),'--storage',str(storage.resolve()),
-             '--assets',str(a.assets.resolve())]
+             '--game' if a.game else '--assets',str((a.game or a.assets).resolve())]
     env=dict(os.environ,PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_PREPARE_REUSE',None)
     # A bad new template must not start work or disturb the selected old cache.
@@ -81,6 +84,7 @@ def main():
                        creationflags=subprocess.CREATE_NO_WINDOW)
     report=json.loads((state.parent/'report.json').read_text())
     assert report['counts']=={'prepared':len(document['records'])}
+    if a.game:assert report['lookup']['volume']['source']=='game-volume'
     if a.expect_hash_backend:
         assert report['hashing']['backend']==a.expect_hash_backend
         assert report['hashing'][a.expect_hash_backend+'_calls']>0
@@ -95,7 +99,7 @@ def main():
         cancellation_preserved_selection=True,source_cache_unchanged=True,counts=report['counts'],
         clean_path=True,seconds=time.monotonic()-started,reuse=report['cache_reuse'],
         shader_work=report['resume'],hashing=report.get('hashing'),
-        preparation_seconds=report['preparation_seconds'],
+        preparation_seconds=report['preparation_seconds'],lookup=report['lookup'],
         native_counts=list(map(int,match.groups()))),indent=2)+'\n')
     print('Frozen generation reuse, cancellation/resume, safe selection and every native pipeline passed')
 
