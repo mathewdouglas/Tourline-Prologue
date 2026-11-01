@@ -360,7 +360,9 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
                   engine=sha(engine.read_bytes()),decoder=sha(decoder.read_bytes()),
                   asset_map=map_id)
     from preparation_checkpoint import Checkpoint
+    from cache_hash import statistics
     started=time.perf_counter()
+    hash_before=statistics()
     with Checkpoint(output,contract,resume,progress=progress) as checkpoint:
         checkpoint.stage('checking-cache')
         checked=time.perf_counter()
@@ -373,11 +375,11 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
             seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
             reused=cached_shaders(document,cache)
         return prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report)
+                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report,hash_before)
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
@@ -484,6 +486,8 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
     # owner consumes it, and real play can learn its own membership indices.
     (cache / 'warmup-v1').mkdir(exist_ok=True)
     report['preparation_seconds'] = time.perf_counter() - started
+    from cache_hash import statistics
+    report['hashing'] = statistics(hash_before)
     save_report(output / 'report.json', report)
     checkpoint.stage('complete',counts=report['counts'])
     return report

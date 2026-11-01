@@ -36,13 +36,21 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 176)
+## Start here: state of play (2026-11-01, Phase 177)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 176 is the latest).
+has the evidence, newest phase first (Phase 177 is the latest).
 
 ### What works now
+
+- **Native offline checksums (Phase 177):** the frozen helper loads a tested
+  repository-authored checksum DLL, with identical Python fallback and
+  `GT5P_PREPARE_NATIVE_HASH=0` rollback. Both modes pass all 2,334 native pipelines,
+  cancellation/resume and source preservation. One local pair measures checksum
+  wall time 1.168 / 61.736 seconds (native/Python); other preparation costs remain.
+  No coverage, renderer/default or stutter claim. Next remove the separate
+  unpacked-asset requirement using the user's existing game files.
 
 - **Incremental preparation updates (Phase 176):** developer `--reuse-cache` and
   optional player reuse read verified shader/driver hints from the previous

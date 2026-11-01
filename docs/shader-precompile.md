@@ -359,6 +359,37 @@ reuse, including exact keys, driver-hint use and unchanged source generations.
 This improves update preparation cost, not first-run coverage or live frame times.
 The starter still contains 2,334 observed-state records, with the same exclusions.
 
+## Native checksum verification (Phase 177)
+
+Development standalone helpers include a small repository-authored `cache_hash.dll`
+to accelerate the existing cache checksum. It uses the exact renderer FNV-64
+algorithm and nonstandard seed; cache formats, IDs and verification requirements
+do not change. The helper loads only its own absolute DLL path, with DLL-directory
+and System32 dependency lookup. ABI 1 and known-vector parity checks gate native
+use. Missing, redirected, incompatible or failed-self-test libraries retain the
+original Python implementation. No compiler is required on the player's PC.
+
+`GT5P_PREPARE_NATIVE_HASH=0` forces the Python path. Source tools remain Python-only
+unless the developer explicitly sets `GT5P_PREPARE_HASH_LIBRARY` to an absolute
+local helper DLL path before starting them. Frozen helpers use their bundled
+location. These controls affect offline integrity verification, not rendering,
+shader translation, native driver creation or draw scheduling. Hashing stays on
+the caller's thread and checks the same bounded inputs. Existing cancellation,
+memory/file limits, cache ownership and native revalidation still apply.
+
+`build_preparer.py` compiles the helper with the maintainer's existing x64 toolchain
+and runs native/Python parity tests before writing the distribution manifest. The
+strict packager verifies and includes the manifest-listed DLL. Only utility code
+is shipped; game-derived bytes remain local. The frozen-tool test checks native
+loading with PATH restricted to System32. Renderer/template contracts and the
+decoder/checkpoint identity remain unchanged because checksum results are identical.
+
+Successful preparation reports a `hashing` object: backend, optional native ABI /
+library SHA-256, call/byte counts, native/Python call counts and checksum wall time
+inside the preparation body. Counts exclude header validation before the body and
+the startup self-test. This separates checksum cost from shader compilation and
+native driver calls; a faster checksum is not evidence of reduced gameplay hitches.
+
 ## Automatic shared vertex preparation (developer only)
 
 Phase 162 adds a capture-free step toward shared-pass preparation. It scans the

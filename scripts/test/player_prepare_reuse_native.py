@@ -26,6 +26,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('helper-dir','zip','previous-cache','elf','assets','output'):
         ap.add_argument('--'+name,type=Path,required=True)
+    ap.add_argument('--expect-hash-backend',choices=('native','python'))
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():ap.error('Use a fresh ignored test output')
     install=out/'Install';storage=out/'Storage'
@@ -80,6 +81,9 @@ def main():
                        creationflags=subprocess.CREATE_NO_WINDOW)
     report=json.loads((state.parent/'report.json').read_text())
     assert report['counts']=={'prepared':len(document['records'])}
+    if a.expect_hash_backend:
+        assert report['hashing']['backend']==a.expect_hash_backend
+        assert report['hashing'][a.expect_hash_backend+'_calls']>0
     assert report['resume']['vertex_programs_compiled']==0 and report['fragment_preparation']['processes']==0
     assert report['cache_reuse']['driver_blobs_copied']==len(document['records'])
     assert hashes(source)==before and pointer.read_text()==(state.parent/'shadercache').relative_to(storage).as_posix()
@@ -90,7 +94,9 @@ def main():
     (out/'validation.json').write_text(json.dumps(dict(template_rejection_preserved_selection=True,
         cancellation_preserved_selection=True,source_cache_unchanged=True,counts=report['counts'],
         clean_path=True,seconds=time.monotonic()-started,reuse=report['cache_reuse'],
-        shader_work=report['resume'],native_counts=list(map(int,match.groups()))),indent=2)+'\n')
+        shader_work=report['resume'],hashing=report.get('hashing'),
+        preparation_seconds=report['preparation_seconds'],
+        native_counts=list(map(int,match.groups()))),indent=2)+'\n')
     print('Frozen generation reuse, cancellation/resume, safe selection and every native pipeline passed')
 
 

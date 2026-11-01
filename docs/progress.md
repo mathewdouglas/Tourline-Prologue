@@ -9,6 +9,38 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 177 - Native offline checksum acceleration (2026-11-01)
+
+The optional standalone helper now builds a small repository-authored native
+checksum DLL. ABI/known-vector self-tests gate it; missing/incompatible libraries
+use the unchanged Python implementation. `GT5P_PREPARE_NATIVE_HASH=0` rolls back.
+Source tools need explicit `GT5P_PREPARE_HASH_LIBRARY` selection. No renderer,
+cache format, shader identifier, native-key contract or draw-policy change.
+
+Eight hash tests pass with the native library, covering the nonstandard renderer
+seed, empty/NUL/unaligned/random buffers, Python buffer semantics, loader selection,
+ABI/self-test rejection, fallback and counter deltas. Existing schema, ownership,
+fragment batching, coverage and packager checks pass; packaging validates/includes
+the manifest-listed DLL. Native hashing also passes real fresh shader compilation,
+growing-template reuse and exact native/persistence checks (`scratch/r177-fresh`).
+
+The same frozen helper passes the full 2,334-record cancellation/resume experiment
+with native hashing enabled and disabled, under System32-only PATH. Both modes
+compile zero shaders, preserve the source generation/selection on rejection or
+cancellation, and validate all 2,334 exact native keys using driver blobs. Both
+measure 30,182 checksums over 802,877,280 bytes. Native checksum wall time is
+1.168 seconds; Python is 61.736 seconds. Preparation-body time is 106.985 versus
+160.074 seconds in this single sequential local pair. Copying, status updates,
+filesystem checks and native creation remain costs. This is not a multi-machine
+benchmark or live stutter evidence; OS/driver caches remain warm and cancellation
+leaves slightly different numbers of already copied shader files in each trial.
+Evidence: `scratch/r177-{native,python}/validation.json`, `scratch/r177-paired.json`
+and `scratch/r177-checksum-benchmark.json`. All caches/binaries remain local.
+
+The user then requested using the installed game dump directly, without a separate
+GTToolsSharp asset extraction. That is the next task; no packed-volume reader is
+claimed in this phase. Keep all pushes on the feature branch with `[skip ci]`.
+
 ## Phase 176 - Verified preparation reuse across catalogue updates (2026-11-01)
 
 The user requested continued shader work without triggering a Tourline build.

@@ -83,6 +83,7 @@ def main():
     run(sys.executable, 'scripts/check_no_game_files.py', '--tracked')
     run(sys.executable, 'scripts/test/release_trigger.py')
     run(sys.executable, 'scripts/test/preparation_reuse.py')
+    run(sys.executable, 'scripts/test/cache_hash.py')
     seed = paths['private_inputs']
     if not (seed/'CI-INPUTS.txt').is_file():
         raise ValueError('Private input directory must contain the CI-INPUTS.txt marker')

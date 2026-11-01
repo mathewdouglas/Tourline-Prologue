@@ -15,6 +15,8 @@ import struct
 import subprocess
 import sys
 
+from cache_hash import fnv64
+
 ROOT = Path(sys._MEIPASS) if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1]
 MAX_FP = 32768
 MAX_CODE = 4 * 1024 * 1024
@@ -64,13 +66,6 @@ def fp_identity(data):
             return dict(identity=hashlib.sha256(normalized).hexdigest(),
                         size=offset, constants=constants, textures=textures)
     raise ValueError('no bounded END instruction')
-
-
-def fnv64(data):
-    value = 1469598103934665603  # Renderer seed (deliberately not standard FNV offset).
-    for byte in data:
-        value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
-    return value
 
 
 def asset_catalog(catalog):
