@@ -85,11 +85,13 @@ def main():
                     help='Optional successful preparation report paired with --prepared; enables bounded draw-key diagnostics')
     ap.add_argument('--condition',choices=('control','prepared'),
                     help='Single-condition diagnostic route; does not establish a paired performance result')
+    ap.add_argument('--warmup-plan',type=Path,
+                    help='Observed phase membership for a private indexed trial; never scans all recipes')
     ap.add_argument('--trials',type=int,choices=(2,4),default=4)
     ap.add_argument('--keep-game-copies',action='store_true',
                     help='Retain disposable game/save copies for debugging (about 4 GiB per trial)')
-    ap.add_argument('--startup-policy',choices=('scan','demand'),default='scan',
-                    help='Scan prepared recipes at startup, or suppress copied membership indices and use files on demand')
+    ap.add_argument('--startup-policy',choices=('scan','demand','indexed','paired-indexed'),default='scan',
+                    help='Scan all recipes, use demand only, replay phase indices, or compare indexed against demand with the same prepared files')
     args = ap.parse_args()
     fixture,engine,prepared,output = (getattr(args,k).resolve() for k in ('fixture','engine','prepared','output'))
     if output.exists() or subprocess.run(['git','check-ignore','-q',str(output/'report.json')],cwd=ROOT).returncode:
@@ -104,12 +106,23 @@ def main():
     if not (prepared/'warmup-v1').is_dir():
         ap.error('--prepared must name the generated shadercache directory')
     coverage_report = args.coverage_report.resolve() if args.coverage_report else None
+    preparation_document = None
     if coverage_report:
         from pipeline_runtime_coverage import parse_report, MAX_REPORT
         if (coverage_report.parent != prepared.parent or not coverage_report.is_file()
                 or coverage_report.stat().st_size > MAX_REPORT):
             ap.error('--coverage-report must be the bounded report.json beside the prepared cache')
-        parse_report(json.loads(coverage_report.read_text(encoding='utf-8-sig')))
+        preparation_document = json.loads(coverage_report.read_text(encoding='utf-8-sig'))
+        parse_report(preparation_document)
+    plan = None
+    if args.warmup_plan:
+        if not preparation_document or args.startup_policy not in ('indexed','paired-indexed'):
+            ap.error('--warmup-plan requires a preparation report and indexed policy')
+        from pipeline_warmup_plan import read, validate_preparation
+        plan = read(args.warmup_plan)
+        validate_preparation(plan, preparation_document)
+    if args.startup_policy == 'paired-indexed' and (plan is None or args.condition):
+        ap.error('paired-indexed requires --warmup-plan and both prepared-cache conditions')
     output.mkdir(parents=True)
     seed_keys = {p.stem[4:] for p in (prepared/'warmup-v1').glob('pso_*.recipe')}
     report = dict(engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
@@ -117,17 +130,21 @@ def main():
                   conditions='1080p/2x MSAA/VSync; async shaders/PSOs; PS3_VERBOSE=0',
                   startup_policy=args.startup_policy,
                   limitations=['Cold application caches, warm uncontrolled OS/driver caches.',
-                               'ABBA order reduces order bias; two runs per condition are not statistical proof.',
+                               'Four trials use ABBA order; two trials are one per condition. Neither is statistical proof.',
                                'Early grid/rolling-start and loading transitions are separate from later racing.',
                                'Scripted navigation is repeatable, but race progress/draw workloads can differ.',
                                'Original offline subset preparation time is outside these live trial timings.'])
     order = (args.condition,) if args.condition else ('control','prepared','prepared','control')[:args.trials]
     if args.condition:report['limitations'].append('Single-condition diagnostic run; no paired performance conclusion.')
-    for number,condition in enumerate(order,1):
+    if args.startup_policy == 'paired-indexed':
+        report['limitations'].append('Fresh processes/private copies of the same prepared disk files; only phase replay differs.')
+    visits = [('prepared', p) for p in ('demand','indexed','indexed','demand')[:args.trials]] if args.startup_policy == 'paired-indexed' else [(c,args.startup_policy) for c in order]
+    for number,(condition,policy) in enumerate(visits,1):
         if b'gt5p.exe' in subprocess.run(['tasklist','/FI','IMAGENAME eq gt5p.exe','/NH'],capture_output=True).stdout.lower():
             raise SystemExit('Another gt5p.exe is running; nothing was stopped')
         require_space(output,fixture,prepared if condition=='prepared' else None)
         tag = f'{number}-{condition}'
+        if args.startup_policy == 'paired-indexed':tag += '-'+policy
         trial = output/tag;game = trial/'game';logs=trial/'logs';game.mkdir(parents=True);logs.mkdir()
         print('Creating isolated trial',tag,flush=True)
         shutil.copytree(fixture/'gamedata',game/'gamedata')
@@ -143,21 +160,26 @@ def main():
         cache = trial/'shadercache'
         if condition == 'prepared':
             shutil.copytree(prepared,cache)
-            if args.startup_policy == 'demand':
+            if policy == 'demand':
                 # Change only this new private trial's copied indices. The seed
                 # cache and all recipe/bytecode/driver files remain untouched.
                 for name in ('menu-v1.txt','race-v1.txt'):
                     (cache/'warmup-v1'/name).write_text('')
         else:
             cache.mkdir()
+        plan_result = None
+        if plan is not None and condition == 'prepared' and policy == 'indexed':
+            from pipeline_warmup_plan import stage
+            plan_result = stage(plan, preparation_document, cache/'warmup-v1',resume=True)
         env = {k:v for k,v in os.environ.items() if not k.startswith(
             ('GT5P_','RSX_','PS3_','PAD_','FP_','VP_','SPU_','PPU_','D3D12_','CULL_'))}
         env.update(PS3_VERBOSE='0',GT5P_GAME_DIR='input/pkg/',
                    PS3_VFS_ROOT=str(game),PS3_GAMEDATA_ROOT=str(game/'gamedata'),
                    RSX_SHADER_CACHE=str(cache),RSX_SHADER_WARMUP='1',
-                   RSX_SHADER_WARMUP_SCAN='1' if args.startup_policy == 'scan' else '0',
+                   RSX_SHADER_WARMUP_SCAN='1' if policy == 'scan' else '0',
                    RSX_SHADER_WARMUP_BACKGROUND='1',RSX_PSO_ASYNC='1',RSX_SHADER_ASYNC='1',
-                   RSX_RACE_PREWARM='0',RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
+                   RSX_RACE_PREWARM='1' if policy == 'indexed' else '0',
+                   RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
         env['RSX_PIPELINE_METRICS'] = '1'
         if coverage_report:env['RSX_PSO_COVERAGE'] = '1'
         cmd = ['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(ROOT/'scripts/test/race.ps1'),
@@ -175,7 +197,8 @@ def main():
                 if proc.poll() is None:
                     subprocess.run(['taskkill','/PID',str(proc.pid),'/T','/F'],capture_output=True)
                     proc.wait(timeout=15)
-        result = dict(tag=tag,condition=condition,**analyze_run(logs,tag,seed_keys))
+        result = dict(tag=tag,condition=condition,warmup_policy=policy,warmup_plan=plan_result,
+                      **analyze_run(logs,tag,seed_keys))
         if coverage_report:
             from pipeline_runtime_coverage import evaluate_files
             result['reference_pipeline_coverage'] = evaluate_files(logs/f'{tag}.err', coverage_report, trial/'coverage')

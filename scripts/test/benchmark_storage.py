@@ -31,6 +31,23 @@ assert not game.exists() and removed==len('disposable')
 assert (target/'keep.txt').read_text()=='source retained'
 assert (trial/'shadercache/keep.txt').is_file() and (trial/'runner.log').is_file()
 
+for mode in ('demand', 'indexed'):
+    labeled=root/('3-prepared-'+mode)
+    (labeled/'game').mkdir(parents=True)
+    (labeled/'logs').mkdir();(labeled/'runner.log').write_text('retained')
+    (labeled/'game/copied.txt').write_text('disposable')
+    assert discard_game_copy(labeled/'game')==len('disposable')
+invalid=root/'4-prepared-arbitrary'
+(invalid/'game').mkdir(parents=True)
+(invalid/'logs').mkdir();(invalid/'runner.log').write_text('retained')
+try:
+    discard_game_copy(invalid/'game')
+except ValueError:
+    pass
+else:
+    raise AssertionError('Unrecognized comparison label allowed cleanup')
+assert (invalid/'game').is_dir()
+
 protected=root/'2-prepared';protected_game=protected/'game'
 (protected_game/'shadercache').mkdir(parents=True)
 (protected/'logs').mkdir();(protected/'runner.log').write_text('retained')

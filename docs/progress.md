@@ -9,6 +9,119 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 193 - Observed phase membership for native warmup (2026-11-02)
+
+The prepared generation had shader bytes, native recipes and driver hints, but
+no menu/race membership. The existing worker therefore had nothing targeted to
+replay before those draws. This change feeds that worker observed membership;
+it does not add another worker, invent phase ownership, or scan all recipes.
+
+`pipeline_warmup_plan.py` exports/merges bounded version-1 metadata. The checked
+developer plan at `config/pipeline-warmup/gt5p-disc-v2.json` intersects genuine
+historical local notifier indices with successful default-stage preparation.
+Of 6,234 distinct menu and 8,192 race entries, 124/1,979 match verified starter
+keys. There are 2,070 distinct targets, with 33 shared by both scopes. Remaining
+keys are excluded. Historical scopes include prepass requests and prior content;
+they are not first-use evidence, a new pipeline-coverage percentage, or a proof
+of narrower track/car ownership. Only hashes/identifiers are tracked.
+
+Developer `pipeline_template.py prepare --warmup-plan <plan>` validates template,
+version, default translation and key membership before lookup. The canonical
+plan digest joins the checkpoint contract. It stages menu/race indices only
+after every requested pipeline and its persistence validate. Resume accepts
+identical membership, finishes partial metadata publication with unique temporary
+files, and preserves/rejects changed learned indices. Changed plans cannot resume
+the same generation. Omitting the option leaves the default contract and path
+unchanged. Source cache indices and the preparation reference report retain
+their recorded hashes. There is no launcher pointer, helper, player-default,
+main/tag or release change.
+
+The full packed-game native proof succeeds in a fresh application cache using
+verified hints: all 1,143 programs located, all 2,892 records prepared and native
+keys matched, 351 vertex variants and all fragment jobs reused, zero vertex
+compiles. All 2,892 native batch requests create pipelines; 2,755 calls supplied
+cached driver blobs. Lookup hashes 2,052,954,112 archive bytes in 8.84 s; native
+batch time is 66.25 s and total preparation 181.34 s. These are one reused-cache
+preparation, not a measured speedup. Both phase lists publish after validation.
+An initial plan preflight compared the report's template digest with the compact
+checkpoint identity; rejection occurred before output creation. It now uses
+the established `template_digest()` report identity.
+
+Synthetic export, key filtering, bounds/version/template rejection, merge,
+partial publication, actual checkpoint contract mismatch, resume, unsupported
+translation and default rollback checks pass. Existing template/translation
+checks pass. The production queue extracted into the offscreen D3D12 WARP test
+passes demand priority, coalescing, owned bytecode/semantics, loading timeout,
+resident/source caps, startup-to-race transition and concurrent shutdown checks.
+The ordinary async draw and queue/shutdown implementation is unchanged. These
+native tests use synthetic shaders and do not establish live stutter reduction.
+
+The benchmark adds explicit indexed and paired-indexed modes. The paired mode
+uses the same prepared cache files for both demand-only and indexed conditions;
+four trials use demand/indexed/indexed/demand. Only private copied indices differ.
+Normal source/cache bytes remain untouched, and the existing worker validates
+recipe/code/root-signature/native state. Cleanup now recognizes the exact new
+trial labels while preserving cache and junction-target guards; its tests pass.
+
+Two initial route collections missed menu navigation at about 4 FPS. The visible
+owned window was not foreground; Windows refused the harness's activation call.
+The previously measured engine reproduced the slowdown. The user offered to
+bring the test window forward for the paired retry. These failed collections
+provide no performance/coverage result. Their disposable game copies were
+guardedly removed (8,389,650,628 bytes); every log, cache and fixture remains.
+The user then brought the test forward and a same-cache HSR 1080p/2x pair
+completed. Both conditions start a fresh process/private copy of the same
+prepared disk files; these are not empty disk shader caches. Async draw policy
+is the same, and OS/driver caches remain warm and uncontrolled.
+
+| Measurement | Prepared files, demand only | Prepared files, indexed warming |
+| --- | ---: | ---: |
+| Demand jobs queued/completed | 2,336/2,336 | 169/169 |
+| Total driver calls / calls supplied cached hints | 2,336/2,331 | 2,239/2,232 |
+| Runtime shader compiles, last sample | 6 | 12 |
+| Grid arrival from launch, seconds | 66.77 | 65.73 |
+| Early 45-second p99, ms | 192.2 | 162.1 |
+| Early intervals >50 ms / >250 ms | 83 / 13 | 66 / 8 |
+| Later 45-second p99, ms | 20.8 | 21.8 |
+| Later intervals >50 ms | 5 | 5 |
+| Sampled peak private bytes, MiB | 3,302.7 | 3,416.9 |
+
+Indexed warming reports 124 menu and 1,979 race-ready entries, 2,070 distinct
+held native objects. Startup finishes in 36.19 s; the subsequent race gate
+reuses its full list in 0 ms. Loaded/hit totals include bookkeeping and shared
+entries: 2,103 loads and 3,807 warm hits are not distinct draw hits or GPU
+residency. The structural benefit is fewer demand jobs, not the elimination of
+driver creation: most driver work moved earlier. Early frame times improve in
+this pair, while later p99 and >50 ms counts do not. Both still have >1.3 s
+maximum intervals. Memory rises about 114 MiB. A single ordered pair with
+different complete draw-key sets is not a consistent stutter-win claim.
+
+The coverage join remains valid: demand matches 1,036/1,040 complete keys and
+indexed matches 1,038/1,045. Shader-pending submissions (60/90) are excluded.
+Additional draws/misses and the different shader-compile totals show the
+workloads are not identical. The original three misses occur in both trials;
+the indexed trial has four additional misses. No template record is added.
+
+Both inspected routes are HSR. The early demand screenshot is overexposed;
+the indexed 20-second screenshot shows normal track/sky/car/mirror rendering,
+and its later 60-second image retains track, scenery, HUD and mirror. This is
+limited visual evidence, not full rendering acceptance. Both disposable game
+copies are removed by the guarded cleanup, with every cache/log/shot retained.
+Keep the developer plan explicit pending repeat routes, translation/settings
+coverage and player integration.
+
+The user reports a hitch when cars in the rear-view mirror cross from distant
+nonreflective LODs to nearer reflective LODs, in both test windows and their own
+sessions. That is a reported hotspot, not an established compilation diagnosis.
+Next correlate remaining first-use pipeline/shader work with the transition and
+check repeated model/texture/upload work; do not assume prewarming alone fixes it.
+
+Evidence: `scratch/loading-warmup-193/local-plan/`, `prepared-with-phases/report.json`,
+`prepared-with-phases/native.log`, `prepared-with-phases/preparation-state.json`,
+`preparation.log`, `cleanup.json`, isolated `build/`, both failed collection logs
+and the paired trial directory. Focused tests keep small synthetic fixtures in
+`scratch/warmup-plan-test-*` and `scratch/benchmark-storage-*`.
+
 ## Phase 192 - Runtime pipeline-key coverage measurement (2026-11-02)
 
 The user selected `GT5P` as the working checkout. Local continuation branch

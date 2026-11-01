@@ -37,6 +37,10 @@ The remaining work is:
    Phase 192 measures 99.7% prepared-key coverage on one HSR route; native
    first-use readiness, early rendering transients and consistent stutter
    reduction remain open.
+   Phase 193 feeds observed phase membership to the existing worker: one
+   same-cache HSR pair reduces demand jobs from 2,336 to 169, with a smaller
+   early p99 improvement and no later p99 improvement. Keep it experimental;
+   repeat acceptance and the reported mirror reflection/LOD hitch remain open.
 2. **Broaden representative coverage.** Add useful missing tracks, cars,
    dealerships, menus, cameras and effects. Rank observed misses/shared programs
    so collection targets gaps rather than every car-track combination. The starter
@@ -70,6 +74,81 @@ settings, followed by the observed misses and costs it identifies. Stable featur
 should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
+
+### Observed phase plans for native warmup (Phase 193, developer experiment)
+
+Prepared files alone do not make a live D3D12 pipeline object available. The
+existing worker can replay known menu/race recipes, but the portable starter
+previously supplied no phase membership. Do not turn that absence into a blanket
+scan or guess pass ownership from a shader name.
+
+`config/pipeline-warmup/gt5p-disc-v2.json` contains observed numeric membership
+intersected with successful default-stage preparation: 124 menu keys and 1,979
+race keys, 2,070 distinct keys with 33 shared. The source is the local runtime's
+historical notifier indices, including prepass requests across prior play.
+These are warmup targets, not a new live-coverage percentage or a first-use claim.
+Unknown/unprepared keys were excluded. No game bytes, shaders or driver blobs
+are included, and the existing template records are unchanged.
+
+Developer preparation accepts `--warmup-plan <plan.json>` after the usual
+`pipeline_template.py prepare` arguments. The plan pins the exact template
+digest, supports default translation only, and becomes part of the checkpoint
+contract. Only complete successful native preparation can publish its two
+membership files. Resume accepts identical files and can finish partial metadata
+publication; different learned membership is preserved and rejected. A changed
+plan requires a new generation. No active cache pointer or player default changes.
+
+The existing worker owns loading-time native creation, demand priority,
+deduplication, count/source budgets and shutdown. Its independent recipe,
+bytecode and root-signature/native-key checks still apply. No new worker,
+draw wait or synchronous draw policy is introduced. Normal async demand remains
+the fallback for missing/incompatible entries. Resident-table references do not
+prove GPU residency. The existing resident cap and loading-gate budget still apply.
+
+```powershell
+python scripts/pipeline_warmup_plan.py export-local `
+  --cache <genuine-runtime-learned-cache> --report <successful-preparation-report> `
+  --output scratch/observed-phase-plan
+python scripts/pipeline_warmup_plan.py merge `
+  --plan <plan-a.json> --plan <plan-b.json> --output scratch/merged-phase-plan
+# Append to the normal prepare command, using a fresh output:
+# --warmup-plan config/pipeline-warmup/gt5p-disc-v2.json
+python scripts/test/shader_stutter.py `
+  --fixture <private-fixture> --engine <isolated-engine> `
+  --prepared <generation/shadercache> --coverage-report <generation/report.json> `
+  --warmup-plan config/pipeline-warmup/gt5p-disc-v2.json `
+  --startup-policy paired-indexed --trials 2 --output scratch/phase-warmup-pair
+```
+
+The paired mode compares the same prepared files with demand-only versus indexed
+warming; four trials use demand/indexed/indexed/demand order. Copies, saves,
+indices and logs are private. Only the indexed condition stages the plan and
+enables existing race warming. `export` can also use a completed, unseeded
+`--startup-policy indexed` benchmark session; seeded sessions cannot manufacture
+new observation evidence. Local-index export does not imply a completed route.
+Inputs and plan sizes/counts are bounded, versions/templates must agree, and
+merging cannot silently convert translation modes or add unresolved keys.
+
+Rollback: omit `--warmup-plan` when preparing a fresh generation. For an existing
+phase-enabled generation, `RSX_SHADER_WARMUP=0 RSX_RACE_PREWARM=0` disables its
+startup/loading replay while retaining ordinary async demand and all cache files.
+Do not delete shadercache. The development helper/launcher and released player
+do not automatically select this plan. Broader translation mapping, packaged
+player integration and promotion depend on live acceptance.
+
+Two initial live collection routes missed menu navigation at approximately
+4 FPS with the window in the background. Windows refused the harness's foreground
+request, and the earlier measured engine reproduced the issue. Those failures
+provide no stutter comparison. A subsequent foreground-controlled HSR pair
+completes: demand jobs fall 2,336 to 169, early p99 192.2 to 162.1 ms, later p99
+20.8 to 21.8 ms, and sampled private memory rises about 114 MiB. Grid arrival is
+66.77/65.73 s. Indexed startup holds 2,070 native objects before the race gate;
+this is not GPU residency. Most driver creation moves earlier rather than
+disappearing. Runtime shader compiles are 6/12, and complete draw sets differ.
+Inspected indexed images render normally; the early demand shot is overexposed.
+One pair does not justify a player default or a general stutter claim. The user
+reports the mirror reflection/LOD hitch in both modes; its cause remains open.
+See Phase 193 for evidence, limitations and the next diagnosis.
 
 ### Measuring requested native keys (Phase 192)
 

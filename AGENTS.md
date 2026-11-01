@@ -36,13 +36,29 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 192)
+## Start here: state of play (2026-11-02, Phase 193)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 192 is the latest).
+has the evidence, newest phase first (Phase 193 is the latest).
 
 ### What works now
+
+- **Observed phase warmup plans (Phase 193):** developer `--warmup-plan`
+  publishes verified menu/race membership after native preparation, using the
+  existing priority/ownership/loading worker. The versioned metadata contains
+  124 menu and 1,979 race targets (2,070 distinct), filtered from real historical
+  notifier indices against successful starter keys. Unknown keys are excluded;
+  no new shaders/state or phase ownership is guessed. Default translation only;
+  the plan is pinned by resume and remains explicit. Full isolated preparation
+  passes all 2,892 starter records and publishes both lists; synthetic checkpoint,
+  rejection, merge, partial publication and rollback checks pass, alongside the
+  native WARP queue/gate/ownership regressions. One foreground HSR same-cache
+  pair reduces demand jobs 2,336->169; early p99 192.2->162.1 ms, later p99
+  20.8->21.8 ms, private memory about +114 MiB. This moves driver work earlier,
+  not all stutter away. Mirror reflection/LOD hitch diagnosis and repeated
+  acceptance remain open; helper/defaults/main/release stay unchanged.
+  Push development only with `[skip ci]`.
 
 - **Runtime coverage measurement (Phase 192):** development diagnostic
   `RSX_PSO_COVERAGE=1` records bounded distinct complete guest pipeline keys;
