@@ -119,8 +119,9 @@ the public [GTToolsSharp readers](https://github.com/Nenkai/GTToolsSharp); origi
 local volume bytes and existing container/program hashes are the acceptance oracles.
 
 Only requested containers are decoded, in archive order, with 128 KiB input/output
-chunks, a 1 GiB per-member / 4 GiB volume-member decode limit, a 128 MiB program-data limit
-and a 600-second deadline checked between chunks. Maps are capped at 1 MiB and
+chunks, a 1 GiB per-member limit, a 4 GiB sum of decoded volume-member sizes,
+a 128 MiB program-data limit and a 600-second deadline checked between chunks.
+Maps are capped at 1 MiB and
 1,024 members, reject overlaps/unknown fields and validate every byte range.
 All archive reads are read only. Cancellation is checked between hashing/decode
 chunks; status writes are throttled while cancellation checks remain immediate.

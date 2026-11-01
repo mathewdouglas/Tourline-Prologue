@@ -31,8 +31,9 @@ The complete ELF/volume must match SHA-256. Only requested members are decoded,
 in archive order; each complete decoded container must match SHA-256 before its
 selected program slices are accepted. Existing program identities, shader
 bytecode, exact native keys and driver persistence checks remain authoritative.
-Bounds are 128 KiB input/output chunks, 1 GiB per member, 4 GiB volume-member decode,
-128 MiB retained program data, 1 MiB/1,024-member maps and a 600-second deadline
+Bounds are 128 KiB input/output chunks, 1 GiB per member, a 4 GiB sum of decoded
+volume-member sizes, 128 MiB retained program data, 1 MiB/1,024-member maps and a
+600-second deadline
 checked between chunks. Overlaps/unknown fields/ranges and changed input files
 are rejected. No extracted member is written to disk. The volume map joins the
 checkpoint identity. Renderer settings/root signatures and asynchronous draw
@@ -49,7 +50,8 @@ reader tests cover raw/compressed members, chunk/offset parity, malformed maps,
 corruption, truncation, decompression overflow/trailing data and cancellation.
 Legacy asset lookup and strict package checks pass. The rebuilt launcher passes
 owned-process tests including configured-game forwarding without another folder
-picker, legacy cancellation, duplicate starts and job shutdown. A local package
+picker (including an unset rollback switch), legacy cancellation, duplicate
+starts and job shutdown. A local package
 contains the manifest-verified volume DLL/map with an explicit allowlist and no
 game data (`scratch/v178-player-candidate.zip`, 202 files); it is not published.
 

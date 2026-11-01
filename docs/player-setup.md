@@ -16,9 +16,9 @@ installation. The already published v0.2 package still uses its earlier unpacked
 asset selection; this source change needs a future package. See [v0.2 notes](release-v0.2.md).
 
 Direct preparation supports the verified BCUS98158 v03.00 volume. It verifies
-the original volume and game executable, derives its read parameters from that
-executable, and streams only the required containers in memory. Game files stay
-read only. Parameters/keys and decoded assets are not distributed. The existing
+the complete original volume and game executable, derives its read parameters
+from that executable, then decodes only the required containers in memory.
+Game files stay read only. Parameters/keys and decoded assets are not distributed. The existing
 `--prepare-assets <folder>` option, or `GT5P_PREPARE_VOLUME=0`, selects the legacy
 unpacked-asset flow if needed; unknown volumes fail safely rather than guessing.
 

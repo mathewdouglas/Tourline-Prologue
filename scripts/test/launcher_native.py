@@ -147,7 +147,9 @@ def main():
         ui.EnumWindows.argtypes=[callback,ctypes.c_void_p]
         ui.GetWindowTextW.argtypes=[ctypes.c_void_p,ctypes.c_wchar_p,ctypes.c_int]
         ui.PostMessageW.argtypes=[ctypes.c_void_p,ctypes.c_uint,ctypes.c_size_t,ctypes.c_ssize_t]
-        packed_owner=subprocess.Popen([launcher,'--prepare'],env=dict(env,GT5P_PROBE_DELAY_MS='300',GT5P_PREPARE_VOLUME='1'))
+        packed_env=dict(env,GT5P_PROBE_DELAY_MS='300')
+        packed_env.pop('GT5P_PREPARE_VOLUME',None)
+        packed_owner=subprocess.Popen([launcher,'--prepare'],env=packed_env)
         packed_titles=set()
         @callback
         def packed_dialog(hwnd,unused):
