@@ -36,13 +36,19 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 181)
+## Start here: state of play (2026-11-01, Phase 182)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 181 is the latest).
+has the evidence, newest phase first (Phase 182 is the latest).
 
 ### What works now
+
+- **v0.2.1 candidate (Phase 182):** preparation window and legacy fallback use
+  the requested title `Tourline Prologue`. VERSION and authored update notes are
+  0.2.1. Sequential launcher/UI/package/trigger/volume/reuse checks pass. The user
+  explicitly authorized promotion to main, a v0.2.1 tag and one release build;
+  feature pushes still use `[skip ci]`. Publication evidence follows in progress.
 
 - **Preparation window (Phase 181):** optional preparation now has a native
   PC Settings-style window with real per-step status/counts, accessible controls

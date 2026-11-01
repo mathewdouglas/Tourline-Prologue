@@ -13,9 +13,9 @@ player integration; retained-route coverage is not whole-game coverage.
 v0.2 added an optional standalone player entry point. See
 [player setup](player-setup.md#optional-shader-preparation-in-v02) and
 [release notes](release-v0.2.md). It uses a complete hash/offset map for this
-starter, rather than requiring a developer SHDS catalogue. Development Phase 178
-reads the user's original packed GT.VOL directly, using the configured game folder;
-the published v0.2 package retains its earlier unpacked-asset selection.
+starter, rather than requiring a developer SHDS catalogue. v0.2.1 includes Phase 178
+reading the user's original packed GT.VOL directly, using the configured game folder;
+the older v0.2 package retains its earlier unpacked-asset selection.
 Broader coverage, settings/GPU validation
 and a consistent live stutter benefit remain separate requirements.
 
@@ -83,7 +83,7 @@ status at most every 100 ms. Cancellation writes the same existing request file
 and waits for helper exit. No worker queue, shader lookup, cache selection,
 generation/resume contract, compiler policy or runtime draw behavior changes.
 Preparation remains optional. No coverage or performance gain follows from UI
-work, and published v0.2 is unchanged.
+work. v0.2.1 uses the title **Tourline Prologue** for both preparation dialogs.
 
 Sequential developer checks: build the launcher with
 `scripts/release/build_launcher.cmd <output>`, then run

@@ -20,7 +20,7 @@ Optional experimental shader preparation:
 After setup, close the game and run Prepare shaders.cmd. Preparation reads the
 game folder already selected for play. No separate GT.VOL extraction, second
 asset copy, Python or compiler install is needed. Your game files stay in place.
-Known menu/High Speed Ring/Daytona shaders and pipelines are reconstructed
+Known menu/High Speed Ring/Daytona/Fuji Speedway F shaders and pipelines are reconstructed
 on your PC. This can take several minutes and uses additional local cache space.
 Cancel keeps completed work; run the same option again to resume. Successful
 preparation is selected on later launches. Normal launching remains available
@@ -28,6 +28,7 @@ without preparation. Whole-game coverage and consistent stutter reduction have
 not been established; other draws/settings still compile on demand.
 Run tourline-prologue.exe --no-prepared to use the ordinary cache without deleting either cache.
 For the legacy unpacked-asset path, use tourline-prologue.exe --prepare-assets <folder>.
+Set GT5P_PREPARE_UI=0 to restore the Windows preparation dialog if needed.
 
 Settings, saves, shaders and logs are in your selected storage folder.
 The default is %LOCALAPPDATA%\GT5PRecomp.

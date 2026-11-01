@@ -247,7 +247,7 @@ static DWORD run(const fs::path& exe, const std::wstring& args, const fs::path& 
             PrepareDialog state{process.h};
             TASKDIALOGCONFIG td{};td.cbSize=sizeof td;
             td.dwFlags=(TASKDIALOG_FLAGS)(TDF_CALLBACK_TIMER|TDF_SHOW_MARQUEE_PROGRESS_BAR|TDF_ALLOW_DIALOG_CANCELLATION);
-            td.pszWindowTitle=L"Project Tourline Prologue - experimental shader preparation";
+            td.pszWindowTitle=L"Tourline Prologue";
             td.pszMainInstruction=L"Preparing known shaders and pipelines";
             td.pszContent=L"Verifying your game and preparation inputs...";
             td.dwCommonButtons=TDCBF_CANCEL_BUTTON|TDCBF_OK_BUTTON;

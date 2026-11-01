@@ -1,19 +1,19 @@
 # Player ZIP and first-run setup
 
-The next port release candidate is **v0.2**, recorded in the root `VERSION` file. Player ZIPs
-include `port_version=0.2` in `release.ini`; its separate `version=03.00` field
+The current port version is **v0.2.1**, recorded in the root `VERSION` file. Player ZIPs
+include `port_version=0.2.1` in `release.ini`; its separate `version=03.00` field
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
-not the port release version. CI names ZIPs `tourline-prologue-v0.2-windows-x64-<commit>.zip`.
+not the port release version. CI names ZIPs `tourline-prologue-v0.2.1-windows-x64-<commit>.zip`.
 
 ## Optional shader preparation in v0.2
 
 Complete ordinary setup, close the game, then run **Prepare shaders.cmd**
-(`tourline-prologue.exe --prepare`). Development builds from Phase 178 read the
+(`tourline-prologue.exe --prepare`). v0.2.1 includes the Phase 178 path reading the
 original `USRDIR/GT.VOL` from the game folder already configured for play. No
 additional volume extraction, unpacker installation or second asset copy is
 needed. The helper is self-contained and requires no player Python/compiler
-installation. The already published v0.2 package still uses its earlier unpacked
-asset selection; this source change needs a future package. See [v0.2 notes](release-v0.2.md).
+installation. The older v0.2 package uses its earlier unpacked asset selection.
+See [v0.2.1 notes](release-v0.2.1.md).
 
 Direct preparation supports the verified BCUS98158 v03.00 volume. It verifies
 the complete original volume and game executable, derives its read parameters
@@ -22,12 +22,12 @@ Game files stay read only. Parameters/keys and decoded assets are not distribute
 `--prepare-assets <folder>` option, or `GT5P_PREPARE_VOLUME=0`, selects the legacy
 unpacked-asset flow if needed; unknown volumes fail safely rather than guessing.
 
-Development Phase 181 shows preparation in a standalone window styled after the
+v0.2.1 includes the Phase 181 standalone preparation window styled after the
 in-game PC Settings menu. It displays the helper's current phase and real counts
 for that step; uncounted steps use an animated bar. Counts are not overall progress
 or an estimated completion time. `GT5P_PREPARE_UI=0` restores the Windows TaskDialog;
-failure to create the new window also falls back to that dialog. This development
-change does not update the published v0.2 download or enable preparation by default.
+failure to create the new window also falls back to that dialog. Its window
+title is **Tourline Prologue**. Preparation stays optional.
 
 Cancel, Escape or closing the window requests cancellation and keeps the window
 open until its owned helper exits. Repeat the preparation option to resume
@@ -39,11 +39,11 @@ atomically selects `prepared-cache.txt`, a storage-relative pointer to
 `preparation/<generation>/shadercache`. Existing ordinary and older generation
 caches remain intact. Storage relocation preserves this relative selection.
 
-Development preparation after v0.2 can reuse verified shaders and driver-cache
+v0.2.1 preparation can reuse verified shaders and driver-cache
 hints from the previously selected generation when metadata or engine identity
 changes. It still verifies original assets and creates/checks every native
-pipeline. `GT5P_PREPARE_REUSE=0` disables this optimization. This development
-change does not alter the already published v0.2 package. See
+pipeline. `GT5P_PREPARE_REUSE=0` disables this optimization. Reuse leaves older
+cache generations intact. See
 [incremental preparation](shader-precompile.md#incremental-preparation-across-template-updates-phase-176).
 
 The next launch uses that cache, retaining demand compilation for missing keys.

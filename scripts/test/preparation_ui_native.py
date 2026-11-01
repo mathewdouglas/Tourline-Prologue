@@ -132,6 +132,7 @@ def main():
                     ui.EnumWindows(find, 0)
                     return windows[0] if windows else None
                 hwnd = until(owned_window)
+                assert text(hwnd) == 'Tourline Prologue'
                 control = lambda ident: ui.GetDlgItem(hwnd, ident)
                 until(lambda: text(control(102)) == 'Vertex')
                 assert text(control(106)) == '180 / 2,892 for this step'

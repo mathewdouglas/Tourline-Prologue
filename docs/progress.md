@@ -9,6 +9,37 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 182 - Tourline Prologue title and v0.2.1 release candidate (2026-11-01)
+
+The user requested the preparation window title **Tourline Prologue** and a
+v0.2.1 release containing the accumulated changes. Both the custom window and
+its TaskDialog rollback now use that exact caption. The native UI regression
+asserts it. The game title and executable names are unchanged. VERSION is
+0.2.1, with authored `docs/release-v0.2.1.md`, updated player instructions and
+the existing metadata-only 2,892-record starter.
+
+The release includes Phases 176-181: verified incremental cache reuse, native
+checksums, direct packed game lookup and bounded-deflate fixes, Fuji candidates
+and the PC Settings-style preparation UI. Preparation remains optional; no
+renderer/asynchronous draw policy change, complete-coverage or new stutter claim.
+Existing cache generations and source game files remain intact.
+
+Local preflight runs sequentially: warning-free launcher/UI stand-in builds,
+both custom and legacy launcher integration suites, focused UI checks including
+the exact title, packaging exclusions/digests, three release-trigger tests,
+nine native packed-reader tests and nine cache-reuse tests. Evidence is under
+`scratch/release-v021/{launcher-build,ui-build,launcher-native,launcher-legacy,
+ui-native,package,trigger,volume,reuse}.log` and `screenshots/` (synthetic status).
+No game was launched. Prior real shader/native/visual evidence remains Phase 180;
+this UI/version delta does not repeat or expand its performance claims.
+
+The user's request explicitly authorizes main/tag/release promotion and a
+dedicated release build, superseding the earlier feature-only/no-build rule for
+this release. Development pushes retain `[skip ci]`; the versioned workflow is
+dispatched once after a fast-forward main promotion and tag validation. It uses
+the dedicated runner/private caches, strict packaging and authored release notes.
+Publication is recorded after the build rather than presumed by this preflight.
+
 ## Phase 181 - PC Settings-style preparation window (2026-11-01)
 
 The user requested one Grok agent to implement a preparation window resembling

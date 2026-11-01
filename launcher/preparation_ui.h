@@ -299,7 +299,7 @@ struct State {
 constexpr DWORD kStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
 constexpr DWORD kExStyle = WS_EX_APPWINDOW;
 constexpr wchar_t kClass[] = L"TourlinePrepareProgress";
-constexpr wchar_t kCaption[] = L"Project Tourline Prologue - experimental shader preparation";
+constexpr wchar_t kCaption[] = L"Tourline Prologue";
 constexpr wchar_t kHeading[] = L"Preparing known shaders and pipelines";
 constexpr wchar_t kHelp[] =
     L"Preparing known shaders and pipelines from your game files. "
