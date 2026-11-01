@@ -36,13 +36,27 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 186)
+## Start here: state of play (2026-11-02, Phase 187)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 186 is the latest).
+has the evidence, newest phase first (Phase 187 is the latest).
 
 ### What works now
+
+- **Automatic translation selection (Phase 187):** development helper opt-in
+  `GT5P_PREPARE_TRANSLATION=auto` selects existing ultrawide/native-scaled modes
+  from canonical saved launcher resolution/aspect settings. Unset/default restores
+  default-only preparation; explicit modes remain available. Bounded read-only
+  snapshots, conservative unsupported-setting/override fallback and a pre-publication
+  settings-change check preserve existing cache selection. Nine synthetic and
+  24 production C++ parser cases pass; both frozen 32-record automatic paths pass
+  cancellation/resume, cached reuse and rollback. Native-scaled also rejects a
+  settings change during preparation. A full packed-game fresh-cache automatic
+  native-scaled run passes all 2,892 default and 2,892 scaled records, adding
+  2,810 distinct native keys (82 overlap); no additional vertex workers start.
+  Numeric template/MSAA/pass state stays
+  observed; no live stutter or complete settings coverage claim. Release unchanged.
 
 - **First-run offer and settings restart (Phase 186):** development launchers
   offer optional preparation after successful setup, before play. Skip/close,

@@ -22,7 +22,7 @@ from preparation_checkpoint import preflight_tree
 from shader_coverage import ROOT
 from pipeline_asset_map import read as read_map
 from preparation_reuse import cache_root, regular_read
-from pipeline_translation import player_mode as translation_mode
+from preparation_settings import select as select_settings, verify as verify_settings
 
 
 def safe_storage(storage):
@@ -58,8 +58,9 @@ def main():
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
     a=ap.parse_args()
-    translation=translation_mode(os.environ)
     storage=safe_storage(a.storage)
+    selection=select_settings(storage)
+    translation=selection['mode']
     install=a.install.resolve()
     def idle_for_player():
         # Verify the optional visible launcher owner. Exclude only our actual
@@ -144,6 +145,9 @@ def main():
         vertex_mode=shader_vertex_batch.player_mode(),translation=translation)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
+    verify_settings(selection,storage)
+    report['player_settings']=selection
+    template.save_report(out/'report.json',report)
     # Switch only after successful shader/native/persistence validation. Existing
     # caches remain intact; game demand can add missing/settings-specific entries.
     pointer=storage/'prepared-cache.txt';pending=pointer.with_suffix('.tmp')

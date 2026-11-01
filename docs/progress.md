@@ -9,6 +9,74 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 187 - Automatic translation selection from launcher settings (2026-11-02)
+
+The development player helper now accepts opt-in
+`GT5P_PREPARE_TRANSLATION=auto`. It selects the existing `ultrawide-native` mode
+for canonical saved 21:9, `native-scaled` for 16:9 native 1440p/4K, and default
+for 720p/1080p. No file means the launcher's first-run 720p/16:9 preset. Unset or
+explicit `default` remains the old default-only path; explicit additional modes
+remain independent of settings lookup. No player default or published binary
+changes. The generic developer template CLI continues to require an explicit
+mode, since it has no launcher storage/settings ownership contract.
+
+`preparation_settings.py` reads at most 64 KiB from one regular unlinked storage
+file, hashes the snapshot and reports the request/resolution/reason in
+`player_settings`. It never writes the settings. Unsafe/unreadable files,
+unsupported types/values, non-ASCII storage paths, non-default anisotropy/export
+precision and listed custom translation/root-signature overrides select only the
+ordinary default preparation with a reason. This deliberately avoids reimplementing
+arbitrary environment parsing. Existing template numeric state, including MSAA,
+attachments and pass state, remains observed; this is translation selection,
+not validation of complete coverage for the player's settings.
+
+A final snapshot check before report/pointer publication refuses changed
+settings. Completed cache files remain available for another run and the previous
+selection is preserved. Sidecar identity still pins the actual explicit mode;
+settings changes do not relabel shader bytes or invalidate older cache files.
+Worker/queue/process ownership, cancellation and live asynchronous draws are
+unchanged. No game data, source or cache contents are distributed.
+
+Nine synthetic selection/read-bound/type/override/hard-link/snapshot tests pass.
+A standalone probe links the actual production settings and key-map parsers;
+its unused input/glyph application hooks abort if called. Twenty-four canonical
+settings cases match, including numeric/string resolution, both aspect ratios,
+UTF-8 BOM and non-ASCII comment content. An initial non-ASCII storage-path probe
+exposed existing narrow environment-path conversion in that parser; automatic
+selection now excludes such paths rather than claiming parity. This does not fix
+the broader Unicode-path issue. Evidence:
+`scratch/settings-auto-187/{parser-validation.json,build-final2.log}`.
+
+The rebuilt frozen helper passes native checksum and packed-reader checks, then
+sequential fresh 32-record automatic ultrawide and native-scaled paths with a
+System32-only PATH. Both pass real vertex cancellation/resume, selected-mode
+shader/native creation, zero-worker cached reuse, serial rollback, invalid-mode
+rejection and prior-cache preservation. The native-scaled run also edits the
+settings during a cached pass: it rejects publication with the expected error,
+keeps the selected pointer and preserves original settings after test cleanup.
+Evidence: `scratch/settings-auto-187/{frozen32-uw,frozen32-rs}/validation.json` and
+`frozen32-rs/settings-changed.log`. Tests remain sequential, original assets and
+the other checkout remain read-only.
+
+The full automatic native-scaled path now passes all 2,892 default and all 2,892
+scaled records from the user's original packed GT.VOL/ELF in an empty application
+cache, with exact shader/key/native/persistence checks. There are 2,810 additional
+native keys and 82 overlapping default keys. The extra stage starts zero vertex
+compiler workers, using default vertex code; it has 2,312 unique fragment requests
+and 2,260 actual new fragment compiles. All 2,892 native driver calls succeed;
+82 use the default-stage cached blobs. Total default-plus-scaled wall time is
+654.22 seconds on one GPU with warm OS/driver caches. This is a single preparation
+proof, not a comparison or live-stutter measurement. The saved settings stay byte
+identical and the selected report identifies automatic native-scaled resolution
+1440p/16:9 with the matching settings digest. Evidence:
+`scratch/settings-auto-187/full-scaled/{validation.json,summary.json,prepare.log}`.
+
+Final selection/template/checkpoint/package/release-trigger regression suites
+pass sequentially. The shipped template and live renderer are unchanged. Feature
+commits use `[skip ci]`; no workflow build, main merge, tag or release is requested.
+Remaining work includes broader numeric-state coverage, custom-setting/Unicode
+support and live residency/stutter validation; no whole-game claim follows.
+
 ## Phase 186 - First-run preparation choice and managed settings restart (2026-11-01)
 
 At the user's request, successful first-run file setup now offers **Prepare now**

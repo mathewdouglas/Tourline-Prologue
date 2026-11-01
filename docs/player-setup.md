@@ -68,6 +68,14 @@ Development helpers also offer explicit additional translation preparation:
 Unset or `default` keeps default-only preparation. These modes do not infer your
 settings or generate every MSAA/pass combination. They are absent from published
 v0.2.1. See [translation modes](shader-precompile.md#additional-local-translation-modes).
+Development `GT5P_PREPARE_TRANSLATION=auto` instead chooses from saved launcher
+settings: 21:9 adds ultrawide variants, while 16:9 native 1440p/4K adds scaled
+fragment variants. Supported file values are checked against the production
+settings parser. Unsupported overrides/settings fall back to default preparation
+with a reason in the report. Settings changed during a pass prevent publishing
+its selection. Unset or `default` restores default-only preparation. This is
+translation selection, not complete MSAA/pass coverage; see
+[automatic selection](shader-precompile.md#automatic-selection-from-launcher-settings-development-phase-187).
 `GT5P_PREPARE_REUSE_HANDOFF=0` rolls back the development optimization that avoids
 rereading shaders just verified/copied during an incremental update.
 

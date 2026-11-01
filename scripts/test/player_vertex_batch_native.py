@@ -23,7 +23,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('zip', 'helper-dir', 'template', 'elf', 'assets', 'output'):
         ap.add_argument('--'+name, type=Path, required=True)
-    ap.add_argument('--translation', choices=('default', 'native-scaled', 'ultrawide-native'), default='default')
+    ap.add_argument('--translation', choices=('default', 'native-scaled', 'ultrawide-native', 'auto'), default='default')
+    ap.add_argument('--auto-aspect', choices=('16:9','21:9'), default='21:9')
     a = ap.parse_args()
     idle()
     out = isolated(a.output)
@@ -43,6 +44,10 @@ def main():
     shutil.copyfile(original/'player-map.json', target/'player-map.json')
     (storage/'input').mkdir(parents=True)
     shutil.copyfile(a.elf, storage/'input/EMAIN.ELF')
+    resolved_translation=a.translation
+    if a.translation=='auto':
+        (storage/'gt5p_settings.toml').write_text('[video]\nresolution="1440p"\naspect="'+a.auto_aspect+'"\n')
+        resolved_translation='ultrawide-native' if a.auto_aspect=='21:9' else 'native-scaled'
     source = storage/'preparation'/('a'*24)/'shadercache'
     source.mkdir(parents=True)
     marker = source/'preserved.txt'
@@ -90,8 +95,11 @@ def main():
     first = json.loads((state.parent/'report.json').read_text())
     assert first['counts'] == {'prepared': len(document['records'])}
     if a.translation != 'default':
-        assert first['additional_translation']['translation'] == a.translation
+        assert first['additional_translation']['translation'] == resolved_translation
         assert first['additional_translation']['counts'] == first['counts']
+    if a.translation=='auto':
+        assert first['player_settings']['requested']=='auto'
+        assert first['player_settings']['mode']==resolved_translation
     assert first['vertex_preparation']['mode'] == 'batch'
     assert first['resume']['vertex_programs_reused'] >= kept
     assert first['vertex_preparation']['launches'] <= 2
@@ -128,11 +136,33 @@ def main():
         rejected_translation = subprocess.run(command, env=dict(env, GT5P_PREPARE_TRANSLATION='invalid'),
             stdout=log, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW, timeout=30)
     assert rejected_translation.returncode != 0 and pointer.read_text() == selected
+    if a.translation=='auto':
+        settings=storage/'gt5p_settings.toml'
+        original_settings=settings.read_bytes()
+        status=storage/'prepare-status.txt'
+        status.unlink()  # This fixture's status only; cache files stay intact.
+        with (out/'settings-changed.log').open('wb') as log:
+            changed=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            try:
+                deadline=time.monotonic()+30
+                while not status.exists() and changed.poll() is None:
+                    if time.monotonic()>deadline:raise AssertionError('No settings-change test progress')
+                    time.sleep(.02)
+                assert changed.poll() is None
+                settings.write_text('[video]\nresolution="720p"\naspect="16:9"\n')
+                assert changed.wait(timeout=180)==1
+                assert pointer.read_text()==selected
+                assert 'Settings changed during preparation' in (out/'settings-changed.log').read_text(errors='replace')
+            finally:
+                if changed.poll() is None:changed.terminate();changed.wait(timeout=10)
+                settings.write_bytes(original_settings)
     result = dict(counts=first['counts'], kept_vertices=kept, resumed=first['vertex_preparation'],
         cached=cached['vertex_preparation'], cancellation_preserved_selection=True,
         invalid_mode_preserved_selection=True, source_preserved=True, clean_path=True,
         unset_default_batch_passed=True, explicit_serial_rollback_passed=True,
         translation=a.translation, invalid_translation_preserved_selection=True,
+        settings_change_preserved_selection=a.translation=='auto',
         seconds=time.perf_counter()-started,
         limitation='Small original-asset proof, warm OS/driver caches; no gameplay/stutter measurement.')
     (out/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

@@ -31,6 +31,9 @@ and a consistent live stutter benefit remain separate requirements.
 3. **Support missing contexts/settings.** Recover branching vertex context and
    relevant renderer-setting/root-signature combinations. Reject incompatible
    entries safely and leave unsupported cases on the existing demand path.
+   Phase 185 adds calibrated local translation modes; Phase 187 adds opt-in
+   selection from supported launcher settings. Other numeric states/settings
+   still need independent coverage and validation.
 4. **Make preparation efficient and resumable.** Reduce repeated compiler-process
    startup, reuse verified results, support cancellation/resume, and bound CPU,
    memory and storage. Phase 172 makes exact batching the developer default and
@@ -52,6 +55,8 @@ and a consistent live stutter benefit remain separate requirements.
    original disc volume. Phase 181 adds a preparation window matching PC Settings,
    with real per-step status and the existing owned cancellation/resume path;
    wider settings support and broader acceptance remain open.
+   Phase 186 offers preparation after first-run setup; Phase 187 selects supported
+   saved translation settings with an opt-in and protects publication from edits.
 7. **Validate the complete player path.** Exercise fresh caches, multiple GPUs,
    settings changes and representative routes. Measure loading time, memory,
    actual preparation hits and hitches; inspect rendering before enabling any
@@ -237,6 +242,59 @@ pixel dimension. The current game enables it for native 1440p/4K and native
 ultrawide. Some fragments do not use WPOS and retain their default code. Only
 explicit modes are generated; anamorphic ultrawide remains outside this helper.
 
+#### Automatic selection from launcher settings (development, Phase 187)
+
+Set `GT5P_PREPARE_TRANSLATION=auto` before running **Prepare shaders.cmd** or the
+first-run preparation choice. This new opt-in reads the launcher's storage file
+`gt5p_settings.toml`; it does not inspect desktop dimensions. Canonical saved
+21:9 selects `ultrawide-native`. Canonical 16:9 at native 1440p/4K selects
+`native-scaled`; 720p/1080p selects `default`. Missing settings use the launcher's
+720p/16:9 first-run preset. The selected extra mode still follows default
+preparation. Unset or `default` restores default-only behavior; explicit mode
+names continue to bypass settings lookup. Published v0.2.1 is unchanged.
+
+The selector reads at most 64 KiB, accepts one regular unlinked file, and writes
+neither settings nor game data. Reports include `player_settings` with the
+requested/resolved mode, reason, settings digest and scope. A second snapshot
+check before publishing `prepared-cache.txt` rejects settings changed during
+preparation, preserving the old selection and completed cache for another run.
+
+Automatic selection is deliberately conservative. Unsupported values, unsafe or
+unreadable files, non-ASCII storage paths, anisotropy other than 16, disabled
+smooth colour and custom resolution/translation/root-signature overrides fall
+back to default preparation with a reported reason. The override list is
+`GT5P_NO_SETTINGS`, `GT5P_RESOLUTION`, `GT5P_ULTRAWIDE`, `GT5P_RENDER_NATIVE`,
+`RSX_ULTRAWIDE`, `RSX_RENDER_HEIGHT`, `RSX_FP_OPT`, `RSX_PSO_KEY_RS`, `RSX_ANISO`
+and `RSX_HIGH_PRECISION`. Explicit modes remain available for developer proofs.
+This selects translation text only: MSAA, attachment formats, pass state and
+all other numeric fields retain observed template values. It does not claim
+that the selected settings have complete pipeline coverage.
+
+Nine synthetic selection/snapshot checks and 24 canonical cases linked against
+the actual C++ settings parser pass sequentially, including a UTF-8 BOM and
+non-ASCII comment contents. A probe exposed the existing parser's narrow
+environment-path handling on one non-ASCII storage path; auto selection excludes
+such paths instead of claiming parity. Frozen 32-record paths separately select
+ultrawide/native-scaled from the saved file and pass cancellation/resume,
+zero-worker reuse, explicit serial rollback and invalid-mode preservation.
+The native-scaled run also changes settings during preparation and confirms
+rejection before replacing the cache selection. Tests:
+`scripts/test/preparation_settings.py`, `preparation_settings_native.py`
+(compile `preparation_settings_probe.cpp` with production `gt5p_settings.cpp`
+and `gt5p_keymap.cpp`), and `player_vertex_batch_native.py --translation auto`
+with `--auto-aspect 16:9|21:9`. No live-draw or frame-time improvement follows.
+
+The complete frozen automatic native-scaled run also passes all 2,892 default
+and 2,892 derived records from original packed files in a fresh application cache.
+Its derived set has 2,810 additional native keys and 82 shared with default. It
+starts no extra vertex workers. The fragment stage has 2,312 unique requests,
+2,260 actual new compiles, and all 2,892 native driver calls succeed (82 use
+default-stage cached blobs). One run takes 654.22 seconds including default
+preparation; OS/driver caches remain warm. This establishes known-state disk
+preparation, not faster gameplay, complete settings coverage or GPU residency.
+Evidence: `scratch/settings-auto-187/full-scaled/validation.json`. Reproduce with
+`scripts/test/player_settings_full_native.py` and a fresh ignored output.
+
 Each vertex worker receives a sanitized UTF-16 environment for one mode,
 including surrogate pairs. Mutable decoder globals never change mode in-process.
 Derive requests carry original program identity/GPU-input mode; the parent
@@ -299,7 +357,8 @@ Evidence: `scratch/settings-preparation-185/full/ultrawide-validation.json`.
 
 Both additional modes separately pass frozen 32-record cancellation/resume,
 zero-worker reuse, serial rollback and invalid-mode cache-pointer preservation.
-The full native-scaled starter has not been measured. Nested owner-death and
+At Phase 185, full native-scaled preparation was unmeasured; Phase 187's complete
+automatic proof is recorded above. Nested owner-death and
 default-root calibration of all 2,892 records also pass. Fragment manifests are
 published after a completed batch, so cancellation can repeat fragment work;
 vertex progress is incremental. Resume's conservative vertex accounting can
