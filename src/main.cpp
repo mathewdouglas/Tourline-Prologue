@@ -83,6 +83,7 @@ extern const char* g_hle_inflight[64];    /* per-thread: HLE currently executing
 void gt5p_spu_register_all(void);         /* generated: src/gen/spu_workloads.c */
 void gt5p_audio_select_native(void);      /* CPU-dispatched audio images */
 void gt5p_start_present_thread(void);     /* src/gt5p_present.cpp */
+void gt5p_install_window_icon(void);      /* src/gt5p_icon.cpp */
 }
 
 /* RSX local memory, as cellGcmGetConfiguration reports it (cellGcmSys.c). */
@@ -741,6 +742,7 @@ int main(int argc, char* argv[])
     gt5p_debug_init();
     gt5p_keymap_init();   /* the keyboard's bindings ([keyboard], PAD_KEYMAP) */
     gt5p_glyphs_init();   /* button prompts for the device in use (GT5P_GLYPHS=0: off) */
+    gt5p_install_window_icon(); /* title bar and taskbar; Explorer uses the executable resource */
 
     /* Schedule guest threads by their PS3 priority on two host cores, as the
      * console's two hardware threads would. Left to the host scheduler, about

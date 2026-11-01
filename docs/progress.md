@@ -9,6 +9,24 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 175 - Project Tourline Prologue executable icon (2026-11-01)
+
+The supplied PT / PROLOGUE artwork is the player icon. `launcher/tourline-prologue.png`
+is the source. `scripts/release/make_icon.ps1` fits the mark into a square and
+writes seven PNG-compressed sizes (16 through 256) to `launcher/tourline-prologue.ico`.
+The wide black margin in the source is cropped so the wordmark remains readable
+at small sizes. The repository game-file check allows these two branding files
+only, still under its 1 MB cap.
+
+`tourline-prologue.exe` embeds that icon and uses it on the setup, storage and
+preparation dialogs. `gt5p.exe` embeds the same icon. Its window class is created
+without one, so the game applies the resource to the title bar and taskbar when
+the D3D12, null or SDL window appears, including a later replacement window.
+The standalone preparer is frozen with the same icon. A local launcher build
+carried all seven images. The engine icon is checked by the release build after
+it links `gt5p.exe`; this session did not relink the engine. No rendering,
+packaging or coverage change beyond the icon.
+
 ## Phase 174 - Tourline Prologue release workflow migration (2026-10-31)
 
 After promotion to main and the v0.2 tag in the older GT5P repository, main was
@@ -23,8 +41,11 @@ A separate local runner is registered, using its own checkout, runtime cache and
 incremental cache. Existing private inputs/notices are read from their provisioned
 directories. The old runner and its successful main/v0.2 builds were left alone.
 Repository/ref rejection tests, actionlint and the tracked game-file audit pass.
-The new main build is the integration check; until it finishes, packaging/upload
-on the new runner remain pending. No player rendering/preparation behavior changes.
+The first new-repository main build then finished on the Tourline runner. The
+player job for `ba6ad60` started at 2026-10-31 02:56:32Z and completed
+successfully at 03:13:28Z. The build step took 16m07s and the ZIP upload took
+24s. A branch push does not publish a release. No player rendering or
+preparation behavior changed in that commit.
 See `docs/local-release-ci.md` for provisioning and the disable switch.
 
 ## Phase 173 - Optional v0.2 player preparation candidate (2026-10-31)

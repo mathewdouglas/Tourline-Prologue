@@ -24,6 +24,9 @@ import sys
 
 MAX_BYTES = 1_000_000          # largest legitimate file today is ~160 KB of text
 MAX_BINARY_BYTES = 64_000      # no binary file belongs here at all, bar a small image
+# Player branding, not game data. The PNG is the supplied logo; the ICO is the
+# multi-size icon embedded in the executables. Both stay under the text limit.
+BRAND_ICONS = {"launcher/tourline-prologue.png", "launcher/tourline-prologue.ico"}
 # The ps3recomp local-changes patch (patches/*.patch) is our own source diff and
 # passed 1 MB in Phase 60. Text diffs there get a larger limit; anything else
 # keeps MAX_BYTES.
@@ -72,6 +75,10 @@ def verdict(path, size, head):
     for magic, what in MAGIC.items():
         if head.startswith(magic):
             return what
+    if low in BRAND_ICONS:
+        if size > MAX_BYTES:
+            return "larger than %d bytes" % MAX_BYTES
+        return None
     is_patch = (low.startswith("patches/") and low.endswith(".patch")
                 and head.startswith(b"diff --git") and b"\x00" not in head)
     limit = MAX_PATCH_BYTES if is_patch else MAX_BYTES

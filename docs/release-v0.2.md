@@ -4,7 +4,8 @@ Adds optional experimental preparation of known shaders and pipelines before
 play. Normal launching and asynchronous draw compilation remain available.
 
 The player entry point is **tourline-prologue.exe** and the game window title is
-**Project Tourline Prologue**. Existing storage/saves/settings remain compatible.
+**Project Tourline Prologue**. The launcher, game window and preparation helper
+use the Project Tourline Prologue icon. Existing storage/saves/settings remain compatible.
 
 - Run **Prepare shaders.cmd** after completing normal game setup. Select your
   own GT.VOL directory unpacked with GTToolsSharp. The unpacker/assets are not

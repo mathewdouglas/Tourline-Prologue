@@ -158,6 +158,7 @@ endif()
 
 add_executable(gt5p
     src/main.cpp
+    src/gt5p_icon.cpp
     src/gt5p_present.cpp
     src/gt5p_audio_native.cpp
     src/gt5p_spin.cpp
@@ -265,8 +266,31 @@ if(GT5P_ENABLE_SPU AND GT5P_TARGET STREQUAL "BCUS98158" AND WIN32 AND CMAKE_C_CO
 endif()
 
 if(WIN32)
+    find_program(GT5P_RC rc)
+    if(NOT GT5P_RC)
+        find_program(GT5P_RC llvm-rc HINTS "C:/Program Files/LLVM/bin")
+    endif()
+    if(NOT GT5P_RC)
+        message(FATAL_ERROR "Windows resource compiler not found; gt5p.exe cannot embed its icon")
+    endif()
+    set(GT5P_ICON_RES "${CMAKE_CURRENT_BINARY_DIR}/gt5p_icon.res")
+    if(GT5P_RC MATCHES "llvm-rc")
+        add_custom_command(OUTPUT "${GT5P_ICON_RES}"
+            COMMAND "${GT5P_RC}" "/FO${GT5P_ICON_RES}" "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline.rc"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline.rc" "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline-prologue.ico"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/launcher"
+            VERBATIM)
+    else()
+        add_custom_command(OUTPUT "${GT5P_ICON_RES}"
+            COMMAND "${GT5P_RC}" /nologo /fo "${GT5P_ICON_RES}" "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline.rc"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline.rc" "${CMAKE_CURRENT_SOURCE_DIR}/launcher/tourline-prologue.ico"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/launcher"
+            VERBATIM)
+    endif()
+    target_sources(gt5p PRIVATE "${GT5P_ICON_RES}")
+    set_source_files_properties("${GT5P_ICON_RES}" PROPERTIES EXTERNAL_OBJECT TRUE)
     target_link_libraries(gt5p PRIVATE
-        ws2_32 xinput ole32 bcrypt shell32
+        ws2_32 xinput ole32 bcrypt shell32 user32
         d3d12 dxgi dxguid d3dcompiler)
     # SDL2.dll is loaded at run time, if present, to read controllers XInput
     # does not know. scripts/get_sdl2.ps1 fetches it into third_party/.

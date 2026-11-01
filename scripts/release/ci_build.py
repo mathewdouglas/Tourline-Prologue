@@ -149,6 +149,7 @@ def main():
         '-DGT5P_TARGET=BCUS98158', '-DCMAKE_BUILD_TYPE=Release',
         f'-DPS3RECOMP_DIR={runtime.as_posix()}', f'-DCMAKE_C_COMPILER={clang}', f'-DCMAKE_CXX_COMPILER={clang}')
     run('cmake', '--build', ROOT/'build', '--parallel', jobs)
+    run(sys.executable, 'scripts/test/exe_icon.py', ROOT/'build/gt5p.exe')
     if cache:
         tracked = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT).decode('utf-8').split('\0')
         cache.save([name for name in tracked if name])
@@ -158,6 +159,7 @@ def main():
     run(preparer/'dist/GT5P-Prepare/GT5P-Prepare.exe','--help')
     # No interpolated command text; the batch file receives a controlled path.
     run('cmd.exe', '/d', '/c', 'scripts\\release\\build_launcher.cmd', launcher)
+    run(sys.executable, 'scripts/test/exe_icon.py', launcher/'tourline-prologue.exe')
     run('cl', '/nologo', '/std:c++17', '/O2', '/W4', '/MT', '/EHsc',
         '/Fo'+str(launcher/'probe.obj'), '/Fe'+str(launcher/'probe.exe'), 'scripts/test/launcher_probe.cpp')
     run(sys.executable, 'scripts/test/launcher_native.py', '--launcher', launcher/'tourline-prologue.exe', '--probe', launcher/'probe.exe')

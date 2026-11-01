@@ -23,7 +23,8 @@ def main():
     out.mkdir(parents=True)
     manifest=json.loads((ROOT/'config/ps3recomp.json').read_text())
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--console',
-        '--name','GT5P-Prepare','--distpath',str(out/'dist'),'--workpath',str(out/'work'),
+        '--name','GT5P-Prepare','--icon',str(ROOT/'launcher/tourline-prologue.ico'),
+        '--distpath',str(out/'dist'),'--workpath',str(out/'work'),
         '--specpath',str(out),'--paths',str(ROOT/'scripts'),
         '--add-data',str(ROOT/'config/ps3recomp.json')+os.pathsep+'config',
         '--add-data',str(ROOT/manifest['patch'])+os.pathsep+'patches',

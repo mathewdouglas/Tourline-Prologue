@@ -1,0 +1,3 @@
+// Project Tourline Prologue icon. Source artwork is tourline-prologue.png.
+// Regenerate the ICO with scripts/release/make_icon.ps1 after replacing it.
+1 ICON "tourline-prologue.ico"

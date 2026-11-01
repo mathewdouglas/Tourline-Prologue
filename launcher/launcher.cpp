@@ -49,6 +49,17 @@ static std::wstring env(const wchar_t* key) {
 static void setenv(const wchar_t* key, const std::wstring& value) {
     if (!SetEnvironmentVariableW(key, value.c_str())) fail(L"Could not set launch environment.");
 }
+static HICON brand_icon() {
+    static HICON icon = reinterpret_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1),
+        IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0));
+    return icon;
+}
+static void brand(TASKDIALOGCONFIG& td) {
+    HICON icon = brand_icon();
+    if (!icon) return;
+    td.dwFlags |= TDF_USE_HICON_MAIN;
+    td.hMainIcon = icon;
+}
 // The current runtime's VFS uses ANSI CRT file paths. Reject lossy conversion
 // instead of accepting a path which will silently refer to a different file.
 static void runtime_path(const fs::path& p) {
@@ -233,6 +244,7 @@ static DWORD run(const fs::path& exe, const std::wstring& args, const fs::path& 
         td.pszContent=L"Verifying your game and preparation inputs...";
         td.dwCommonButtons=TDCBF_CANCEL_BUTTON|TDCBF_OK_BUTTON;
         td.pfCallback=prepare_dialog;td.lpCallbackData=(LONG_PTR)&state;
+        brand(td);
         if (FAILED(TaskDialogIndirect(&td,nullptr,nullptr,nullptr))) fail(L"Could not open preparation progress.");
     }
     // Keep this thread's dialogs responsive while either child is running.
@@ -254,6 +266,7 @@ static fs::path executable_for(const fs::path& disc, const std::wstring& expecte
     td.pszWindowTitle = L"Project Tourline Prologue - executable setup"; td.pszMainInstruction = L"One game file needs to be decrypted";
     td.pszContent = L"The download contains no game data or decryption keys. If your dump already has a decrypted EMAIN.ELF, select it. Otherwise select your installed RPCS3; it will decrypt a temporary copy of EMAIN.SELF. Your original dump is left unchanged.";
     td.cButtons = 2; td.pButtons = buttons; td.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    brand(td);
     int choice = IDCANCEL;
     if (FAILED(TaskDialogIndirect(&td, &choice, nullptr, nullptr))) fail(L"Could not open the executable setup dialog.");
     if (choice == IDCANCEL) return {};
@@ -364,6 +377,7 @@ static fs::path storage_picker() {
         L"\n\nYour game dump stays where it is. The launcher stays where you extracted it; you can put that entire folder on your SSD too. Changing storage copies existing data and keeps the original as a backup.";
     td.pszContent = content.c_str(); td.cButtons = 2; td.pButtons = buttons;
     td.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    brand(td);
     int choice = IDCANCEL;
     if (FAILED(TaskDialogIndirect(&td, &choice, nullptr, nullptr))) fail(L"Could not open storage setup.");
     if (choice == IDCANCEL) return {};
