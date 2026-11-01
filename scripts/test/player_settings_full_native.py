@@ -41,8 +41,7 @@ def main():
     settings.write_text('[video]\nresolution="1440p"\naspect="'+a.aspect+'"\nmsaa=2\n[game]\nanisotropy=16\nsmooth_colour=true\n')
     original=settings.read_bytes()
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
-    env.update(PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'),
-               GT5P_PREPARE_TRANSLATION='auto')
+    env.update(PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     command=[install/'preparation/GT5P-Prepare.exe','--install',install,'--storage',storage,'--game',a.game.resolve()]
     start=time.perf_counter()
     with (out/'prepare.log').open('wb') as log:

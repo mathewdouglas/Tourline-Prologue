@@ -61,7 +61,7 @@ def main():
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_PREPARE_VERTEX_BATCH', None)  # Exercise the real unset default.
     env.pop('GT5P_PREPARE_TRANSLATION', None)
-    if a.translation != 'default':
+    if a.translation != 'auto':
         env['GT5P_PREPARE_TRANSLATION'] = a.translation
     started = time.perf_counter()
     with (out/'cancel.log').open('wb') as log:
@@ -157,12 +157,26 @@ def main():
             finally:
                 if changed.poll() is None:changed.terminate();changed.wait(timeout=10)
                 settings.write_bytes(original_settings)
+        sidecar=state.parent/'tr'
+        snapshots={p:p.read_bytes() for p in sidecar.rglob('*.json')}
+        with (out/'translation-rollback.log').open('wb') as log:
+            subprocess.run(command,env=dict(env,GT5P_PREPARE_TRANSLATION='default'),
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+        default_report=json.loads((state.parent/'report.json').read_text())
+        assert default_report['counts']==first['counts']
+        assert default_report['player_settings']['requested']=='default'
+        assert 'additional_translation' not in default_report
+        assert snapshots=={p:p.read_bytes() for p in sidecar.rglob('*.json')}
+        assert pointer.read_text()==selected
     result = dict(counts=first['counts'], kept_vertices=kept, resumed=first['vertex_preparation'],
         cached=cached['vertex_preparation'], cancellation_preserved_selection=True,
         invalid_mode_preserved_selection=True, source_preserved=True, clean_path=True,
         unset_default_batch_passed=True, explicit_serial_rollback_passed=True,
         translation=a.translation, invalid_translation_preserved_selection=True,
         settings_change_preserved_selection=a.translation=='auto',
+        unset_translation_default_passed=a.translation=='auto',
+        explicit_translation_rollback_passed=a.translation=='auto',
         seconds=time.perf_counter()-started,
         limitation='Small original-asset proof, warm OS/driver caches; no gameplay/stutter measurement.')
     (out/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

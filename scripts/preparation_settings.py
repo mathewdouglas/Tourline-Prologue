@@ -1,4 +1,4 @@
-"""Conservative opt-in selection of existing translation modes for launcher play.
+"""Conservative default selection of existing translation modes for launcher play.
 
 This selects generated shader text only. Template target/MSAA/pass state stays
 observed, and root signature stays pinned. Unsupported overrides use the ordinary
@@ -21,7 +21,7 @@ LIMIT = 'Translation selection only; other settings, unseen passes and missing s
 
 def select(storage, environ=None):
     env = {k.upper(): v for k,v in (os.environ if environ is None else environ).items()}
-    requested = env.get('GT5P_PREPARE_TRANSLATION', 'default')
+    requested = env.get('GT5P_PREPARE_TRANSLATION', 'auto')
     result = dict(schema=1, requested=requested, mode='default', source='explicit',
                   settings_sha256=None, limitation=LIMIT)
     if requested != 'auto':

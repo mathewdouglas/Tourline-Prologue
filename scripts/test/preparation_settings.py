@@ -26,15 +26,23 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(),before)
         return result
 
-    def test_default_and_explicit_do_not_read_settings(self):
+    def test_explicit_modes_and_rollback_do_not_read_settings(self):
         with patch.object(settings,'regular_read',side_effect=AssertionError('Unexpected settings read')):
-            self.assertEqual(settings.select(self.storage,{})['mode'],'default')
             for mode in ('default','native-scaled','ultrawide-native'):
                 selected=settings.select(self.storage,{'GT5P_PREPARE_TRANSLATION':mode})
                 self.assertEqual(selected['mode'],mode)
                 settings.verify(selected,self.storage,{})
             for mode in ('', '1', '../outside', 'invalid'):
                 with self.assertRaises(ValueError):settings.select(self.storage,{'GT5P_PREPARE_TRANSLATION':mode})
+
+    def test_unset_selects_saved_settings_and_checks_publication(self):
+        selected=self.choose('[video]\nresolution="1440p"',{})
+        self.assertEqual(selected['requested'],'auto')
+        self.assertEqual(selected['mode'],'native-scaled')
+        settings.verify(selected,self.storage,{})
+        self.path.write_text('[video]\naspect="21:9"')
+        with self.assertRaisesRegex(ValueError,'Settings changed'):
+            settings.verify(selected,self.storage,{})
 
     def test_saved_supported_resolution_and_aspect_modes(self):
         for value in ('"720p"','"1080p"','"1440p"','"2160p"','"4k"','"4K"','720','1080','1440','2160'):

@@ -19,52 +19,50 @@ the older v0.2 package retains its earlier unpacked-asset selection.
 Broader coverage, settings/GPU validation
 and a consistent live stutter benefit remain separate requirements.
 
-1. **Broaden representative coverage.** Merge templates from other tracks,
-   dealerships, menus, cars and cameras. Report each session's additional and
-   shared programs/state so further collection targets useful gaps rather than
-   every car-track combination. Phase 170 adds reporting and the first session
-   expansion; broader unvisited content remains open.
-2. **Generate more directly from assets.** Extend material/shared-pass rules to
-   derive valid pipelines without observing every draw. Recover bindings and
-   actual pass state instead of multiplying every shader by every possible state.
-   This is the main scaling path toward GT5.
-3. **Support missing contexts/settings.** Recover branching vertex context and
-   relevant renderer-setting/root-signature combinations. Reject incompatible
-   entries safely and leave unsupported cases on the existing demand path.
-   Phase 185 adds calibrated local translation modes; Phase 187 adds opt-in
-   selection from supported launcher settings. Other numeric states/settings
-   still need independent coverage and validation.
-4. **Make preparation efficient and resumable.** Reduce repeated compiler-process
-   startup, reuse verified results, support cancellation/resume, and bound CPU,
-   memory and storage. Phase 172 makes exact batching the developer default and
-   adds verified template resume; launcher cancellation still needs refinement.
-   Phase 176 adds verified reuse across template/engine generations, so extending
-   a catalogue need not recompile unchanged shaders. Cancellation/resume is also
-   available through the optional Phase 173 player entry.
-   Phase 183 adds bounded vertex workers; Phase 184 makes them the default,
-   retaining explicit serial rollback.
-5. **Demonstrate consistent stutter reduction.** Fewer runtime shader compiles have
-   not yet produced a consistent frame-time win. Separate driver creation, cache
-   reads, scheduling and unrelated game work; load prepared resources at useful
-   times without expensive blanket startup scanning.
-6. **Integrate the launcher.** Detect game/version and supported settings, show
-   progress, support cancellation/resume, and handle cache compatibility. Ship
-   metadata only; shader contents and GPU-specific binaries remain local.
-   Phase 173 implements an optional standalone player path with manual unpacked
-   asset selection. Phase 178 removes that additional extraction for the supported
-   original disc volume. Phase 181 adds a preparation window matching PC Settings,
-   with real per-step status and the existing owned cancellation/resume path;
-   wider settings support and broader acceptance remain open.
-   Phase 186 offers preparation after first-run setup; Phase 187 selects supported
-   saved translation settings with an opt-in and protects publication from edits.
-7. **Validate the complete player path.** Exercise fresh caches, multiple GPUs,
-   settings changes and representative routes. Measure loading time, memory,
-   actual preparation hits and hitches; inspect rendering before enabling any
-   default. No zero-stutter or complete-coverage promise follows from creation.
+Current development builds already provide direct packed-game reads, both-stage
+reconstruction and native-key verification, bounded default batching, cancellation/
+resume, verified incremental reuse, first-run Prepare/Skip, progress UI and settings
+restart. Phase 188 makes supported settings selection automatic inside optional
+preparation. The published v0.2.1 release predates these latest development changes.
 
-The immediate order is broader coverage reporting/session merging, then fixing
-the measured performance bottleneck. GT5 additionally needs its asset formats
-and rendering contexts verified; GT5P's template does not supply GT5 coverage.
+The remaining work is:
+
+1. **Prove live use and reduce stutters.** Check that the selected translation's
+   prepared files are found at runtime and that useful pipelines become resident
+   before their first draw. Separate shader compiles from driver pipeline creation,
+   file reads and unrelated game work. Measure preparation hits, demand builds,
+   frame-time hitches, loading time and memory on repeatable routes, and inspect
+   screenshots. Existing trials have not established a consistent stutter benefit;
+   blanket startup scanning must not become a default on assumption alone.
+2. **Broaden representative coverage.** Add useful missing tracks, cars,
+   dealerships, menus, cameras and effects. Rank observed misses/shared programs
+   so collection targets gaps rather than every car-track combination. The starter
+   is a verified observed set, not a whole-game catalogue.
+3. **Generate more from assets.** Recover material/shared-pass bindings and actual
+   pass ownership/state so valid pipelines can be derived without observing every
+   draw. Keep unknown bindings unresolved. This remains the main scaling path
+   toward GT5; GT5 also needs its own asset formats and rendering contexts verified.
+4. **Complete settings and context support.** Cover remaining MSAA, anisotropy,
+   precision, root-signature, branching-vertex and pass/attachment combinations.
+   Automatic selection currently handles supported translation modes only; custom
+   overrides and non-ASCII storage paths conservatively fall back. Rebuilding
+   known keys does not prove every combination used by a setting is covered.
+5. **Reduce remaining preparation costs.** Avoid repeated asset lookup and
+   per-pipeline shader staging, retain more fragment progress across cancellation,
+   extend verified reuse where measured costs justify it, and diagnose intermittent
+   missing offline-completion markers while keeping rejection strict. Preserve byte limits,
+   process/queue ownership, cancellation and safe compatibility rejection.
+6. **Finish acceptance and release integration.** Validate representative routes
+   and settings changes across additional GPUs/drivers, complete packaged-player
+   checks and document actual limits. The launcher/preparer mechanics are already
+   implemented; merging/releasing the latest development work is a separate step.
+   Ship metadata only, keeping game-derived programs/source/binaries local.
+
+The next practical priority is runtime hit/residency measurement for the supported
+settings, followed by the observed misses and costs it identifies. Stable features
+should become defaults after appropriate validation, with rollback switches.
+Optional preparation remains a player choice. No zero-stutter or whole-game
+coverage promise follows from offline pipeline creation.
 
 ### Exact vertex batching (Phases 183-184)
 
@@ -226,9 +224,9 @@ scaled fragment path with unchanged default vertex programs. `default` remains
 the default and rollback, and does not read/write translation sidecars.
 
 The development player helper accepts the same fixed mode through
-`GT5P_PREPARE_TRANSLATION=ultrawide-native` or `native-scaled`. Unset or `default`
-restores default-only preparation; other values fail before cache selection.
-This is an explicit opt-in, not automatic detection of the player's settings.
+`GT5P_PREPARE_TRANSLATION=ultrawide-native` or `native-scaled`. Phase 188
+defaults an unset value to `auto`; explicit `default` restores default-only
+preparation. Invalid values fail before cache selection.
 The already-published v0.2.1 helper does not implement these modes.
 
 | Mode | Vertex translator | Fragment translator |
@@ -244,14 +242,16 @@ explicit modes are generated; anamorphic ultrawide remains outside this helper.
 
 #### Automatic selection from launcher settings (development, Phase 187)
 
-Set `GT5P_PREPARE_TRANSLATION=auto` before running **Prepare shaders.cmd** or the
-first-run preparation choice. This new opt-in reads the launcher's storage file
+From Phase 188, running **Prepare shaders.cmd** or accepting the first-run
+preparation choice uses `auto` when `GT5P_PREPARE_TRANSLATION` is unset. Explicit
+`=auto` is equivalent. Automatic selection reads the launcher's storage file
 `gt5p_settings.toml`; it does not inspect desktop dimensions. Canonical saved
 21:9 selects `ultrawide-native`. Canonical 16:9 at native 1440p/4K selects
 `native-scaled`; 720p/1080p selects `default`. Missing settings use the launcher's
 720p/16:9 first-run preset. The selected extra mode still follows default
-preparation. Unset or `default` restores default-only behavior; explicit mode
-names continue to bypass settings lookup. Published v0.2.1 is unchanged.
+preparation. Explicit `GT5P_PREPARE_TRANSLATION=default` restores default-only
+behavior; explicit mode names continue to bypass settings lookup. Published
+v0.2.1 is unchanged.
 
 The selector reads at most 64 KiB, accepts one regular unlinked file, and writes
 neither settings nor game data. Reports include `player_settings` with the

@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 187)
+## Start here: state of play (2026-11-02, Phase 188)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 187 is the latest).
+has the evidence, newest phase first (Phase 188 is the latest).
 
 ### What works now
+
+- **Validated preparation defaults (Phase 188):** at the user's request, an unset
+  `GT5P_PREPARE_TRANSLATION` now selects `auto` in the development player helper.
+  Explicit `=default` restores default-only preparation. Existing batching, packed
+  reads, verified reuse, setup offer/UI and managed restart are already defaults;
+  preparation remains a player choice. The shader document now separates completed
+  mechanics from remaining live-use/stutter, content/asset-rule, settings/context,
+  efficiency/robustness and multi-GPU/release work. Published v0.2.1 is unchanged.
+  Ten synthetic and both unset-default frozen 32-record paths pass, including
+  explicit translation rollback without changing sidecars. An initial missing
+  offline log marker was rejected safely; its cause remains an open robustness
+  issue and the guard stays strict. Feature pushes use `[skip ci]`.
 
 - **Automatic translation selection (Phase 187):** development helper opt-in
   `GT5P_PREPARE_TRANSLATION=auto` selects existing ultrawide/native-scaled modes
@@ -1259,6 +1271,9 @@ silently. A dropped jump table and `bisl $r0,$r0` were found by asking
 
 ### The user's standing rules
 
+- Make appropriately validated player features defaults, keeping rollback switches.
+  Conditional reconstruction proofs and unproven live-performance experiments
+  remain developer options until suitable behavior is established.
 - Commit **and push** to `origin` at the end of every turn.
 - No game data, keys, decrypted executables, generated source or decompiled
   code in tracked files. Never `--no-verify`, never `git add -f`.

@@ -9,6 +9,59 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 188 - Validated settings selection becomes the player default (2026-11-02)
+
+The user requested that new features become defaults once appropriately
+validated. The development player helper now treats an unset
+`GT5P_PREPARE_TRANSLATION` as `auto`. Explicit `=auto` is equivalent;
+`=default` restores the old default-only preparation and bypasses settings
+lookup. Explicit additional modes are unchanged. Developer template CLI/API
+defaults stay explicit/default because they have no launcher settings ownership
+contract. Preparation remains an optional first-run/CMD choice.
+
+The promotion uses Phase 185/187's complete shader/native proofs, production
+settings-parser parity and frozen lifecycle checks. Existing bounded batching,
+packed-file reads, checksum acceleration, verified reuse/handoff, preparation
+window/setup offer and managed restart were already defaults. Conditional
+reconstruction experiments and blanket live scanning remain developer options;
+their partial proofs or unproven frame-time effects do not establish suitability
+as player defaults. No live draw-policy change is made.
+
+Ten synthetic tests pass, explicitly checking unset settings dispatch and its
+publication guard as well as no-lookup explicit rollback. The frozen helper is
+rebuilt, retaining native checksum/packed-reader checks. The 32-record lifecycle
+harness removes the translation variable for automatic legs and explicitly sets
+`default` for rollback. It also verifies a default-only rerun leaves translation
+sidecar JSON unchanged and preserves the selected pointer/cache. The full native
+test harness now likewise exercises the unset selection default; full Phase
+185/187 results remain the basis for shader/native coverage, rather than claiming
+another full run for this dispatch change.
+
+An initial ultrawide test aborts safely when an existing offline fragment process
+exits without the required no-guest-entry log marker, despite printing its batch
+completion summary. No relaxed guard or automatic acceptance is introduced; the
+previous cache pointer is preserved. A fresh ultrawide repeat passes cancellation,
+resume, exact/native persistence, zero-worker reuse, serial rollback, invalid
+switches, settings-change rejection and explicit translation rollback. Initial
+failure evidence is under `scratch/settings-default-188/frozen32-uw`; the passing
+repeat is under `scratch/settings-default-188/uw`. The missing-marker condition
+remains a robustness investigation, without claiming its cause is established.
+
+The separate native-scaled unset-default 32-record run passes the same lifecycle,
+settings-change rejection and explicit translation rollback. Both passing runs
+confirm zero new compiler workers on cached reuse and unchanged translation
+sidecar JSON under explicit `=default`. Evidence:
+`scratch/settings-default-188/{uw,rs}/validation.json`. Final selection/template,
+package and release-trigger regressions pass sequentially.
+
+The shader roadmap now lists completed mechanics separately from remaining
+runtime hit/residency and stutter work, representative content, asset-derived
+generation, settings/context combinations, efficiency/robustness, multi-GPU and
+release acceptance. Its next priority is measuring actual runtime use of prepared
+pipelines and diagnosing the resulting misses/costs. Player documentation records
+the new default and rollback. Feature pushes use `[skip ci]`; main, tag and the
+published v0.2.1 release remain unchanged.
+
 ## Phase 187 - Automatic translation selection from launcher settings (2026-11-02)
 
 The development player helper now accepts opt-in
