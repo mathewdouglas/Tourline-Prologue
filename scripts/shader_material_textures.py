@@ -159,7 +159,7 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
         raise ValueError('dynamic absence conflicts with active resource paths')
     if path not in (None, 'active', 'fallback'):
         raise ValueError('unsupported global sampler path')
-    if shadow_path not in (None, 'shadow-lv'):
+    if shadow_path not in (None, 'shadow-lv', 'shadow-lv-depth'):
         raise ValueError('unsupported shadow sampler path')
     if environment_path not in (None, 'framebuffer-single', 'framebuffer-mipped'):
         raise ValueError('unsupported environment sampler path')
@@ -181,7 +181,7 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
     for g in globals_:
         signature = (g['name'], g['kind'], g['identifier'])
         dither = path is not None and signature in signatures
-        shadow = shadow_path == 'shadow-lv' and signature in {
+        shadow = shadow_path in ('shadow-lv', 'shadow-lv-depth') and signature in {
             ('realTimeShadowMap', 0x601, 87), ('realTimeShadowMapColor', 0x601, 96)}
         environment = environment_path is not None and signature == ('envMapSampler', 0x901, 71)
         mirror = mirror_path == 'scene-copy' and signature == ('mirrorMapSampler', 0x601, 115)
@@ -217,11 +217,18 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
         if absent:
             facts = dict(shape='cube' if g['identifier'] in (71, 115) else '2d',
                          gamma=False, unnormalized=False)
+        initialized_depth = shadow and shadow_path == 'shadow-lv-depth'
+        if initialized_depth:
+            # Fresh B9F430/BA6998 baseline, enum-0x40 BA1080 setup, then the
+            # real LV pass/setter. ShadowColour is converted to non-depth 0x85.
+            address, filtering = 0x60030404, 0x02022000
+            facts = dict(shape='2d', gamma=False, unnormalized=False,
+                         depth_compare=6 if g['identifier'] == 87 else None)
         bindings.append(dict(g, address=address, filtering=filtering, texture_facts=facts,
                              sampler=sampler_register(address, filtering),
                              global_path=selected_path, sampler_mask=12 if mirror else 15,
-                             address_mask=0 if mirror else 0xf0f if shadow or environment else 0xffffffff,
-                             filtering_mask=0x07070000 if shadow or environment or mirror else 0xffffffff))
+                             address_mask=0xffffffff if initialized_depth else 0 if mirror else 0xf0f if shadow or environment else 0xffffffff,
+                             filtering_mask=0xffffffff if initialized_depth else 0x07070000 if shadow or environment or mirror else 0xffffffff))
     return dict(definition, bindings=bindings, globals=unresolved)
 
 

@@ -36,13 +36,26 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 189)
+## Start here: state of play (2026-11-02, Phase 190)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 189 is the latest).
+has the evidence, newest phase first (Phase 190 is the latest).
 
 ### What works now
+
+- **Initialized LV depth resources (Phase 190):** explicit developer
+  `--shadow-resource-path initialized-depth-lv` derives depth shape, gamma,
+  coordinates and comparison from fresh framebuffer initialization plus the LV
+  pass, including the non-depth shadow-colour copy. Native descriptor and
+  production alias/compare/trim checks pass. All 214 newly matched retained HSR
+  keys reproduce both shaders and fresh native pipelines exactly, persist and
+  reuse every driver blob; two separate 32-request samples also pass. Material
+  profile matches cover 345/1,497 retained links under explicit contexts, not
+  whole-game/player coverage. Earlier conflicting/unknown declared depth bindings
+  reject; no differently configured unlisted earlier depth binding and successful
+  default local aliases remain prerequisites. Active environment/live ownership
+  and stutter benefit remain open. Starter/player/release unchanged; `[skip ci]`.
 
 - **Asset-derived dynamic fallbacks (Phase 189):** developer material preparation
   accepts explicit `--dynamic-resource-path absent`. Real null-resource callbacks

@@ -57,7 +57,7 @@ def main():
     wrappers = (args.generated / 'ppu_recomp_007.cpp').read_text()
     snippets += '\n' + '\n'.join(extract(wrappers, n) for n in (
         'func_00BA6998', 'func_00BA6590', 'func_00BA6BD8', 'func_00BA6CF0',
-        'func_00BA6B40', 'func_00BA6C68', 'func_00BA6628', 'func_00BA1080', 'func_00B9F1F8', 'func_00B9F430', 'func_00B9EEF8'))
+        'func_00BA6B40', 'func_00BA6C68', 'func_00BA6628', 'func_00BA1080', 'func_00B9F1F8', 'func_00B9F430', 'func_00B9EEF8', 'func_00B9EE50'))
     assert snippets.count('g_trampoline_fn') == 1, 'Only the bounded compact-fragment emitter may contain overflow trampolines'
     prefix = '''#define PPU_NO_INLINE_LOADS
 #define PPU_NO_INLINE_STORES
@@ -88,12 +88,15 @@ void func_00BA08B8(ppu_context* ctx) {
  if(!allocation_success) {ctx->gpr[3]=0;return;}
  uint32_t a=ctx->gpr[3];vm_write32(a,7);vm_write32(a+4,0x1000);
  vm_write32(a+0x10,ctx->gpr[7] ? ctx->gpr[7] : 1);vm_write32(a+0x24,0);
+ // Real BA08B8 writes its r7 attachment/AA mode at +0x23. Getters use it
+ // for extent conversion; it is not an inherited descriptor word.
+ vm_write8(a+0x23,ctx->gpr[7]);
  ctx->gpr[3]=1;
 }
-void func_00B9EE50(ppu_context* ctx) { ctx->gpr[3]=6; }
 void ps3_indirect_tail(ppu_context* ctx) {assert(!"Unexpected indirect tail");}
 void func_00BCB520(ppu_context* ctx) { ctx->gpr[3]=0x2000; }
 static uint32_t mirror_mode;
+static uint32_t initialized_shadow;
 static uint32_t object_calls,object_front,object_face,object_cull,object_gamma;
 void func_00837F80(ppu_context* ctx) {}
 void func_0082F108(ppu_context* ctx) {}
@@ -144,6 +147,9 @@ void func_00BCE538(ppu_context* ctx) {}
 void func_00BCFEF8(ppu_context* ctx) {}
 void func_00BCFFA0(ppu_context* ctx) {}
 void ps3_indirect_call(ppu_context* ctx) {
+ if(initialized_shadow && ctx->ctr==1) {
+  ctx->gpr[3]=initialized_shadow;func_008293A8(ctx);return;
+ }
  if(mirror_mode) {
   if(ctx->ctr==3 || ctx->ctr==4) return; // Viewport setup / scene rendering.
   if(ctx->ctr==5) {func_00827DD0(ctx);return;}
@@ -250,9 +256,11 @@ extern "C" __declspec(dllexport) void mirror_pass(uint32_t address,uint32_t filt
 }
 extern "C" __declspec(dllexport) void shadow_pass(uint32_t address,uint32_t filtering,uint32_t enabled) {
  ppu_context ctx={0};ctx.gpr[1]=0x1ff0000;ctx.gpr[2]=0x133bc58;
+ if(!initialized_shadow) {
  for(uint32_t j=0;j<13;j++) vm_write32(0x1e02000+j*4,0);
  vm_write32(0x1e02000,0x201a00);vm_write32(0x1e02008,0x18529);
  vm_write32(0x1e0200c,address);vm_write32(0x1e02018,filtering);vm_write32(0x1e0201c,0x400040);
+ }
  vm_write32(0x1e33000,0x1e34000);vm_write32(0x1e34038,0x1e35000);
  vm_write32(0x1e35000,1);vm_write32(0x1e35004,0x133bc58);
  vm_write32(0x1e36000,0x1e37000);vm_write32(0x1e37010,0x1e38000);
@@ -264,6 +272,28 @@ extern "C" __declspec(dllexport) void shadow_pass(uint32_t address,uint32_t filt
  ctx.gpr[3]=0x1e36000;ctx.gpr[4]=0x1e3a000;
  func_008103F0(&ctx);
  if(enabled) assert(vm_read32(0x1e3d000+0x1c44)==0x1e02000);
+}
+extern "C" __declspec(dllexport) uint32_t shadow_initialized(uint32_t poison,uint32_t width,uint32_t mips,uint32_t success,uint32_t identifier,uint32_t unit) {
+ assert(width>0 && width<=2048 && unit<16 && (identifier==87 || identifier==96));
+ ppu_context ctx={0};ctx.gpr[1]=0x1ff0000;ctx.gpr[2]=0x133bc58;
+ const uint32_t object=0x1e02000-0x54,texture=object+0x2c;
+ for(uint32_t j=0;j<0x90;j+=4) vm_write32(object+j,poison);
+ vm_write32(object+4,width);vm_write32(object+8,width);
+ ctx.gpr[3]=texture;func_00B9F430(&ctx);
+ allocation_success=success;
+ ctx.gpr[3]=texture;ctx.gpr[4]=width;ctx.gpr[5]=width;ctx.gpr[6]=0x40;
+ ctx.gpr[7]=mips;ctx.gpr[8]=0;ctx.gpr[9]=0;ctx.gpr[10]=0x302;
+ func_00BA1080(&ctx);
+ if(!success) {assert(ctx.gpr[3]==0);return 0;}
+ assert(ctx.gpr[3]==1);
+ initialized_shadow=object;shadow_pass(0,0,1);initialized_shadow=0;
+ uint32_t root=vm_read32(ctx.gpr[2]-0x66f8);
+ vm_write32(root-0x8000,0x1e3d000);
+ uint32_t copy_state=vm_read32(ctx.gpr[2]-0x48bc);vm_write32(copy_state+8,0x1e10000);
+ vm_write16(0x1e01006,unit);ctx.gpr[4]=0x1e01000;
+ if(identifier==87) func_00D6D930(&ctx);else func_00D6D898(&ctx);
+ assert(vm_read32(copy_state+8)==0x1e10034);
+ return 1;
 }
 extern "C" __declspec(dllexport) void dynamic_emit(uint32_t identifier,uint32_t unit,uint32_t address,uint32_t filtering,uint32_t present) {
  assert(unit<16);
@@ -344,6 +374,8 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
     lib.environment_setup.argtypes = [ctypes.c_uint32] * 6
     lib.dynamic_emit.argtypes = [ctypes.c_uint32] * 5
     lib.shadow_pass.argtypes = [ctypes.c_uint32] * 3
+    lib.shadow_initialized.argtypes = [ctypes.c_uint32] * 6
+    lib.shadow_initialized.restype = ctypes.c_uint32
     assert data[:6] == b'\x7fELF\x02\x02', 'Expected ELF64 big endian'
     phoff = struct.unpack_from('>Q', data, 32)[0]
     stride, count = struct.unpack_from('>HH', data, 54)
@@ -565,6 +597,28 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
             for gate in (0, 1):
                 lib.object_pass(flip, gate, poison)
                 object_checks += 1
+    initialized_shadows = []
+    for poison in (0, 0xffffffff, 0x12345678):
+        for width in (64, 1024):
+            for mips in (0, 1, 4):
+                for identifier in (87, 96):
+                    for unit in range(16):
+                        assert not lib.shadow_initialized(poison, width, mips, 0, identifier, unit)
+                        assert lib.shadow_initialized(poison, width, mips, 1, identifier, unit)
+                        commands = [lib.word(0x1e10000 + j * 4) for j in range(13)]
+                        assert (commands[2] >> 8) & 0x9f == (0x90 if identifier == 87 else 0x85)
+                        assert commands[3] == 0x60030404 and commands[6] == 0x02022000
+                        assert sampler_register(commands[3], commands[6]) == 9
+                        assert (commands[2] >> 4) & 15 == 2 and not commands[2] & (4 | 0x4000)
+                        assert commands[7] == (width << 16) | width, (poison, width, mips, identifier, unit, [hex(w) for w in commands])
+                        name = 'realTimeShadowMap' if identifier == 87 else 'realTimeShadowMapColor'
+                        d = dict(bindings=[], globals=[dict(name=name, kind=0x601, identifier=identifier, unit=unit)])
+                        b = with_global_sampler_path(d, shadow_path='shadow-lv-depth')['bindings'][0]
+                        assert (commands[3], commands[6]) == (b['address'], b['filtering'])
+                        assert b['texture_facts'] == dict(shape='2d', gamma=False, unnormalized=False,
+                                                         depth_compare=6 if identifier == 87 else None)
+                        initialized_shadows.append(dict(poison=poison, width=width, mips=mips,
+                                                        identifier=identifier, unit=unit, words=commands))
     report = {'elf_sha256': digest, 'registry_base': f'{base:08x}',
               'scope': 'Isolated callbacks, ShadowLV pass and framebuffer setup; render/scene/allocation helpers mocked; synthetic resources',
               'fragment_control_checks': fragment_control_checks,
@@ -575,6 +629,8 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
               'object_pass_scope': 'Real setup and face/enable emitters; model draw and lighting helpers mocked; state sampled at draw entry',
               'dynamic_descriptor_checks': dynamic_checks,
               'dynamic_fallbacks': dynamic_fallbacks,
+              'initialized_shadow_checks': len(initialized_shadows),
+              'initialized_shadows': initialized_shadows,
               'mirror_scene_copy_checks': mirror_checks,
               'mirror_examples': mirror_examples,
               'mirror_scope': 'Real consumer/copy getter/framebuffer getter/setter/emitter; scene render and plane normalization mocked',

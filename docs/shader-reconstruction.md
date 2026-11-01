@@ -5,6 +5,34 @@ extended by a capture-free conditional subset preparer in Phase 157 below.
 This is not complete player first-run setup or a complete shader catalogue. It follows the
 [coverage/provenance work](shader-coverage.md).
 
+## Initialized LV depth resource (Phase 190)
+
+The explicit developer `--shadow-resource-path initialized-depth-lv` closes a
+conditional active-shadow profile. Fresh `00B9F430` / `00BA6998` initialization,
+depth enum `0x40` through `00BA1080`, the real framebuffer getter and the enabled
+`008103F0` LV pass supply normalized 2D depth, clear gamma, comparison 6 and
+linear/border sampling. `0082E330` publishes the depth source and converts its
+shadow-colour copy to non-depth. No captured descriptor supplies these values.
+
+Production shadow-alias allocation must succeed under the default local alias
+policy. Production takes the compare from the first depth-format binding even
+when unsampled. Earlier declared unknown/conflicting bindings reject; absence
+of an unlisted/stale earlier different compare remains an explicit prerequisite.
+The context does not establish actual live draw ownership or later overrides.
+Ordinary profiles still reject depth inputs and cannot discard shadow compare
+facts silently. Active environment/mirror bindings stay unresolved.
+
+The real constructor/getter/pass/callback chain passes 576 initialized descriptor
+checks and matching allocation-failure exclusions. Production renderer alias,
+first-compare and sampled-unit trimming statements pass 6,159 native cases.
+Two empty-cache 32-request proofs pass. Separately, all 214 newly matched retained
+HSR keys rebuild both shaders and exact fresh native pipelines, pass independent
+key/persisted-driver verification and reuse every driver blob. The complete
+material-profile comparison is 345/1,497 retained links; this is conditional
+independent reconstruction, not new starter entries or whole-game coverage.
+See the [workflow](shader-precompile.md#initialized-lv-shadow-resources-phase-190)
+and Phase 190 [progress](progress.md).
+
 ## Explicit dynamic resource absence (Phase 189)
 
 The capture-free material constructor now supports an explicit absent-resource
@@ -25,8 +53,8 @@ Two fresh 32-request samples pass shader/native creation, independent key and
 persisted-cache verification; the diverse sample covers all four callback
 signatures. Enumeration produces 7,698 conditional candidates for one context,
 not a claim that all of them are natively validated or used live. Actual pass
-ownership, active environment gamma, shadow compare/depth aliases and stutter
-benefit remain open. Shared rule set 2 is unchanged.
+ownership, active environment gamma and stutter benefit remain open. Phase 190
+adds the explicit initialized shadow resource context; shared rule set 2 is unchanged.
 See the [workflow](shader-precompile.md#asset-derived-dynamic-fallback-context-phase-189)
 and Phase 189 [evidence](progress.md#phase-189---asset-derived-dynamic-fallback-bindings-2026-11-02).
 

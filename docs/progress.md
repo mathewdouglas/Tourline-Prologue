@@ -9,6 +9,101 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 190 - Initialized LV shadow resource reconstruction (2026-11-02)
+
+Developer material preparation gains explicit `--shadow-resource-path
+initialized-depth-lv`. It reconstructs active shadow and shadow-colour bindings
+from a fresh original framebuffer descriptor, successful local depth setup and
+the enabled LV pass. It is separate from the absent-resource context; combining
+them rejects. The verified disc ELF gates preparation and shadow rule version 1
+is pinned in material resume identity. Omission restores prior construction in
+separate output; player defaults, shipped starter, renderer and release stay unchanged.
+
+The structural owner lead is `008178A8`: its shadow framebuffer at object +0x18
+is initialized through `0082A210` with format enum `0x40` and flags `0x302`.
+The isolated oracle executes real `00B9F430` / `00BA6998` initialization,
+`00BA1080` with real `00BD0080` conversion and `00B9EE50` mip calculation,
+the `008293A8` getter, `008103F0` pass, `0082E330` assignment/conversion and
+both `00D6D930` / `00D6D898` callbacks. Resource allocation, scene rendering and
+virtual dispatch remain controlled boundaries; this is not a complete live-owner trace.
+
+The initialized primary has a 2D non-cube depth base format `0x90`, clear read
+gamma, normalized coordinates and comparison 6. The LV pass gives address
+`0x60030404` and filter `0x02022000` (sampler 9). Its copied colour descriptor
+converts to non-depth base `0x85`, retaining those sampling/gamma/coordinate
+facts. These are constructor/pass results, not values taken from the retained
+shadow word reported in Phase 49. The old sampler-only `shadow-lv` path remains
+partial. New facts require the explicit initialized resource context.
+
+The producer/consumer oracle passes 576 success cases over poisoned incoming
+storage, two dimensions, automatic/single/multiple mips, both callbacks and all
+16 units. Corresponding allocation failures exclude the new chain. An initial
+probe exposed incomplete allocation-mock metadata: the real allocator writes its
+r7 mode at texture +0x23, which the getter uses for extents. The mock now writes
+that field from the actual input; the rerun passes. No game/runtime fix is inferred.
+
+A second native oracle extracts the production shadow-alias conditional, first
+depth-format compare loop, sampled-unit trimming and default location predicate
+from the isolated renderer. 6,159 cases cover alias disable/failure, local/main
+location, cube/volume, format bounds, unused units and earlier unsampled depth.
+The latter can change the compare. The profile rejects conflicting/unknown
+earlier declared bindings and inconsistent reconstructed sampling facts. Unlisted
+or stale earlier units must be absent or share comparison 6; default local alias
+allocation must succeed. Those are explicit prerequisites, not recovered live facts.
+Other alias redirects/later overrides remain excluded. Local depth uploads stay
+unsupported, and ordinary profiles reject explicit shadow-compare facts.
+
+Asset-only CCW/RGBA16-MSAA2/active-dither enumeration accepts 56,593 material
+definitions, including 38,732 using initialized shadow facts, and deduplicates
+to 2,630 conditional candidates. These are constructor candidates, not all
+natively prepared pipelines. The eight RGBA16 face/target/dither contexts give
+20,538 distinct candidates after deduplication. Their manifest is frozen before
+the retained HSR oracle is opened. `audit_material_variants.py` exposes the
+resource option and records its rule version. All 131 previous material-profile
+matches remain, and 214 additional profiles match, for 345/1,497 retained links.
+Every added match has sampled-shadow profile `0x62000`. Unknown active
+environment/mirror resources still exclude materials; counts are not whole-game coverage.
+
+Two separate empty application caches pass 32-request shader/native tests.
+The prefix sample includes 27 shadow requests; the diverse sample has 32 distinct
+program pairs across shadow-only and shadow/shadow-colour combinations. Every
+request creates a distinct native key within its sample; the diverse repeat
+uses cached blobs for all 32. A separate proof freezes the complete independently
+constructed manifest, then uses the retained oracle only to select validation
+cases. All 214 newly matched candidates rebuild both shaders, construct fresh
+native state with expected key zero, and exactly reproduce their retained native
+keys. No captured state/descriptor is copied into requests. Independent root-
+signature/key recomputation and persisted-envelope verification pass all 214;
+a second native run uses cached driver blobs for all 214. This validates the
+newly matched keys under their explicit contexts, not every enumerated candidate.
+
+The actual CLI resume passes all 32 prefix requests and cached-driver calls.
+Rollback/context changes, contradictory absent/active choices and wrong ELF
+reject without changing existing output/cache files; wrong-build output is not
+created. Synthetic shadow/ordinary/fallback/variant/texture tests and template
+compatibility checks pass. One read-only audit was started before the diverse
+native check finished, then stopped; it was rerun after that check, sequentially.
+No concurrent game/native compiler was started. Original checkout, assets and
+processes stay untouched; no shadercache is deleted/moved and no game-derived
+outputs are tracked. Feature push uses `[skip ci]`; no main/tag/release change.
+
+This improves independent material reconstruction. The observed starter already
+contains these retained pipelines; it is not reissued. Player packed-file
+integration of asset-rule enumeration, active environment gamma/ownership,
+remaining pass/shared contexts and measured live use/stutter reduction remain.
+
+Local evidence:
+
+- `scratch/global-registry-763c9062f129486783a46f950d0b1414/report.json`
+- `scratch/shadow-resources-native-1e7ab98a9d2c49dab9ac94274b63cf8c/report.json`
+- `scratch/a190-shadow/{manifest,report}.json`, `pipeline-batch-0.log`
+- `scratch/a190-diverse/{manifest,report}.json`, `native-first.log`, `native-reuse.log`
+- `scratch/a190-audit-final/{manifest,report}.json`
+- `scratch/a190-matches/{candidates,manifest,report}.json`, native first/reuse logs
+- `scratch/active-shadow-190/{oracle-final.log,backend.log,prepare.log,diverse.log,audit-final.log,matches.log,resume.log,rollback.json}`
+- Ignored `proof.py`, `prove_matches.py` and `rollback.py` in that investigation
+  folder retain selection, construction-before-oracle order and preservation checks.
+
 ## Phase 189 - Asset-derived dynamic fallback bindings (2026-11-02)
 
 Roadmap item 3 gains another capture-free rule: developer material preparation

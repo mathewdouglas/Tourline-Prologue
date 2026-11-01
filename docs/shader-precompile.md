@@ -42,9 +42,9 @@ The remaining work is:
    pass ownership/state so valid pipelines can be derived without observing every
    draw. Keep unknown bindings unresolved. This remains the main scaling path
    toward GT5; GT5 also needs its own asset formats and rendering contexts verified.
-   Phase 189 adds complete built-in fallback bindings under an explicit dynamic
-   resource-absence context. Active shadow/environment state and live ownership
-   are still unresolved; this does not enlarge the shipped observed starter.
+   Phases 189-190 add built-in fallbacks and an explicit initialized LV depth
+   resource context. Active environment state and complete live ownership are
+   still unresolved; these rules do not enlarge the shipped observed starter.
 4. **Complete settings and context support.** Cover remaining MSAA, anisotropy,
    precision, root-signature, branching-vertex and pass/attachment combinations.
    Automatic selection currently handles supported translation modes only; custom
@@ -117,12 +117,56 @@ requests produce 25 distinct native pipelines. A separate repeat uses driver
 blobs for all 32 requests. Cold/warm callback tests cover every sampler unit.
 No live rendering/stutter test or whole-game coverage claim follows.
 
-The next active-material blockers are independently recovering the depth format,
-depth alias and compare writer for shadow bindings, and the actual environment
-gamma writer/ownership. A new shared `ConvoluteResampleX` wrapper is only a lead:
+Phase 190 below recovers a conditional initialized depth/LV chain. Remaining
+active-material blockers include actual environment gamma/ownership and proving
+the shadow context's prerequisites for live draws. A new shared
+`ConvoluteResampleX` wrapper is only a lead:
 its inherited draw state needs a native oracle before adding another full profile.
 The existing ColorCorrect/Convolution rules remain unchanged. See Phase 189 in
 [progress](progress.md) and [reconstruction](shader-reconstruction.md).
+
+### Initialized LV shadow resources (Phase 190)
+
+Developer `--shadow-resource-path initialized-depth-lv` constructs shadow profiles
+from a fresh original framebuffer descriptor, depth-format enum `0x40`, successful
+local setup and the enabled LV pass. The original constructors initialize gamma,
+normalized coordinates and comparison function 6; the LV pass forces linear
+sampling/border wrap and publishes the depth descriptor. Its shadow-colour copy
+is converted to non-depth format. Both bindings are reconstructed; the old
+sampler-only `shadow-lv` proof still leaves resource facts unresolved.
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/shadow-lv-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --shadow-resource-path initialized-depth-lv --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/shadow-lv-proof
+```
+
+This context requires the default local shadow-alias path to be enabled and its
+allocation to succeed. It assumes no later descriptor overrides or other alias
+redirects. Production chooses the comparison from the first depth-format binding,
+including unsampled units. Conflicting or unresolved earlier declared bindings
+are rejected; any unlisted/stale earlier depth binding must have the same
+comparison or be absent. That residual state is an explicit prerequisite, not a
+fact recovered from a captured draw. Active environment/mirror bindings stay
+unresolved and can still exclude a material. Local depth uploads remain outside
+the ordinary material rule. Ordinary profiles cannot silently drop shadow state.
+
+The same verified disc ELF gate applies. Resume identity records shadow rule 1.
+Omit the option and use separate output to roll back; changing the resumed
+context rejects without modifying its cache. It cannot be combined with the
+contradictory all-dynamic-resources-absent context. No renderer/draw-policy change
+or player default is introduced.
+
+`audit_material_variants.py` accepts the same option. It freezes the asset-derived
+candidate manifest before opening the retained oracle. Matching a profile is
+distinct from reproducing shader bytecode and the full native pipeline key.
+See Phase 190 in [progress](progress.md) for the native proofs, measured retained
+matches and remaining live-ownership/stutter limits. The shipped starter remains
+the existing observed-state set; these are independent construction rules.
 
 ### Exact vertex batching (Phases 183-184)
 

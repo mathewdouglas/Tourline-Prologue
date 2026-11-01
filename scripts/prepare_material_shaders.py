@@ -17,7 +17,7 @@ from shader_coverage import ROOT, fnv64, bounded_read
 from shader_materials import scan
 from shader_material_state import model_states
 from shader_material_textures import model_textures, with_global_sampler_path
-from shader_material_profile import ordinary_profile, ASSUMPTIONS
+from shader_material_profile import ordinary_profile, shadow_lv_profile, ASSUMPTIONS, SHADOW_ASSUMPTIONS
 from shader_pass_state import TARGET_PATHS, native_target_fields
 from shader_reconstruct import NativeCompiler, offline_env, run_offline
 
@@ -53,9 +53,11 @@ def save_code(path, code):
         path.write_bytes(code)
 
 
-def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynamic_path=None):
+def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynamic_path=None, shadow_resource_path=None):
     if dynamic_path not in (None, 'absent'):
         raise ValueError('unsupported dynamic resource path')
+    if shadow_resource_path not in (None, 'initialized-depth-lv') or (shadow_resource_path and dynamic_path):
+        raise ValueError('unsupported or conflicting shadow resource path')
     index = json.loads((catalog / 'index.json').read_text())
     files = sorted({str(Path(s['file']).resolve()) for s in index['sources']})
     counts, rejected, seen, jobs = Counter(), Counter(), set(), []
@@ -77,7 +79,8 @@ def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynami
                         rejected['material tables: ' + str(exc)] += 1
                         continue
                     rejected.update(state_rejected); rejected.update(texture_rejected)
-                    definitions = {d['definition']: with_global_sampler_path(d, global_path, dynamic_path=dynamic_path) for d in textures}
+                    definitions = {d['definition']: with_global_sampler_path(d, global_path, dynamic_path=dynamic_path,
+                                   shadow_path='shadow-lv-depth' if shadow_resource_path else None) for d in textures}
                     for pair in pairs:
                         for binding in bindings.get(pair['material'], ()):
                             counts['material_candidates'] += 1
@@ -87,7 +90,8 @@ def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynami
                                 continue
                             values = states[binding['state']]
                             try:
-                                state = ordinary_profile(definition, values, pair['fragment_control'], object_path, target_path)
+                                builder = shadow_lv_profile if shadow_resource_path else ordinary_profile
+                                state = builder(definition, values, pair['fragment_control'], object_path, target_path)
                             except ValueError as exc:
                                 rejected[str(exc)] += 1
                                 continue
@@ -101,6 +105,10 @@ def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynami
                                                     if b.get('global_path') == 'absent' and definition['used'] & (1 << b['unit']))
                             if fallback_units:
                                 counts['dynamic_fallback_material_candidates'] += 1
+                            shadow_units = sorted(b['unit'] for b in definition['bindings']
+                                                  if b.get('global_path') == 'shadow-lv-depth' and definition['used'] & (1 << b['unit']))
+                            if shadow_units:
+                                counts['initialized_shadow_material_candidates'] += 1
                             if key in seen:
                                 counts['duplicate_candidates'] += 1
                                 continue
@@ -115,6 +123,8 @@ def enumerate_jobs(catalog, object_path, target_path, global_path, limit, dynami
                                         {k: b[k] for k in ('name', 'kind', 'identifier', 'unit')}
                                         for b in definition['bindings']
                                         if b.get('global_path') == 'absent' and definition['used'] & (1 << b['unit'])]
+                                if shadow_units:
+                                    jobs[-1]['initialized_shadow_units'] = shadow_units
         if number % 100 == 0:
             print(f'Containers {number + 1}/{len(files)}; eligible unique candidates {len(seen)}', flush=True)
     return jobs, dict(containers=len(files), counts=dict(counts), rejected=dict(rejected))
@@ -224,12 +234,16 @@ def main():
     ap.add_argument('--global-sampler-path', choices=('active', 'fallback'))
     ap.add_argument('--dynamic-resource-path', choices=('absent',),
                     help='Explicit null environment/shadow/mirror resources; never inferred from captures')
+    ap.add_argument('--shadow-resource-path', choices=('initialized-depth-lv',),
+                    help='Fresh initialized depth framebuffer and LV pass; explicit alias/compare prerequisites')
     ap.add_argument('--context-set', choices=('supported', 'rgba16'),
                     help='Prepare the explicit supported context union instead of a single context')
     ap.add_argument('--limit', type=int, default=8, help='Unique candidates to prepare (0: all eligible; default 8)')
     ap.add_argument('--enumerate-only', action='store_true')
     ap.add_argument('--resume', action='store_true', help='Reuse shader bytecode; always validate driver pipelines again')
     args = ap.parse_args()
+    if args.dynamic_resource_path and args.shadow_resource_path:
+        ap.error('Absent and initialized shadow resources are contradictory contexts')
     if args.context_set:
         if args.object_pass_path or args.native_target_path or args.global_sampler_path:
             ap.error('--context-set cannot be combined with individual context choices')
@@ -248,7 +262,7 @@ def main():
         ap.error('Output already exists; choose a new directory or --resume')
     if b'gt5p.exe' in subprocess.run(['tasklist', '/FI', 'IMAGENAME eq gt5p.exe', '/NH'], capture_output=True).stdout.lower():
         ap.error('Close the game before material preparation')
-    if args.dynamic_resource_path:
+    if args.dynamic_resource_path or args.shadow_resource_path:
         check_dynamic_game(args.game_root.resolve())
     identity = dict(schema=1, engine=hashlib.sha256(args.engine.read_bytes()).hexdigest(),
                     decoder=hashlib.sha256(args.decoder.read_bytes()).hexdigest(), object_path=args.object_pass_path,
@@ -257,15 +271,19 @@ def main():
         identity.update(schema=2, context_set=args.context_set)
     if args.dynamic_resource_path:
         identity.update(dynamic_resource_path=args.dynamic_resource_path, dynamic_rule_version=1)
+    if args.shadow_resource_path:
+        identity.update(shadow_resource_path=args.shadow_resource_path, shadow_rule_version=1)
     if output.exists() and json.loads((output / 'identity.json').read_text()) != identity:
         ap.error('Preparation engine/decoder/context changed; choose a new output directory')
     started = time.perf_counter()
     if args.context_set:
         from shader_material_variants import enumerate_variants
-        jobs, inventory = enumerate_variants(args.catalog, args.context_set, args.limit, dynamic_path=args.dynamic_resource_path)
+        jobs, inventory = enumerate_variants(args.catalog, args.context_set, args.limit, dynamic_path=args.dynamic_resource_path,
+                                             shadow_resource_path=args.shadow_resource_path)
     else:
         jobs, inventory = enumerate_jobs(args.catalog, args.object_pass_path, args.native_target_path,
-                                         args.global_sampler_path, args.limit, dynamic_path=args.dynamic_resource_path)
+                                         args.global_sampler_path, args.limit, dynamic_path=args.dynamic_resource_path,
+                                         shadow_resource_path=args.shadow_resource_path)
     enumeration_seconds = time.perf_counter() - started
     output.mkdir(parents=True, exist_ok=True)
     (output / 'identity.json').write_text(json.dumps(identity, indent=2) + '\n')
@@ -277,6 +295,8 @@ def main():
     if args.dynamic_resource_path:
         report['assumptions'] = list(ASSUMPTIONS) + [
             'all supported dynamic environment/shadow/mirror resource pointers null; initialized built-ins unchanged']
+    if args.shadow_resource_path:
+        report['assumptions'] = list(SHADOW_ASSUMPTIONS)
     (output / 'manifest.json').write_text(json.dumps([
         {k: v for k, v in job.items() if k not in ('vertex', 'fragment')} for job in jobs], indent=2) + '\n')
     (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
