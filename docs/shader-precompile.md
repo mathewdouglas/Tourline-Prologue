@@ -42,6 +42,9 @@ The remaining work is:
    pass ownership/state so valid pipelines can be derived without observing every
    draw. Keep unknown bindings unresolved. This remains the main scaling path
    toward GT5; GT5 also needs its own asset formats and rendering contexts verified.
+   Phase 189 adds complete built-in fallback bindings under an explicit dynamic
+   resource-absence context. Active shadow/environment state and live ownership
+   are still unresolved; this does not enlarge the shipped observed starter.
 4. **Complete settings and context support.** Cover remaining MSAA, anisotropy,
    precision, root-signature, branching-vertex and pass/attachment combinations.
    Automatic selection currently handles supported translation modes only; custom
@@ -63,6 +66,63 @@ settings, followed by the observed misses and costs it identifies. Stable featur
 should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
+
+### Asset-derived dynamic fallback context (Phase 189)
+
+Developer `prepare_material_shaders.py --dynamic-resource-path absent` extends
+the existing capture-free material constructor. It requires the verified disc
+ELF in the private game root and assumes all supported dynamic environment,
+shadow, shadow-colour and mirror resource pointers are null at binding time.
+This chooses the original callbacks' fallback branch explicitly. It never treats
+an unresolved binding, absent capture, or supplied active descriptor as evidence
+of a null resource. Dither/PCF active/fallback remains a separate explicit choice.
+
+The original initialized fallbacks supply known non-depth shape, read gamma,
+normalized coordinates and sampling. Environment/mirror use a cube; shadows use
+2D. Material state, GPU-fetch inputs, compact fragment control and the explicit
+object/target context still supply the other fields. Local cube/depth uploads,
+unknown global signatures, duplicate units and local/global overlaps retain
+their existing rejection. Active environment/shadow/mirror options cannot be
+combined with the contradictory absent context. No new renderer switch, live
+worker, queue, draw policy or player-cache selection is introduced.
+
+For a bounded developer proof, using original assets/catalogue read-only and a
+private game root containing the user's verified `input/EMAIN.ELF`:
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/dynamic-absent-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --dynamic-resource-path absent --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/dynamic-absent-proof
+```
+
+`--enumerate-only` constructs metadata without running compilers. Existing
+`--context-set supported|rgba16` can expand explicit face/target/dither choices;
+it does not select live ownership. Jobs record the fallback signatures/units
+that justified the rule. Resume requires the same engine, decoder and context,
+including the versioned dynamic rule. Omit `--dynamic-resource-path` to restore
+the prior constructor, using a separate output; trying to change this context
+inside an existing resumed generation rejects without modifying that cache.
+
+The original-asset scan finds 7,698 distinct candidate profiles for the explicit
+CCW/RGBA16-MSAA2/active-dither/absent-resource context. These are constructor
+candidates, not all natively prepared or observed live. Two empty-cache samples
+of 32 requests pass both-stage compilation, native creation, independent key
+recomputation and persisted driver-envelope checks. The diverse sample spans all
+four callback signatures and ten authored signature/unit combinations; its 32
+requests produce 25 distinct native pipelines. A separate repeat uses driver
+blobs for all 32 requests. Cold/warm callback tests cover every sampler unit.
+No live rendering/stutter test or whole-game coverage claim follows.
+
+The next active-material blockers are independently recovering the depth format,
+depth alias and compare writer for shadow bindings, and the actual environment
+gamma writer/ownership. A new shared `ConvoluteResampleX` wrapper is only a lead:
+its inherited draw state needs a native oracle before adding another full profile.
+The existing ColorCorrect/Convolution rules remain unchanged. See Phase 189 in
+[progress](progress.md) and [reconstruction](shader-reconstruction.md).
 
 ### Exact vertex batching (Phases 183-184)
 

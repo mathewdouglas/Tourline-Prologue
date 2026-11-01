@@ -286,6 +286,10 @@ extern "C" __declspec(dllexport) void dynamic_emit(uint32_t identifier,uint32_t 
  else assert(!"Unsupported dynamic identifier");
  assert(vm_read32(copy_state+8)==0x1e10034);
 }
+extern "C" __declspec(dllexport) void reset_builtins() {
+ uint32_t block=vm_read32(0x133bc58-0x5010);bounds(block,0x100);
+ memset(memory+block,0,0x100);
+}
 extern "C" __declspec(dllexport) uint32_t emit(uint32_t identifier,uint32_t unit,uint32_t width,uint32_t address,uint32_t active) {
  assert(unit<16 && width>0 && width<4096);
  ppu_context ctx={0};ctx.gpr[1]=0x1ff0000;ctx.gpr[2]=0x133bc58;
@@ -350,6 +354,8 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
             payload = ctypes.create_string_buffer(data[off:off + size])
             lib.load(va, payload, size)
     base = lib.word(lib.word(0x133bc58 - 0x66f8) - 0x7fe0)
+    builtin_base = lib.word(0x133bc58 - 0x5010)
+    assert not any(lib.word(builtin_base + j * 4) for j in range(64)), 'Expected zeroed fallback BSS'
     assert base and base + 0x9c0 < 0x1ff0000
     slots = [71, 87, 94, 96, 103, 104, 115]
     expected = {
@@ -405,6 +411,7 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
                     emitted.append({'identifier': identifier, 'unit': unit, 'width': width,
                                     'active': bool(active), 'resource_address': address, 'words': commands})
     dynamic_checks = 0
+    dynamic_fallbacks = []
     for identifier in (71, 87, 96, 115):
         for unit in range(16):
             for address in (0x101, 0x303, 0x301, 0x103):
@@ -418,10 +425,32 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
                             assert commands[j] == 0x12340000 + j
                     assert commands[3] == address and commands[6] == filtering
                     dynamic_checks += 1
-            lib.dynamic_emit(identifier, unit, 0, 0, 0)
-            assert lib.word(0x1e1000c) == 0x60010101
-            assert lib.word(0x1e10018) == 0x02022000
-            dynamic_checks += 1
+            lib.reset_builtins()
+            previous = None
+            for cold in (True, False):
+                # Cold BSS initialization, then reuse after a supplied descriptor
+                # with unrelated state. Neither takes fields from a live capture.
+                lib.dynamic_emit(identifier, unit, 0xffffffff, 0xffffffff, 0)
+                commands = [lib.word(0x1e10000 + j * 4) for j in range(13)]
+                name, kind = {71: ('envMapSampler', 0x901), 87: ('realTimeShadowMap', 0x601),
+                              96: ('realTimeShadowMapColor', 0x601), 115: ('mirrorMapSampler', 0x601)}[identifier]
+                d = dict(used=1 << unit, bindings=[], globals=[dict(name=name, kind=kind, identifier=identifier, unit=unit)])
+                resolved = with_global_sampler_path(d, dynamic_path='absent')
+                b = resolved['bindings'][0]
+                assert (commands[3], commands[6]) == (b['address'], b['filtering'])
+                assert sampler_register(commands[3], commands[6]) == b['sampler'] == 8
+                assert commands[2] == (0x1852d if identifier in (71, 115) else 0x18529)
+                assert commands[7] == 0x10001
+                actual = dict(d, globals=[], bindings=[dict(unit=unit, format=commands[2], address=commands[3],
+                              width=commands[7] >> 16, height=commands[7] & 65535)])
+                assert texture_fields(resolved, True) == texture_fields(actual, True)
+                assert not texture_fields(resolved, True)['unresolved_units']
+                if previous is not None:
+                    assert commands == previous, 'Warm fallback changed after a supplied resource'
+                previous = commands
+                dynamic_fallbacks.append(dict(identifier=identifier, unit=unit, cold=cold, words=commands))
+                dynamic_checks += 1
+                lib.dynamic_emit(identifier, unit, 0x60730303, 0x01052000, 1)
     shadow_checks = 0
     for address in (0, 0x101, 0x303, 0xffffffff):
         for minimum in range(8):
@@ -545,6 +574,7 @@ extern "C" __declspec(dllexport) void init(uint32_t gate,uint32_t arg,uint32_t v
               'object_pass_checks': object_checks,
               'object_pass_scope': 'Real setup and face/enable emitters; model draw and lighting helpers mocked; state sampled at draw entry',
               'dynamic_descriptor_checks': dynamic_checks,
+              'dynamic_fallbacks': dynamic_fallbacks,
               'mirror_scene_copy_checks': mirror_checks,
               'mirror_examples': mirror_examples,
               'mirror_scope': 'Real consumer/copy getter/framebuffer getter/setter/emitter; scene render and plane normalization mocked',

@@ -144,14 +144,19 @@ def known_sampler_key(definition):
     return key, mask
 
 
-def with_global_sampler_path(definition, path=None, shadow_path=None, environment_path=None, mirror_path=None, environment_texture_path=None):
+def with_global_sampler_path(definition, path=None, shadow_path=None, environment_path=None, mirror_path=None, environment_texture_path=None, dynamic_path=None):
     """Add measured global sampler candidates for explicitly chosen pass paths.
 
     Captures never choose the path here. Unknown signatures, duplicate global
-    units and local/global overlaps stay unresolved. Only sampler state is added.
+    units and local/global overlaps stay unresolved. Dynamic absence is an explicit
+    callback branch, never inferred from a captured descriptor or missing metadata.
     """
-    if path is None and shadow_path is None and environment_path is None and mirror_path is None and environment_texture_path is None:
+    if path is None and shadow_path is None and environment_path is None and mirror_path is None and environment_texture_path is None and dynamic_path is None:
         return definition
+    if dynamic_path not in (None, 'absent'):
+        raise ValueError('unsupported dynamic resource path')
+    if dynamic_path and any((shadow_path, environment_path, mirror_path, environment_texture_path)):
+        raise ValueError('dynamic absence conflicts with active resource paths')
     if path not in (None, 'active', 'fallback'):
         raise ValueError('unsupported global sampler path')
     if shadow_path not in (None, 'shadow-lv'):
@@ -169,6 +174,9 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
     globals_ = definition.get('globals', ())
     counts = Counter(g['unit'] for g in globals_)
     local_units = {b['unit'] for b in definition['bindings']}
+    # A missing scalar alias still declares a local use of the unit. A global
+    # callback must not silently resolve that local/global ownership conflict.
+    local_units.update(b['unit'] for b in definition.get('unresolved', ()) if 'unit' in b)
     bindings, unresolved = list(definition['bindings']), []
     for g in globals_:
         signature = (g['name'], g['kind'], g['identifier'])
@@ -177,10 +185,18 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
             ('realTimeShadowMap', 0x601, 87), ('realTimeShadowMapColor', 0x601, 96)}
         environment = environment_path is not None and signature == ('envMapSampler', 0x901, 71)
         mirror = mirror_path == 'scene-copy' and signature == ('mirrorMapSampler', 0x601, 115)
-        if not (dither or shadow or environment or mirror) or counts[g['unit']] != 1 or g['unit'] in local_units:
+        absent = dynamic_path == 'absent' and signature in {
+            ('envMapSampler', 0x901, 71), ('realTimeShadowMap', 0x601, 87),
+            ('realTimeShadowMapColor', 0x601, 96), ('mirrorMapSampler', 0x601, 115)}
+        if not (dither or shadow or environment or mirror or absent) or counts[g['unit']] != 1 or g['unit'] in local_units:
             unresolved.append(g)
             continue
-        if mirror:
+        if absent:
+            # Real callbacks select initialized non-depth built-ins: BA6B40
+            # supplies the cube (environment/mirror); BA6C68 supplies the 2D
+            # shadow fallback. BA6998/BA6590 fix normalized coordinates/gamma.
+            address, filtering, selected_path = 0x60010101, 0x02022000, dynamic_path
+        elif mirror:
             # Linear filtering fixes bank bits 2..3. Wrap bits 0..1 remain unknown.
             address, filtering, selected_path = 0, 0x02020000, mirror_path
         elif environment:
@@ -198,6 +214,9 @@ def with_global_sampler_path(definition, path=None, shadow_path=None, environmen
         if environment and environment_texture_path:
             facts = dict(shape='cube' if environment_texture_path == 'framebuffer-cube' else '2d',
                          gamma=None, unnormalized=False)
+        if absent:
+            facts = dict(shape='cube' if g['identifier'] in (71, 115) else '2d',
+                         gamma=False, unnormalized=False)
         bindings.append(dict(g, address=address, filtering=filtering, texture_facts=facts,
                              sampler=sampler_register(address, filtering),
                              global_path=selected_path, sampler_mask=12 if mirror else 15,

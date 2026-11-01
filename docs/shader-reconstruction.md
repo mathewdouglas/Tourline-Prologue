@@ -5,6 +5,31 @@ extended by a capture-free conditional subset preparer in Phase 157 below.
 This is not complete player first-run setup or a complete shader catalogue. It follows the
 [coverage/provenance work](shader-coverage.md).
 
+## Explicit dynamic resource absence (Phase 189)
+
+The capture-free material constructor now supports an explicit absent-resource
+context. Original environment/mirror callbacks select an initialized non-depth
+cube fallback; shadow/shadow-colour select a non-depth 2D fallback. Their sampler,
+gamma and normalized-coordinate facts are independently known and verified using
+real constructors and emitters, including cold initialization and warm reuse.
+Active-resource state is not inferred from these fallback values.
+
+`prepare_material_shaders.py --dynamic-resource-path absent` selects this context,
+alongside the existing explicit object/target/dither choices. Unknown signatures,
+duplicate units, local/global overlap and missing local facts remain unresolved.
+The disc ELF is verified before output creation/reuse and the rule is versioned
+in resume identity. Omitting the option restores prior construction in a separate
+output. Conditional fallback cubes do not enable arbitrary local cube materials.
+
+Two fresh 32-request samples pass shader/native creation, independent key and
+persisted-cache verification; the diverse sample covers all four callback
+signatures. Enumeration produces 7,698 conditional candidates for one context,
+not a claim that all of them are natively validated or used live. Actual pass
+ownership, active environment gamma, shadow compare/depth aliases and stutter
+benefit remain open. Shared rule set 2 is unchanged.
+See the [workflow](shader-precompile.md#asset-derived-dynamic-fallback-context-phase-189)
+and Phase 189 [evidence](progress.md#phase-189---asset-derived-dynamic-fallback-bindings-2026-11-02).
+
 ## Explicit host depth attachment (Phase 164)
 
 Shared candidate preparation accepts `--depth-context backed|colour-only|both`,

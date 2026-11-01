@@ -1,4 +1,4 @@
-"""Capture-free translation candidate for explicit ordinary 2D upload contexts.
+"""Capture-free profile for ordinary 2D uploads and explicit built-in fallbacks.
 
 This is a conditional material profile, not proof of actual draw/pass ownership.
 Unknown sampled bindings fail closed, including globals with only shape known.
@@ -27,7 +27,9 @@ def ordinary_profile(definition, material, control, object_path, target_path):
         else:
             facts = binding.get('texture_facts') or {}
             shape, texel = facts.get('shape'), facts.get('unnormalized')
-        if shape != '2d' or texel is None:
+        fallback_cube = ('format' not in binding and binding.get('global_path') == 'absent'
+                         and shape == 'cube' and texel is False)
+        if (shape != '2d' and not fallback_cube) or texel is None:
             raise ValueError('ordinary profile requires known 2D coordinate facts')
         if unit < 4 and texel:
             low |= 1 << unit

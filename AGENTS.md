@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 188)
+## Start here: state of play (2026-11-02, Phase 189)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 188 is the latest).
+has the evidence, newest phase first (Phase 189 is the latest).
 
 ### What works now
+
+- **Asset-derived dynamic fallbacks (Phase 189):** developer material preparation
+  accepts explicit `--dynamic-resource-path absent`. Real null-resource callbacks
+  supply non-depth cube environment/mirror and 2D shadow fallbacks, including
+  sampler, gamma and normalized-coordinate facts. Unknown/overlapping bindings
+  stay unresolved; active resource state is not inferred. The disc ELF gates this
+  rule and resume pins it. Cold/warm callback checks and two fresh 32-request
+  shader/native samples pass, including all four authored callback signatures;
+  independent native keys, persistence, driver reuse and rejection preservation
+  verify. Asset enumeration finds 7,698 conditional candidates for one explicit
+  context, not 7,698 validated/live pipelines. Starter/player/release unchanged;
+  active shadow compare/environment gamma and actual pass ownership remain open.
 
 - **Validated preparation defaults (Phase 188):** at the user's request, an unset
   `GT5P_PREPARE_TRANSLATION` now selects `auto` in the development player helper.

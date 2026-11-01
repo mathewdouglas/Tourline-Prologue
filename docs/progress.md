@@ -9,6 +9,85 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 189 - Asset-derived dynamic fallback bindings (2026-11-02)
+
+Roadmap item 3 gains another capture-free rule: developer material preparation
+accepts `--dynamic-resource-path absent`. Exact original global records identify
+environment (71), shadow (87), shadow-colour (96) and mirror (115) callbacks.
+The explicitly selected null-pointer branches use initialized built-ins. No
+capture selects the branch or supplies construction values. The verified disc
+ELF gates the CLI before output creation/reuse; output identity pins dynamic
+rule version 1. Normal player defaults and the starter are unchanged.
+
+Real handlers `00D6CAA0`, `00D6D930`, `00D6D898` and `00D6D9C0` call the original
+fallback constructors. `00BA6B40` supplies a cube for environment/mirror;
+`00BA6C68` supplies a non-depth 2D shadow fallback. Shared `00BA6998` / `00BA6590`
+initialization fixes normalized coordinates and clear read gamma. The emitted
+address/filter are `0x60010101` / `0x02022000` (sampler bank 8). Address compare
+bits do not imply a depth-compare profile: this format is non-depth. Active
+resources retain their prior unresolved facts.
+
+The isolated native registry oracle checks the initial fallback BSS is zero,
+then tests cold initialization and warm reuse after a supplied unrelated
+descriptor for all four callbacks at every unit: 128 complete fallback cases.
+Actual emitted descriptor-derived shape/gamma/coordinate fields equal the rule.
+The dynamic check total is 1,152, including previous supplied-descriptor cases.
+Existing dither, environment, shadow, mirror, fragment-control and object-pass
+checks pass. No guest gameplay starts; resource/allocation/render boundaries
+retain the documented mock scope. Synthetic tests cover all 64 callback/unit
+combinations and explicit face/target variants, independent dither gates and
+wrong-build rejection. Existing texture/profile/variant/envelope tests pass.
+
+The ordinary profile still rejects unsupported local cube/depth uploads. It now
+admits the explicit initialized global cube fallback alongside ordinary 2D local
+uploads. Unknown signatures, overlapping/duplicate units, unsupported paths and
+contradictory active-resource options fail closed. A missing local scalar alias
+still reserves its unit, so a global cannot silently resolve that ownership
+conflict. Final enumeration confirms this conservative guard preserves the
+measured inventory and prepared prefix sample. Missing local bindings remain
+rejected. An original-asset scan of 601 containers / 1,106 models finds 115,339
+eligible material definitions for CCW/RGBA16-MSAA2/active-dither/null-dynamic
+resources. 97,478 use the new rule; deduplication yields 7,698 candidate profiles
+overall. These are conditional constructor candidates, not all prepared native
+keys or live coverage. Actual material/pass ownership remains unestablished.
+
+Two separate empty application-cache samples pass both shaders, fresh native
+construction and persistence. The prefix sample's 32 requests produce 21 distinct
+native keys. A second 32-request sample selects authored binding-signature
+diversity, then distinct program pairs, without capture input. It spans all four
+callback signatures and ten signature/unit combinations, including low-unit
+mirror cubes, shadow-only, shadow-colour and environment/shadow materials. It
+produces 25 distinct native keys. The new read-only `material_preparation_keys.py`
+recomputes every key from the serialized root signature, numeric descriptor,
+both verified bytecodes and input elements; it checks initial requests have no
+captured native state and verifies persisted driver envelopes. Both samples
+pass. Requests sharing a native key are not counted as distinct pipelines.
+
+The prefix repeat passes all 32 requests with 32 cached-blob calls. Omitting the
+absent context on `--resume` rejects before modification; a different ELF rejects
+before output creation. A complete file/hash snapshot confirms existing proof
+cache/output preservation after both rejections. All tests and offline processes
+are sequential. Original checkout/assets/runtime/processes remain untouched;
+no shadercache is deleted or moved and no game-derived output is tracked.
+
+Grok read-only investigations confirm active-material blockers remain the
+shadow depth/compare/alias writer and environment gamma/ownership. Observed HSR
+counts are ranking evidence, not reconstruction inputs. Shared wrapper `00820488`
+/ caller `0081E048` makes `ConvoluteResampleX` a follow-up lead, but inherited
+fixed-function state and descriptor packets need a native oracle. No third
+shared profile is added by analogy. No live draw, stutter, whole-game or GT5
+compatibility claim follows. Main/tag/release stay unchanged; push `[skip ci]`.
+
+Local evidence:
+
+- `scratch/global-registry-0d3c1743cea44d4d90382747da533133/report.json`
+- `scratch/a189-absent/{manifest,report}.json` and `pipeline-batch-0.log`
+- `scratch/a189-mixed/{manifest,report}.json` and `native.log`
+- `scratch/a189-final-inventory/{manifest,report}.json`
+- `scratch/asset-rule-189/{rank.json,global-verified.log,prepare.log,resume.log,mixed.log,rollback.json}`
+- Ignored `scratch/asset-rule-189/mixed.py` records diversity selection/proof;
+  `rollback.py` records preservation checks alongside their local outputs.
+
 ## Phase 188 - Validated settings selection becomes the player default (2026-11-02)
 
 The user requested that new features become defaults once appropriately
