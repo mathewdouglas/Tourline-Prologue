@@ -112,6 +112,45 @@ function Get-ToDaytona([int]$At = 6000) {
     $s -join ","
 }
 $DaytonaHold = Get-ToDaytona 6000
+
+# Course slot is the number of discrete RIGHT taps from the initial Course
+# Select cursor. Measured: slot 0 is High Speed Ring (no tap) and slot 1 is
+# Daytona (one tap at +3000-3100); slot 2 is Fuji Speedway F (verified on its
+# Race Mode page in Phase 180). The volume listing has 10 distinct
+# piece/course_logo_S assets, so slots 3..9 are an experimental ordinal ceiling.
+# That count is not a verified menu length and it does not name those slots.
+$CourseSlotExperimentalMax = 9
+
+function Get-CourseSelectPresses([int]$Slot) {
+    if ($Slot -lt 0 -or $Slot -gt $CourseSlotExperimentalMax) {
+        throw "Course slot $Slot is outside the experimental range 0..$CourseSlotExperimentalMax. Measured slots are 0 (HighSpeedRing), 1 (Daytona), 2 (FujiSpeedwayF)."
+    }
+    $s = New-Object System.Collections.Generic.List[string]
+    for ($k = 0; $k -lt $Slot; $k++) {
+        $t = 3000 + 400 * $k
+        $s.Add("@CourseSelectRoot+$t-$($t+100):RIGHT")
+    }
+    # Slots 0 and 1 keep the Daytona confirm at +4500. Slot 2 matches the
+    # collected extra tap at +3400 and the same confirm. A later tap keeps the
+    # 1400 ms confirm gap used by slot 1 once it would otherwise land on the tap.
+    $cross = 4500
+    if ($Slot -ge 1) {
+        $lastEnd = 3100 + 400 * ($Slot - 1)
+        if ($lastEnd + 1000 -gt 4500) { $cross = $lastEnd + 1400 }
+    }
+    $s.Add("@CourseSelectRoot+$cross-$($cross+300):CROSS")
+    $s -join ","
+}
+
+# Same menu timing as Get-ToDaytona. Slot 1 reproduces that function's course
+# presses; slot 0 reproduces them with the single Daytona RIGHT removed.
+function Get-ToCourse([int]$At = 6000, [int]$Slot = 1) {
+    $s = @("@TopMenuTemplate+$At-$($At+300):CIRCLE")
+    foreach ($k in 0..3) { $t = $At + 1000 + 350 * $k; $s += "@TopMenuTemplate+$t-$($t+100):RIGHT" }
+    $s += "@TopMenuTemplate+$($At+3100)-$($At+3400):CROSS"
+    $s += (Get-CourseSelectPresses $Slot)
+    $s -join ","
+}
 $DaytonaRaceHold = "@PitSceneRoot+10000-10300:CROSS,@DrivingOptionRoot+3000-3300:CROSS"
 # On the starting grid the cursor rests on Start; Cross begins the race.
 # "$DaytonaHold,$DaytonaRaceHold,$DaytonaStartHold" -> driving the race.

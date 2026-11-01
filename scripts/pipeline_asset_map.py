@@ -218,16 +218,21 @@ def main():
         ap.add_argument('--'+name,type=Path,required=True)
     ap.add_argument('--trace',type=Path,action='append',required=True,help='Representative trace; repeat to combine sessions')
     ap.add_argument('--catalog',type=Path,help='Omit programs already found by the SHDS lookup')
+    ap.add_argument('--known-map',type=Path,action='append',default=[],
+                    help='Omit identities already in verified location maps; emit incremental locations only')
     args = ap.parse_args()
+    if len(args.known_map)>16:ap.error('Use at most 16 known location maps')
     output = isolated(args.output)
     if output.exists():
         ap.error('Use a fresh ignored output')
     records = read_template(args.template)['records']
     known = set()
+    for path in args.known_map:
+        known.update((r['stage'],r['id'],r['size']) for r in read(path)['records'])
     if args.catalog is not None:
         v,f,_ = locate(records,args.catalog,args.elf)
-        known = {(s,r[s]['sha256'],r[s]['size']) for r in records for s,found in (('vp',v),('fp',f))
-                 if r[s]['sha256'] in found}
+        known.update((s,r[s]['sha256'],r[s]['size']) for r in records for s,found in (('vp',v),('fp',f))
+                     if r[s]['sha256'] in found)
     document,stats = build(records,args.trace,args.assets,args.elf,known)
     output.mkdir(parents=True)
     save_report(output/'asset-map.json',document)

@@ -3,6 +3,11 @@
 This pragmatic developer workflow uses real draw state, not independent state
 reconstruction. It cannot discover scenes it never visits. All writes are in a
 private ignored output; the fixture must already be a copied local game dump.
+
+The default visit is still High Speed Ring then Daytona. --course-slots selects
+numeric Course Select ordinals instead, so additional tracks do not need a name
+map. --provenance is off unless requested; it records into <output>/provenance
+and exports a portable template with pipeline_template.py.
 """
 import argparse
 import hashlib
@@ -13,12 +18,97 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import time
 
 from shader_coverage import ROOT, bounded_read, fnv64
 from shader_reconstruct import offline_env, run_offline
 
-TRACKS = ('HighSpeedRing', 'Daytona')
+DEFAULT_TRACKS = ('HighSpeedRing', 'Daytona')
+MEASURED_COURSE_SLOTS = {'HighSpeedRing': 0, 'Daytona': 1, 'FujiSpeedwayF': 2}
+TRACKS = tuple(MEASURED_COURSE_SLOTS)
+# Distinct piece/course_logo_S assets in the read-only volume listing: 10.
+# Slots are cursor ordinals. Slots 0..2 are measured; the listing assigns no names.
+COURSE_SLOT_MAX = 9
+# Runtime clamps RSX_PSO_PROVENANCE_LIMIT to 1..16384 (rsx_pso_provenance.h).
+PROVENANCE_LIMIT = 16384
+
+
+def resolve_routes(tracks, course_slots):
+    """Return ordered visit descriptors. Default tracks stay name-tagged."""
+    if course_slots is None:
+        names = list(DEFAULT_TRACKS if tracks is None else tracks)
+        if any(name not in MEASURED_COURSE_SLOTS for name in names):
+            raise ValueError('Unknown measured route')
+        return [dict(slot=MEASURED_COURSE_SLOTS[name], label=name, tag_kind='track',
+                     identity='measured') for name in names]
+    if tracks is not None:
+        raise ValueError('Pass tracks or course slots, not both')
+    if not course_slots or len(set(course_slots)) != len(course_slots):
+        raise ValueError('Course slots must be a non-empty list of unique ordinals')
+    routes = []
+    for slot in course_slots:
+        if type(slot) is not int or isinstance(slot, bool) or not 0 <= slot <= COURSE_SLOT_MAX:
+            raise ValueError(f'Course slot {slot} is outside the experimental range 0..{COURSE_SLOT_MAX}')
+        label = next((name for name, measured in MEASURED_COURSE_SLOTS.items() if measured == slot), f'slot{slot}')
+        routes.append(dict(slot=slot, label=label, tag_kind='slot',
+                           identity='measured' if slot in MEASURED_COURSE_SLOTS.values() else 'experimental-unverified'))
+    return routes
+
+
+def provenance_directory(output):
+    """Owned recorder directory. The runtime requires the parent to exist and rejects a path of 448 characters or more."""
+    path = (output / 'provenance').resolve()
+    if output.resolve() not in path.parents:
+        raise ValueError('Provenance path escapes this run')
+    if len(str(path)) >= 448:
+        raise ValueError('Provenance path exceeds the runtime directory limit (447 characters)')
+    return path
+
+
+def template_destination(output):
+    primary = output / 'session-template.json'
+    if not primary.exists():
+        return primary
+    for number in range(2, 100):
+        candidate = output / f'session-template-{number}.json'
+        if not candidate.exists():
+            return candidate
+    raise ValueError('Too many session templates already exist; nothing was overwritten')
+
+
+def provenance_capture_state(logs, tags):
+    """Require the recorder's own enabled line. Return whether it reported an incomplete capture."""
+    missing, incomplete = [], False
+    for tag in tags:
+        err = logs / f'{tag}.err'
+        text = err.read_text(errors='replace') if err.exists() else ''
+        if '[pso-provenance] enabled:' not in text:
+            missing.append(tag)
+        if 'capture incomplete' in text:
+            incomplete = True
+    if missing:
+        raise ValueError('Provenance recorder did not start for: ' + ', '.join(missing))
+    return incomplete
+
+
+def export_session(engine, decoder, elf, trace, cache, destination):
+    if destination.exists():
+        raise ValueError('Template output exists; nothing was overwritten: ' + str(destination))
+    if not any(trace.glob('links_*.jsonl')):
+        raise ValueError('Provenance directory has no link log; nothing was exported')
+    cmd = [sys.executable, str(ROOT / 'scripts/pipeline_template.py'), 'export',
+           '--trace', str(trace), '--cache', str(cache), '--engine', str(engine),
+           '--decoder', str(decoder), '--elf', str(elf), '--output', str(destination)]
+    done = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, errors='replace', timeout=600)
+    stdout, stderr = done.stdout or '', done.stderr or ''
+    if done.returncode:
+        raise ValueError('Template export failed: ' + (stderr or stdout)[-2000:])
+    match = re.search(r'(\d+) template records:', stdout)
+    records = int(match.group(1)) if match else 0
+    if records <= 0:
+        raise ValueError('Template export produced no portable records: ' + stdout[-1000:])
+    return dict(records=records, exporter_log=stdout[-4000:])
 
 
 def save_report(path, report):
@@ -132,7 +222,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('fixture', 'engine', 'output'):
         ap.add_argument('--' + name, required=True, type=Path)
-    ap.add_argument('--tracks', nargs='+', choices=TRACKS, default=list(TRACKS))
+    ap.add_argument('--tracks', nargs='+', choices=TRACKS,
+                    help='Measured routes. Default is HighSpeedRing then Daytona. Mutually exclusive with --course-slots.')
+    ap.add_argument('--course-slots', nargs='+', type=int,
+                    help='Course Select ordinals 0..9. 0..2 are measured HighSpeedRing, Daytona and FujiSpeedwayF. '
+                         '3..9 are experimental and unnamed. Omit --tracks.')
+    ap.add_argument('--provenance', action='store_true',
+                    help='Record RSX_PSO_PROVENANCE under this output and export a portable template. Off by default.')
+    ap.add_argument('--decoder', type=Path,
+                    help='Production decoder.dll. Required with --provenance so the session template can be exported.')
     ap.add_argument('--seconds', type=int, default=90, help='Sampling seconds after the grid (30..900)')
     ap.add_argument('--passes', type=int, default=1, help='Visits per route (1..4); more visits can catch late async draws')
     ap.add_argument('--resolution', choices=('720p', '1080p'), default='1080p')
@@ -144,6 +242,12 @@ def main():
         ap.error('Use --seconds 30..900 and --passes 1..4')
     if args.prepare_only and not args.resume:
         ap.error('--prepare-only requires --resume')
+    if args.provenance and args.decoder is None:
+        ap.error('--provenance requires --decoder so the session can export a portable template')
+    try:
+        routes = resolve_routes(args.tracks, args.course_slots)
+    except ValueError as exc:
+        ap.error(str(exc))
     fixture, output, engine = isolated(args.fixture), isolated(args.output), args.engine.resolve()
     if fixture == output or fixture in output.parents or output in fixture.parents:
         ap.error('Output must be separate from the copied fixture')
@@ -161,10 +265,23 @@ def main():
             if path.is_symlink() or path.is_junction():
                 ap.error('The supplied fixture must contain copies, not links: ' + str(path))
     idle()
+    decoder = None
+    if args.provenance:
+        decoder = args.decoder.resolve()
+        isolated(decoder.parent)
+        if not decoder.is_file():
+            ap.error('Decoder is missing')
+    # Default config stays the historical track list. Slot and provenance keys
+    # are added only for those explicit modes, so an older resume still matches.
     config = dict(engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
                   fixture=str(fixture), elf_sha256=hashlib.sha256((fixture / 'input/EMAIN.ELF').read_bytes()).hexdigest(),
-                  tracks=args.tracks, seconds=args.seconds, passes=args.passes,
+                  tracks=[route['label'] for route in routes], seconds=args.seconds, passes=args.passes,
                   resolution=args.resolution, msaa=args.msaa)
+    if args.course_slots is not None:
+        config['course_slots'] = [route['slot'] for route in routes]
+    if args.provenance:
+        config['provenance'] = dict(limit=PROVENANCE_LIMIT,
+                                    decoder_sha256=hashlib.sha256(decoder.read_bytes()).hexdigest())
     report_path = output / 'report.json'
     if args.resume:
         report = json.loads(report_path.read_text())
@@ -174,12 +291,19 @@ def main():
         if output.exists():
             ap.error('Use a new output or --resume; no files were removed')
         output.mkdir(parents=True)
+        limitations = ['Only the supported routes/current car and selected settings are visited.',
+                       'No whole-game coverage or stutter-reduction guarantee.',
+                       'Driver blobs are local to this hardware/driver; retain recipes and code.',
+                       'Preparation finishes before play; do not bulk scan this cache during a benchmark.']
+        if args.course_slots is not None:
+            limitations.append('Course slots 0..2 are measured HighSpeedRing, Daytona and FujiSpeedwayF. '
+                               'Slots 3..9 are an experimental ordinal bound from 10 distinct course_logo_S assets and have no names.')
+        if args.provenance:
+            limitations.append('Provenance recording is diagnostic I/O under this output. '
+                               'The exported template contains recorded links only.')
         report = dict(schema=1, config=config, routes=[], status='initializing',
                       origin='Automatically learned real draw state and local bytecode, not independent asset reconstruction.',
-                      limitations=['Only the supported routes/current car and selected settings are visited.',
-                                   'No whole-game coverage or stutter-reduction guarantee.',
-                                   'Driver blobs are local to this hardware/driver; retain recipes and code.',
-                                   'Preparation finishes before play; do not bulk scan this cache during a benchmark.'])
+                      limitations=limitations)
         save_report(report_path, report)
         game = output / 'game'
         game.mkdir()
@@ -198,15 +322,24 @@ def main():
         ap.error('Run disc junction no longer points to the copied fixture')
     cache.mkdir(exist_ok=True)
     logs.mkdir(exist_ok=True)
+    prov = None
+    if args.provenance:
+        prov = provenance_directory(output)
+        if prov.exists() and (prov.is_symlink() or prov.is_junction()):
+            ap.error('Provenance directory must be a real directory inside this run')
+        prov.mkdir(exist_ok=True)
 
     def save():
         save_report(report_path, report)
 
     try:
+        if prov is not None:
+            report['provenance_directory'] = str(prov)
+            save()
         if not args.prepare_only:
             for number in range(1, args.passes + 1):
-                for track in args.tracks:
-                    tag = f'{number}-{track}'
+                for visit in routes:
+                    tag = f"{number}-{visit['label']}" if visit['tag_kind'] == 'track' else f"{number}-slot{visit['slot']}"
                     if any(r['tag'] == tag and r['status'] == 'visited' for r in report['routes']):
                         continue
                     idle()
@@ -220,11 +353,20 @@ def main():
                                RSX_SHADER_WARMUP='1', RSX_SHADER_WARMUP_SCAN='0', RSX_SHADER_WARMUP_BACKGROUND='1',
                                RSX_PSO_ASYNC='1', RSX_SHADER_ASYNC='1', RSX_PSO_RECIPES='1',
                                RSX_PSO_RECIPE_KEEP_DAYS='0', RSX_RACE_PREWARM='1',
-                               RSX_RACE_PREWARM_WAIT_MS='0', RSX_PSO_PROVENANCE='0', PAD_HOLD_MERGE='0', RSX_PRESENT_SYNC='1')
-                    cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(ROOT / 'scripts/test/race.ps1'),
-                           '-Track', track, '-Tag', tag, '-Seconds', str(args.seconds), '-SampleDelay', '0',
-                           '-FrameTest', '-RaceShots', '30', '-Engine', str(engine), '-GameRoot', str(game),
-                           '-OutputDirectory', str(logs), 'GT5P_RESOLUTION=' + args.resolution, 'RSX_MSAA=' + args.msaa]
+                               RSX_RACE_PREWARM_WAIT_MS='0', RSX_PSO_PROVENANCE='0' if prov is None else str(prov),
+                               PAD_HOLD_MERGE='0', RSX_PRESENT_SYNC='1')
+                    if prov is not None:
+                        env['RSX_PSO_PROVENANCE_LIMIT'] = str(PROVENANCE_LIMIT)
+                    cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(ROOT / 'scripts/test/race.ps1')]
+                    if visit['tag_kind'] == 'slot':
+                        cmd.extend(['-CourseSlot', str(visit['slot'])])
+                    if visit['identity'] == 'measured':
+                        cmd.extend(['-Track', visit['label']])
+                    cmd.extend(['-Tag', tag, '-Seconds', str(args.seconds), '-SampleDelay', '0',
+                                '-FrameTest', '-RaceShots', '30', '-Engine', str(engine), '-GameRoot', str(game),
+                                '-OutputDirectory', str(logs), 'GT5P_RESOLUTION=' + args.resolution, 'RSX_MSAA=' + args.msaa])
+                    if prov is not None:
+                        cmd.extend(['RSX_PSO_PROVENANCE=' + str(prov), 'RSX_PSO_PROVENANCE_LIMIT=' + str(PROVENANCE_LIMIT)])
                     print('Automatically visiting', tag, flush=True)
                     with (logs / (tag + '.runner.log')).open('wb') as stream:
                         proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT)
@@ -240,17 +382,38 @@ def main():
                     after = inventory(cache)
                     if after['rejected']:
                         raise ValueError('Learned recipe dependencies are damaged; inspect the cache')
-                    route = dict(tag=tag, status='visited', new_recipes=len(set(after['recipes']) - before),
+                    route = dict(tag=tag, status='visited', course_slot=visit['slot'],
+                                 course_identity=visit['identity'],
+                                 new_recipes=len(set(after['recipes']) - before),
                                  total_recipes=len(after['recipes']), **result)
                     report['routes'].append(route)
                     save()
                     print(f"{tag}: {route['new_recipes']} new / {route['total_recipes']} learned recipes", flush=True)
+        export_error = None
+        if args.provenance:
+            try:
+                visited = [item['tag'] for item in report['routes'] if item.get('status') == 'visited']
+                if not visited:
+                    raise ValueError('No visited route is available to export')
+                incomplete = provenance_capture_state(logs, visited)
+                destination = template_destination(output)
+                exported = export_session(engine, decoder, fixture / 'input/EMAIN.ELF', prov, cache, destination)
+                report['provenance_export'] = dict(trace=str(prov), template=str(destination), limit=PROVENANCE_LIMIT,
+                                                   incomplete=incomplete, **exported)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                export_error = exc
+                report['provenance_export_error'] = str(exc)
+            save()
         report['status'] = 'preparing'
         save()
         print('Preparing every learned native pipeline before play', flush=True)
         started = time.monotonic()
         report['preparation'] = prepare(engine, game, cache, output / 'prepare.log')
         report['preparation']['wall_seconds'] = time.monotonic() - started
+        if export_error is not None:
+            raise export_error
+        if args.provenance and report.get('provenance_export', {}).get('incomplete'):
+            raise ValueError('RSX_PSO_PROVENANCE reported an incomplete capture. The partial template and prepared cache were kept.')
         report['status'] = 'complete'
         report.pop('error', None)
         save()

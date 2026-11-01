@@ -19,12 +19,17 @@
 # frame (from GT5P_FRAME_LOG). -SampleDelay <s> moves the start.
 # -ExtraHold "<PAD_HOLD entries>" appends presses to the drive (e.g.
 # "@QuickArcadeRoot+75000-75200:START").
+# -CourseSlot <n> selects that many RIGHT taps on Course Select. Omit it to
+# keep -Track: HighSpeedRing is slot 0 and Daytona is slot 1, with the existing
+# press times. FujiSpeedwayF is verified slot 2. Slots 3..9 are experimental and unnamed. Passing -Track together
+# with an experimental slot is rejected.
 # -Engine/-GameRoot/-OutputDirectory support isolated audit runs. Another game
 # makes launch fail; cleanup stops only this script's own process.
 # -Cpu also reports per-thread CPU over the sampling window, named from the log
 # (guest thread names, host thread names), in scratch/pv/<tag>.cpu.txt.
 [CmdletBinding(PositionalBinding = $false)]
-param([ValidateSet("HighSpeedRing", "Daytona")][string]$Track = "HighSpeedRing",
+param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track = "HighSpeedRing",
+      [ValidateRange(0, 9)][int]$CourseSlot,
       [string]$Tag = "race", [int]$Seconds = 60, [switch]$IntroShots, [switch]$LoadingShots,
       [ValidateRange(0,3600)][int]$PitIdleSeconds = 0,
       [ValidateRange(0,3600)][int]$GridIdleSeconds = 0, [switch]$Cpu,
@@ -92,8 +97,28 @@ function Watch-RaceIdle($Proc, [string]$Stage, [int]$Duration) {
     }
     Save-RaceWindowShot $Proc (Join-Path $dir "$Tag.$Stage-idle-end.png")
 }
-$hold = Get-ToDaytona 10000
-if ($Track -eq "HighSpeedRing") { $hold = $hold.Replace("@CourseSelectRoot+3000-3100:RIGHT,", "") }
+$slot = 0
+$courseIdentity = "measured"
+$trackLabel = $Track
+$measuredSlotNames = @{0="HighSpeedRing";1="Daytona";2="FujiSpeedwayF"}
+if ($PSBoundParameters.ContainsKey("CourseSlot")) {
+    if ($PSBoundParameters.ContainsKey("Track")) {
+        if ($measuredSlotNames.ContainsKey($CourseSlot)) {
+            if ($Track -ne $measuredSlotNames[$CourseSlot]) { throw "-Track $Track does not match measured course slot $CourseSlot." }
+        } else { throw "Course slot $CourseSlot is an unnamed experimental ordinal. Omit -Track." }
+    }
+    $slot = $CourseSlot
+    $hold = Get-ToCourse 10000 $slot
+    if ($measuredSlotNames.ContainsKey($slot)) { $trackLabel = $measuredSlotNames[$slot] }
+    else { $trackLabel = "slot$slot"; $courseIdentity = "experimental-unverified" }
+    "Course slot $slot ($courseIdentity)"
+} else {
+    # Unbound -CourseSlot keeps the historical High Speed Ring / Daytona strings.
+    $hold = Get-ToDaytona 10000
+    if ($Track -eq "HighSpeedRing") { $hold = $hold.Replace("@CourseSelectRoot+3000-3100:RIGHT,", "") }
+    if ($Track -eq "FujiSpeedwayF") { $slot=2; $hold=Get-ToCourse 10000 2 }
+    else { $slot = $(if ($Track -eq "HighSpeedRing") { 0 } else { 1 }) }
+}
 foreach ($at in @(20000, 40000, 60000, 80000)) {
     $at += 1000 * $PitIdleSeconds
     $hold += ",@PitSceneRoot+$at-$($at+300)!DrivingOptionRoot:CROSS"
@@ -106,6 +131,12 @@ foreach ($at in @(5000, 10000, 20000, 40000, 60000)) {
     $hold += ",@QuickArcadeRoot+$at-$($at+300):CROSS"
 }
 if ($ExtraHold) { $hold += ",$ExtraHold" }
+if ($PSBoundParameters.ContainsKey("CourseSlot")) {
+    $presses = @($hold.Split(",") | Where-Object { $_ -ne "" })
+    if ($presses.Count -gt 64) {
+        throw "This route has $($presses.Count) PAD_HOLD presses. The runtime accepts 64, so the extra course taps were not started."
+    }
+}
 if ($FrameTest) {
     if (-not $PSBoundParameters.ContainsKey("SampleDelay")) { $SampleDelay = 45 }
     if (-not $PSBoundParameters.ContainsKey("Seconds")) { $Seconds = 60 }
@@ -241,7 +272,8 @@ try {
     $tS1 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     @{ launch_ms = $launchMs; grid_observed_ms = $gridMs; sample_start_ms = $tS0;
        sample_end_ms = $tS1; engine = $Engine; game_root = $GameRoot; pid = $p.Id;
-       track = $Track; seconds = $Seconds; sample_delay = $SampleDelay } |
+       track = $trackLabel; course_slot = $slot; course_identity = $courseIdentity;
+       seconds = $Seconds; sample_delay = $SampleDelay } |
         ConvertTo-Json | Set-Content (Join-Path $dir "$Tag.window.json")
     $rows | Export-Csv "$dir/$Tag.fps.csv" -NoTypeInformation
     $memoryRows | Export-Csv "$dir/$Tag.memory.csv" -NoTypeInformation
@@ -270,7 +302,7 @@ try {
         throw "No frames were presented during sampling; title FPS is stale. Inspect scratch/pv/$Tag.*"
     }
     $ordered = @($rows.Fps | Sort-Object)
-    if ($ordered.Count) { "$Track`: median $($ordered[[int]($ordered.Count/2)]) fps over $Seconds s" }
+    if ($ordered.Count) { "$trackLabel`: median $($ordered[[int]($ordered.Count/2)]) fps over $Seconds s" }
     "Cache warming finished for the materials seen in this run; logs and shot: $dir/$Tag.*"
 } finally {
     if ($launcherOwner) {

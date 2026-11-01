@@ -93,6 +93,53 @@ Phase 160 adds [named shared-pass selection and isolated state checks](shader-re
 This is developer reconstruction work. CPU inputs and one conditional shared-pass
 rule are now independently constructed; other shared resource/pass contexts remain open.
 
+### Additional course collection and incremental locations (Phase 180)
+
+`train_pipeline_cache.py` now accepts `--course-slots` instead of `--tracks` and
+can record/export provenance in its owned output. The default remains the two
+measured named routes. This developer command visits one slot at a time:
+
+```powershell
+.venv/Scripts/python scripts/train_pipeline_cache.py `
+  --fixture <copied-audit-fixture> --engine <modern-isolated-gt5p.exe> `
+  --decoder <production-decoder.dll> --course-slots 2 --provenance `
+  --output scratch/course-slot-collection --seconds 90
+```
+
+`--provenance` is off by default and writes `<output>/provenance`; export writes
+`session-template.json` without replacing earlier exports. An incomplete recorder
+log fails the run after keeping the partial template/cache. Numeric slots mean
+RIGHT taps from the initial Course Select cursor. Slots 0/1 are High Speed Ring
+and Daytona. The Phase 180 pit screenshot verifies slot 2 as Fuji Speedway F;
+`--tracks FujiSpeedwayF` / `race.ps1 -Track FujiSpeedwayF` selects that same route.
+The ceiling 9 is experimental, based on ten distinct logo assets rather than a
+decoded menu length. Higher slots may stick/wrap and require visual confirmation.
+Slots 3..9 remain unnamed; do not infer names or coverage from ordinals alone.
+
+Direct owned route scripts also accept `race.ps1 -CourseSlot 2` without `-Track`.
+Names and experimental slots cannot be mixed. The old named-route timing, async
+draw policy and owner-only cleanup remain intact. Only one game/test runs at a
+time. These automated sessions sample the grid/opening section with the current
+car/AI lineup; they do not traverse every track section or every car combination.
+Provenance is diagnostic I/O, unsuitable for performance comparisons.
+
+For a verified session delta, generate only previously unknown program locations:
+
+```powershell
+.venv/Scripts/python scripts/pipeline_asset_map.py `
+  --template scratch/new-candidates.json --trace scratch/session-provenance `
+  --known-map assets/pipeline-templates/gt5p-disc-v2/player-map.json `
+  --assets <maintainer-reference-assets> --elf <verified-user-ELF> `
+  --output scratch/additional-program-locations
+```
+
+`--known-map` accepts up to 16 validated maps and combines with `--catalog`.
+It skips already located identities; it does not substitute captured bytes for
+original assets or verify a whole pipeline. Merge the additional locations with
+the prior map, regenerate/verify the numeric volume map, then prepare the delta
+in a fresh cache. Only positively verified records join the starter. Maintainer
+reference extraction remains local; players use their existing packed game.
+
 ## Direct preparation from the configured game files (Phase 178)
 
 The development launcher passes its already verified disc/PS3_GAME folder to
@@ -199,7 +246,7 @@ Diagnostic recording is off during performance tests. Export each session:
 
 Templates contain hashes, translation state, numeric native state and canonical
 ATTR inputs. No game-derived shader bytes/source/binaries are included. Keep all
-experimental outputs ignored. A verified 2,334-record metadata starter is in
+experimental outputs ignored. A verified 2,892-record metadata starter is in
 `assets/pipeline-templates/gt5p-disc-v2`; pass that directory to `--template`.
 Game ELF, renderer source contract, explicit default settings and
 schema/key/Windows x64 ABI compatibility are required. Format 2 excludes
@@ -212,10 +259,12 @@ programs are reported and remain on the asynchronous demand path. Optional
 `--demand-fallback` writes an empty preparation result for invalid/incompatible
 template headers without starting a compiler; strict preparation otherwise fails.
 
-Phase 169 adds a separate version-1 program location map for code outside the
-supported SHDS tables. The starter contains `asset-map.json`: now 119 locations
-(4 vertex, 115 fragment), each a container SHA-256, file offset, size, encoding and
-program identity. No filenames, guest addresses or shader contents are included.
+Phase 169 introduced a version-1 program location map for code outside supported
+SHDS tables. Phase 180 extends `asset-map.json` to 286 locations (59 vertex,
+227 fragment), adding all 167 new program identities. New locations can overlap
+supported SHDS lookup. Each entry contains a container SHA-256, file offset,
+size, encoding and program identity. No filenames, guest addresses or shader
+contents are included.
 Supply `--assets <original unpacked GT.VOL directory>` when preparing the bundled
 starter; the map is selected automatically. For a standalone template, also pass
 `--asset-map <map.json>`. Existing SHDS lookup remains available without a map.
@@ -224,8 +273,10 @@ Preparation hashes candidate-sized original containers, verifies the selected
 program slices, then applies the same shader-source/bytecode/native-key checks.
 Renaming or relocating identical assets is supported; changed assets cannot serve
 their old locations. Missing containers stay unresolved. The measured full lookup
-resolves all 2,334 retained HSR/Daytona records. Unsupported branching contexts
-remain excluded; Phase 170 details export exclusions and conflict quarantine.
+resolves the retained observed-state records. The Phase 180 starter has 2,892
+records, including an additional Fuji Speedway F grid/opening session.
+Unsupported branching contexts remain excluded; Phases 170/180 detail export
+exclusions and conflict quarantine.
 This closes an extraction gap, not the unknown-state problem for unseen content.
 
 Generate a map once from representative developer provenance and original assets:
@@ -427,7 +478,8 @@ The growing-template native regression is `scripts/test/preparation_reuse_native
 It checks an independently prepared base, expansion, fresh control and complete
 reuse, including exact keys, driver-hint use and unchanged source generations.
 This improves update preparation cost, not first-run coverage or live frame times.
-The starter still contains 2,334 observed-state records, with the same exclusions.
+Phase 180 grows the starter to 2,892 observed-state records; this reuse mechanism
+does not derive additional pipelines by itself.
 
 ## Native checksum verification (Phase 177)
 

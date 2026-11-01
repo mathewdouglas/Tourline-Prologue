@@ -9,6 +9,90 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 180 - Fuji Speedway F session and incremental coverage (2026-11-01)
+
+The user requested more coverage with Grok assistance and strictly sequential
+tests. One Grok agent extended developer course selection/provenance export;
+another audited older local recordings. Agents ran no builds/tests/game processes.
+The parent alone performed executable validation, one test at a time. No source,
+runtime, cache or process in the original checkout was changed or interrupted.
+
+An isolated session selected Course Select slot 2 by the existing Daytona route
+plus one additional RIGHT tap, recording the menu/pit/grid/opening section with
+the current car/AI lineup. It exported 2,167 supported records. Export excludes
+three branching vertex contexts and eleven missing joined files. Comparison with
+the verified 2,334-record starter quarantines nine conflicting FP identity/source
+keys, preserving the existing baseline. The remaining 558 new candidates include
+64 using existing program identities and 494 needing at least one new program.
+No conflicting record is selected by order or majority. Research found no other
+unconsumed supported session; older HSR/Daytona exports are already represented.
+
+Incremental `pipeline_asset_map.py --known-map` skips existing verified locations.
+All 167 additional programs (55 VP, 112 FP) are found in original assets with zero
+invalid/unresolved oracles: 729 containers / 2,415,031,816 bytes searched in
+162.515 s on this machine. The complete player map grows to 1,143 identities
+(348 VP, 795 FP); the supplemental map has 286 locations, including the original
+119 outside supported SHDS tables and all 167 new locations. New locations can
+overlap SHDS lookup. The regenerated numeric volume map verifies all 1,143 programs
+from 104 archive members plus the ELF, with the same supported volume/ELF hashes.
+It decodes 1,198,534,632 bytes including the ELF without writing extracted assets.
+
+Every one of the 558 candidates then rebuilds both shader stages in a separate
+empty application cache, matching expected source/bytecode IDs and exact native
+keys. All 558 D3D12 pipelines create and persist; zero unresolved/incompatible/
+key-rejected records. The run compiles 93 vertex variants and 374 exact fragment
+requests in two sequential engine batches. Total preparation is 115.601 s;
+fragment work is 19.027 s. Native creation makes 558 driver calls with zero cached
+blobs (11.532 s). OS/driver caches remain warm from collection. Evidence:
+`scratch/coverage180-slot2/{coverage,export,promotion}.json`,
+`new-locations/report.json` and `prepared/{report.json,native.log}`.
+
+Only these positively verified records are appended: the starter now contains
+2,892 observed-state records, with every previous record unchanged. Existing
+2,334 and new 558 batches have separate empty-cache proofs; this is not a single
+fresh-cache compilation of all 2,892. The frozen player helper under System32-only
+PATH grows an older prepared cache using only packed game files. Invalid-template
+rejection and real cancellation preserve the previous selection/source generation;
+resume verifies all 2,892 shader/native keys and persisted blobs. It reuses 296
+vertex variants / 2,395 fragment jobs, compiles 55 additional vertices and 322
+distinct fragment requests, and passes 2,892 native calls with 2,335 cached blobs.
+The prior cache included one matching ordinary-demand key beyond the old starter;
+do not describe it as exactly 2,334 driver files. Evidence:
+`scratch/c180-player/validation.json`. The regression has explicit `--expanding`
+mode, retaining strict complete-cache expectations without that flag.
+
+The prepared-cache replay exercises `race.ps1 -CourseSlot 2`. Its Race Mode
+screenshot explicitly reads **FUJI SPEEDWAY F**, establishing the measured name;
+the first collection's legacy window tag said Daytona only because that route
+provided the base navigation. The new scripts expose `FujiSpeedwayF` as a named
+route and report numeric identity explicitly. High Speed Ring/Daytona remain the
+defaults with identical timing. Slots 3..9 are an experimental ceiling from ten
+logo assets, not decoded menu length/names; they may wrap/stick and need visual
+confirmation. Optional training `--provenance --decoder` records under its owned
+output and exports a portable template; incomplete captures fail while keeping
+the partial template/cache. The automatic export helper also reproduces all
+2,167 supported session records from the real capture and confirms the recorder
+enabled line (`automatic-export-validation.json`). Export has a 600-second timeout. No new global
+process termination, asynchronous draw policy or player preparation default.
+
+Screenshots show pit/track/cars rendering in the prepared replay; initial capture
+draws were incomplete before async work recovered. These are visual checks, not
+pixel-equal comparisons. The replay's cumulative pipeline metrics were not
+enabled, so empty counters must not be read as zero runtime compiles. It differs
+in timing and recording from collection and supplies no controlled stutter result.
+Evidence: `scratch/coverage180-slot2/visual/{report,metrics}.json` and its shots.
+
+Course timing/selection, template/schema/conflict/bundle and strict package tests
+pass sequentially. A local 206-file candidate also passes actual ZIP shard/helper
+checksums and game/cache exclusion (`scratch/coverage180-slot2/package-validation.json`);
+it is not published. A PowerShell precedence error in the new synthetic slot-9 test
+was corrected before passing it. The temporary private game copy was removed
+after visual checks, reclaiming 4,191,691,292 bytes; its fixture junction was
+removed nonrecursively first. Every shadercache, report, shot, original asset and
+fixture remains (`scratch/coverage180-slot2/cleanup.json`). Other cars/cameras,
+track sections, settings, branching contexts and consistent stutter reduction
+remain open. Metadata and source only; no new release/build or game bytes shipped.
+
 ## Phase 179 - Packed-reader review and buffered deflate output (2026-11-01)
 
 Two requested Grok agents performed static review only; the parent alone ran

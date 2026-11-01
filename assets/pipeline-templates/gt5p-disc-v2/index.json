@@ -76,7 +76,23 @@
     },
     {
       "file": "part-0018.json",
-      "sha256": "d9721e8e5c2034341cc9ae8fc5d2b1a885c94d672d8bfbeca9ce418959cdaedb"
+      "sha256": "052270803a5a8520b87b0d2a94ab6946cdb921ab1281c19821bfe39dda5da5c8"
+    },
+    {
+      "file": "part-0019.json",
+      "sha256": "1e8c3790e59386d160e946844c2d746ac0ab63eff7e1289cb9fbf79f2ec170df"
+    },
+    {
+      "file": "part-0020.json",
+      "sha256": "18ea5e11093ebc1ba060d1065866389583a86d5dee6733d91fc936eca165d2d1"
+    },
+    {
+      "file": "part-0021.json",
+      "sha256": "0510aa5f9a618cc98b53bb2abd975b5084cbf6f74ec3f7956f239875e148da39"
+    },
+    {
+      "file": "part-0022.json",
+      "sha256": "205e2ccf951933737978c2cdb8a1520564bcedd8721c875a3ad64eadc481df1d"
     }
   ]
 }

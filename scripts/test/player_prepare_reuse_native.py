@@ -30,6 +30,7 @@ def main():
     source_args.add_argument('--assets',type=Path)
     source_args.add_argument('--game',type=Path)
     ap.add_argument('--expect-hash-backend',choices=('native','python'))
+    ap.add_argument('--expanding',action='store_true',help='Allow an older subset cache and require missing shaders/pipelines to be prepared')
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():ap.error('Use a fresh ignored test output')
     install=out/'Install';storage=out/'Storage'
@@ -45,8 +46,15 @@ def main():
     source=storage/'preparation'/('a'*24)/'shadercache';source.mkdir(parents=True)
     names=[key+'.dxbc' for key in expected_shaders(document)]
     names += [f"pso_{r['key']}.bin" for r in document['records']]
-    for name in names:shutil.copyfile(a.previous_cache/name,source/name)
+    missing=[]
+    for name in names:
+        if a.expanding and not (a.previous_cache/name).is_file():missing.append(name)
+        else:shutil.copyfile(a.previous_cache/name,source/name)
     before=hashes(source)
+    seed_shaders=sum(name.endswith('.dxbc') for name in before)
+    seed_drivers=sum(name.endswith('.bin') for name in before)
+    if a.expanding:
+        assert missing and seed_shaders>0 and 0<seed_drivers<len(document['records'])
     pointer=storage/'prepared-cache.txt'
     previous=source.relative_to(storage).as_posix();pointer.write_text(previous)
     helper=install/'preparation/GT5P-Prepare.exe'
@@ -88,17 +96,22 @@ def main():
     if a.expect_hash_backend:
         assert report['hashing']['backend']==a.expect_hash_backend
         assert report['hashing'][a.expect_hash_backend+'_calls']>0
-    assert report['resume']['vertex_programs_compiled']==0 and report['fragment_preparation']['processes']==0
-    assert report['cache_reuse']['driver_blobs_copied']==len(document['records'])
+    if a.expanding:
+        assert report['resume']['vertex_programs_compiled']>0 and report['fragment_preparation']['processes']>0
+        assert report['resume']['verified_cached_sources']==seed_shaders
+    else:
+        assert report['resume']['vertex_programs_compiled']==0 and report['fragment_preparation']['processes']==0
+    assert report['cache_reuse']['driver_blobs_copied']==seed_drivers
     assert hashes(source)==before and pointer.read_text()==(state.parent/'shadercache').relative_to(storage).as_posix()
     assert json.loads(state.read_text())['phase']=='complete'
     match=re.search(r'requests=(\d+) created=(\d+) driver_calls=(\d+) cached_blob_calls=(\d+)',
                     (state.parent/'native.log').read_text(errors='replace'))
-    assert match and list(map(int,match.groups()))==[len(document['records'])]*4
+    assert match and list(map(int,match.groups()))==[len(document['records'])]*3+[seed_drivers]
     (out/'validation.json').write_text(json.dumps(dict(template_rejection_preserved_selection=True,
         cancellation_preserved_selection=True,source_cache_unchanged=True,counts=report['counts'],
         clean_path=True,seconds=time.monotonic()-started,reuse=report['cache_reuse'],
-        shader_work=report['resume'],hashing=report.get('hashing'),
+        expanding=a.expanding,seed_shaders=seed_shaders,seed_driver_blobs=seed_drivers,missing_seed_files=len(missing),
+        shader_work=report['resume'],fragment_work=report['fragment_preparation'],hashing=report.get('hashing'),
         preparation_seconds=report['preparation_seconds'],lookup=report['lookup'],
         native_counts=list(map(int,match.groups()))),indent=2)+'\n')
     print('Frozen generation reuse, cancellation/resume, safe selection and every native pipeline passed')
