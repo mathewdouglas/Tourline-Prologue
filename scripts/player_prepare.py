@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -15,6 +16,7 @@ import shader_fragment_batch
 from preparation_checkpoint import preflight_tree
 from shader_coverage import ROOT
 from pipeline_asset_map import read as read_map
+from preparation_reuse import cache_root, regular_read
 
 
 def safe_storage(storage):
@@ -25,10 +27,25 @@ def safe_storage(storage):
     return storage.resolve()
 
 
+def previous_cache(storage, output):
+    """Only reuse the launcher's storage-relative, generated cache selection."""
+    pointer=storage/'prepared-cache.txt'
+    if not pointer.exists() and not pointer.is_symlink():return None
+    relative=regular_read(pointer,512).decode('utf-8')
+    if not re.fullmatch(r'preparation/[0-9a-f]{24}/shadercache',relative):
+        raise ValueError('Invalid previous preparation cache selection; caches preserved')
+    selected=storage/relative
+    # Resume already verifies the destination. Importing it into itself would
+    # confuse ownership and cannot provide any additional reuse.
+    if selected==output/'shadercache':return None
+    return cache_root(selected)
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('install','storage','assets'):ap.add_argument('--'+name,type=Path,required=True)
     ap.add_argument('--launcher-pid',type=int,default=0)
+    ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
     a=ap.parse_args()
     storage=safe_storage(a.storage)
     install=a.install.resolve()
@@ -69,6 +86,7 @@ def main():
     if parent.exists():preflight_tree(parent)
     parent.mkdir(exist_ok=True)
     out=parent/token
+    reuse=None if a.no_reuse or os.environ.get('GT5P_PREPARE_REUSE')=='0' else previous_cache(storage,out)
     cancel=storage/'prepare.cancel';status=storage/'prepare-status.txt'
     def progress(phase,counts):
         if cancel.exists():raise KeyboardInterrupt('Preparation cancelled; completed files kept')
@@ -98,7 +116,7 @@ def main():
     shader_fragment_batch.run_offline=run_owned
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve(),asset_map=location_map,resume=out.exists(),
-        output_validator=lambda p:p,progress=progress)
+        output_validator=lambda p:p,progress=progress,reuse_cache=reuse)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     # Switch only after successful shader/native/persistence validation. Existing

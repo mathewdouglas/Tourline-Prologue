@@ -316,20 +316,14 @@ def locate(records, catalog, elf, asset_map=None, assets=None):
 
 def cached_shaders(document,cache):
     """Reuse only expected source-key files with exact bytecode IDs and lengths."""
-    expected={}
-    for r in document['records']:
-        for source,code,index in (('vp_source','vs',4),('fp_source','ps',8)):
-            length=r['native']['words'][index] | (r['native']['words'][index+1]<<32)
-            value=(r[code],length)
-            if r[source] in expected and expected[r[source]]!=value:
-                raise ValueError('Template source/bytecode mapping conflicts')
-            expected[r[source]]=value
+    from preparation_reuse import expected_shaders,shader_matches
+    expected=expected_shaders(document)
     found={};total=0
     for key,(code_id,length) in expected.items():
         path=cache/(key+'.dxbc')
         if not path.exists():continue
         data=bounded_read(path,4*1024**2)
-        if not data.startswith(b'DXBC') or len(data)!=length or f'{fnv64(data):016x}'!=code_id:
+        if not shader_matches(data,code_id,length):
             raise ValueError('Cached shader failed resume verification; cache preserved: '+key)
         total+=len(data)
         if total>128*1024**2:raise ValueError('Resume shader memory budget exceeded')
@@ -337,7 +331,7 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None):
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -371,12 +365,19 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
         checkpoint.stage('checking-cache')
         checked=time.perf_counter()
         reused=cached_shaders(document,output/'shadercache') if resume else {}
+        seed_report=None
+        if reuse_cache is not None:
+            from preparation_reuse import seed_cache
+            checkpoint.stage('reusing-cache')
+            cache=output/'shadercache';cache.mkdir(exist_ok=True)
+            seed_report=seed_cache(document,reuse_cache,cache,checkpoint.progress)
+            reused=cached_shaders(document,cache)
         return prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked)
+                                asset_map,assets,fragment_mode,checkpoint,reused,started,time.perf_counter()-checked,seed_report)
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
@@ -384,6 +385,7 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
     lookup['seconds'] = time.perf_counter() - lookup_started
     report = dict(schema=1, template_sha256=template_digest(template), lookup=lookup,
                   requested=len(document['records']), records=[], preparation_seconds=None,
+                  cache_reuse=seed_report,
                   engine_sha256=checkpoint.contract['engine'], decoder_sha256=checkpoint.contract['decoder'],
                   resume=dict(attempt=checkpoint.state['attempt'],verified_cached_sources=len(reused),
                               cache_verification_seconds=cache_seconds,
@@ -502,6 +504,7 @@ def main():
     p = sub.add_parser('prepare')
     p.add_argument('--fragment-mode',choices=('batch','legacy'),default='batch',help='Exact-request batching by default; legacy rollback')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
+    p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
     p.add_argument('--asset-map',type=Path,help='Optional verified hash/offset map for non-SHDS programs')
     p.add_argument('--assets',type=Path,help='Original unpacked asset root used with --asset-map')
     p.add_argument('--demand-fallback',action='store_true',help='Report incompatible templates and provide an empty demand cache')
@@ -516,7 +519,7 @@ def main():
         return
     if args.command == 'prepare':
         result = prepare(*(getattr(args, k).resolve() for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume)
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache)
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

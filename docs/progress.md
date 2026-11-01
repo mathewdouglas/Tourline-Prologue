@@ -9,6 +9,65 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 176 - Verified preparation reuse across catalogue updates (2026-11-01)
+
+The user requested continued shader work without triggering a Tourline build.
+This step makes growing templates practical to prepare repeatedly: developer
+`pipeline_template.py prepare --reuse-cache <old shadercache>` reads verified
+shader/driver hints into a fresh, separately owned output. The optional player
+helper automatically considers the previously selected generated cache when its
+new output identity differs. `GT5P_PREPARE_REUSE=0` / helper `--no-reuse` rolls
+back. Original assets remain required and reverified; the normal asynchronous
+draw policy, renderer contract, starter records and release defaults are unchanged.
+
+The new template supplies every source/bytecode ID and expected native key.
+Shaders require exact source-key filename, DXBC signature, length and bytecode
+ID. Driver hints require the existing bounded/checksummed envelope; all requested
+pipelines still pass exact native-key creation and persisted-cache verification.
+D3D12's existing uncached fallback handles incompatible driver hints. No recipes,
+packs, membership lists or old checkpoints are imported. Copying is atomic per
+file, bounded to 128 MiB of shaders / 256 MiB of driver hints and 60 seconds
+between files. Redirected roots are rejected; damaged/missing/linked selected
+files remain normal preparation work. Source generations are never written or
+removed; the new destination keeps the existing exclusive lock and checkpoint.
+
+Nine synthetic checks cover corruption, different shader IDs/lengths, missing
+files, mapping conflicts, overlap, redirected/hard-linked input, resource budgets,
+cancellation and player-pointer confinement. Existing schema, checkpoint,
+fragment-batch, coverage and packager checks pass. The first native test invocation
+used the legacy material-proof engine, which lacks exact fragment batching; its
+missing results were rejected. That failed evidence remains in `scratch/reuse176`.
+The local instruction now distinguishes the modern template/batch proof engine.
+
+The supported engine passes the growing-template test in `scratch/reuse176b`:
+32 base records, 64 expanded records, a fresh 64-record control and complete
+64-record reuse all pass exact shader/native/persistence checks. Expansion reuses
+the base's 16 vertex variants, 32 fragment jobs and 32 driver hints, compiling
+18 additional vertex variants and 31 distinct fragment requests. The fresh
+control compiles 34 vertex variants and 53 fragment requests. Complete reuse
+compiles neither stage and revalidates all 64 native pipelines from driver hints.
+Preparation times for expanded/fresh/complete-reuse cases are 19.141 / 24.467 /
+7.231 seconds in this one local experiment, not a hardware-wide guarantee.
+Every reused source tree remains byte-for-byte unchanged.
+
+A newly frozen helper is tested with the released icon-bearing engine, an
+isolated copied prior cache and PATH restricted to System32. An invalid new
+template and cancellation after real shader copies both preserve the old
+selection. Resume verifies 2,286 cached shader sources, compiles zero vertex
+programs / zero fragment requests, and creates/checks all 2,334 native pipelines;
+all 2,334 driver calls use cached blobs. Every driver blob persists and the copied
+source cache remains unchanged. The helper reports 166.217 seconds; the wrapper
+measures 175.106 seconds including its remaining checks. Cache import takes
+53.484 seconds, so copying/checksumming and native revalidation remain material
+costs even with zero shader compilation. OS/driver caches are retained. Evidence:
+`scratch/r176-player/validation.json`, its generation's `report.json`/`native.log`,
+and `scratch/reuse176b/validation.json`. Tool binaries and cache contents stay local.
+
+This is update efficiency, not added starter coverage, a new first-run timing
+comparison or live stutter evidence. The optional starter still has 2,334
+observed-state records. Work is kept on `feature/shader-incremental-preparation`
+and pushed with `[skip ci]`; no main/tag/release push or workflow dispatch is used.
+
 ## Phase 175 - Project Tourline Prologue executable icon (2026-11-01)
 
 The supplied PT / PROLOGUE artwork is the player icon. `launcher/tourline-prologue.png`

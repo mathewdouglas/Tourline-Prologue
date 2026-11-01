@@ -33,6 +33,9 @@ and a consistent live stutter benefit remain separate requirements.
    startup, reuse verified results, support cancellation/resume, and bound CPU,
    memory and storage. Phase 172 makes exact batching the developer default and
    adds verified template resume; launcher cancellation still needs refinement.
+   Phase 176 adds verified reuse across template/engine generations, so extending
+   a catalogue need not recompile unchanged shaders. Cancellation/resume is also
+   available through the optional Phase 173 player entry.
 5. **Demonstrate consistent stutter reduction.** Fewer runtime shader compiles have
    not yet produced a consistent frame-time win. Separate driver creation, cache
    reads, scheduling and unrelated game work; load prepared resources at useful
@@ -307,6 +310,54 @@ saving results. Shader caches, logs and screenshots remain. Use
 check reserves the writable game copy, prepared cache and 2 GiB headroom. Fourteen
 old copies were removed on request, freeing 54.53 GiB; their report paths remain
 as historical evidence, but those disposable game directories no longer exist.
+
+## Incremental preparation across template updates (Phase 176)
+
+Resume still requires the same template/helper contract. For a different template
+or engine, use a fresh output and read verified hints from an older cache:
+
+```powershell
+.venv/Scripts/python scripts/pipeline_template.py prepare `
+  --template scratch/expanded-template.json --catalog ../GT5P/shadercache/library-v1/all `
+  --elf ../GT5P/input/EMAIN.ELF --engine <isolated-engine> `
+  --decoder scratch/reconstruction-build/decoder.dll --game-root <isolated-game-root> `
+  --assets <original-unpacked-assets> --asset-map <verified-program-map> `
+  --output scratch/expanded-preparation --reuse-cache scratch/older-preparation/shadercache
+```
+
+The new template remains authoritative. Only requested source-keyed DXBC files
+with its exact bytecode identifiers and lengths are copied. Missing, damaged or
+different shader files are skipped and rebuilt normally. Requested native cache
+blobs need the existing bounded/checksummed envelope; they are driver hints, not
+proof of compatibility. Every requested pipeline still passes native key/creation
+and persisted-cache validation. D3D12 rejects incompatible hints through the
+existing uncached creation fallback. Original assets are still located/verified.
+No recipe, membership list, shader pack or checkpoint is imported from the source.
+
+Reuse reads at most the template's requested filenames, with 128 MiB of shader
+copies, 256 MiB of driver hints, a 4/32 MiB per-file limit respectively and a
+60-second deadline checked between files. Over-budget files remain compilation
+work. Redirected roots/ancestors are rejected; redirected/hard-linked selected
+files are skipped. The old cache is read only; the new output has the existing
+exclusive preparation lock. Complete individual copies survive cancellation and
+the normal checkpoint path verifies them on resume. No caches are removed.
+
+Optional player preparation automatically reads the previous generated cache
+selected by `prepared-cache.txt` when its new output identity differs. It accepts
+only the launcher's generated storage-relative selection. Success selects the new
+cache; failure/cancellation leaves the old selection intact. `GT5P_PREPARE_REUSE=0`
+or helper `--no-reuse` disables this optimization. Developer preparation defaults
+to no cross-generation reuse unless `--reuse-cache` is supplied. `report.json`'s
+`cache_reuse` separates copied/rejected/missing/budget-skipped files and bytes;
+shader reuse counters and native driver counters retain their existing meanings.
+The reuse source is an optimization rather than checkpoint identity: a matching
+resume can change or omit it, while destination shader verification stays strict.
+
+The growing-template native regression is `scripts/test/preparation_reuse_native.py`.
+It checks an independently prepared base, expansion, fresh control and complete
+reuse, including exact keys, driver-hint use and unchanged source generations.
+This improves update preparation cost, not first-run coverage or live frame times.
+The starter still contains 2,334 observed-state records, with the same exclusions.
 
 ## Automatic shared vertex preparation (developer only)
 

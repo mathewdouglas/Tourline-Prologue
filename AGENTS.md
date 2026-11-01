@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 175)
+## Start here: state of play (2026-11-01, Phase 176)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 175 is the latest).
+has the evidence, newest phase first (Phase 176 is the latest).
 
 ### What works now
+
+- **Incremental preparation updates (Phase 176):** developer `--reuse-cache` and
+  optional player reuse read verified shader/driver hints from the previous
+  generation into a separately locked output. All 2,334 starter pipelines pass
+  frozen-helper cancellation/resume, exact keys and native creation, with zero
+  shader compiles and all driver calls using cached blobs; source cache unchanged.
+  `GT5P_PREPARE_REUSE=0` / helper `--no-reuse` disables it. Bounded copying and
+  native revalidation still cost time. No new coverage/stutter claim or release
+  build; push only the feature branch with `[skip ci]`.
 
 - **Player icon (Phase 175):** the supplied PT / PROLOGUE logo is embedded in
   tourline-prologue.exe, gt5p.exe and the preparation helper. Setup dialogs use

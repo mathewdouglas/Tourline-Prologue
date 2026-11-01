@@ -22,6 +22,13 @@ atomically selects `prepared-cache.txt`, a storage-relative pointer to
 `preparation/<generation>/shadercache`. Existing ordinary and older generation
 caches remain intact. Storage relocation preserves this relative selection.
 
+Development preparation after v0.2 can reuse verified shaders and driver-cache
+hints from the previously selected generation when metadata or engine identity
+changes. It still verifies original assets and creates/checks every native
+pipeline. `GT5P_PREPARE_REUSE=0` disables this optimization. This development
+change does not alter the already published v0.2 package. See
+[incremental preparation](shader-precompile.md#incremental-preparation-across-template-updates-phase-176).
+
 The next launch uses that cache, retaining demand compilation for missing keys.
 `tourline-prologue.exe --no-prepared` uses the ordinary cache for that launch without deleting
 anything. Failure/cancellation leaves any prior selection intact. Logs are
