@@ -48,7 +48,7 @@ def compatibility(engine, decoder, elf):
         raise ValueError('Engine/decoder missing')
     return dict(abi='windows-x64-recipe-v1', key_version=1, root_signature_keyed=True,
                 renderer_sha256=renderer_contract(), renderer_settings=SETTINGS.copy(),
-                elf_sha256=sha(elf.read_bytes()), translation_policy='default-constbuf-v1')
+                elf_sha256=sha(bounded_read(elf,64*1024**2)), translation_policy='default-constbuf-v1')
 
 
 

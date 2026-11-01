@@ -9,6 +9,41 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 179 - Packed-reader review and buffered deflate output (2026-11-01)
+
+Two requested Grok agents performed static review only; the parent alone ran
+tests sequentially. The integration review found no actionable defect. The
+reader review found no integrity bypass and reported a possible false rejection
+when zlib retains output after consuming all compressed input.
+
+A synthetic 131,101-byte repeated payload reproduces that failure at the real
+128 KiB output limit: the old loop stops at 131,072 bytes with an empty input
+tail, then reports an incomplete stream. A 16-byte-limit case reproduces it too.
+The reader now drains buffered output using bounded empty-input calls after a
+full output chunk, checking cancellation/deadline on every drain. Empty calls
+that need more input yield control to the next input chunk. EOF, trailing-data,
+decoded-size and complete-container/program identity checks are unchanged.
+
+All nine native reader tests pass, including both regression sizes and existing
+corruption/truncation/overflow checks. The 64 MiB ELF read limit now also applies
+to the earlier renderer compatibility check and maintainer map generation.
+Oversized input is rejected before native reader loading. Helper game-folder
+normalization now mirrors the launcher's PARAM.SFO rule, avoiding selection of
+an unrelated nested PS3_GAME folder. No new renderer/draw-policy/coverage claim.
+
+The rebuilt frozen helper again passes the full 976-program lookup and all
+2,334 exact native pipeline keys/creation/persistence checks using prior verified
+shaders/driver blobs, under System32-only PATH. Cancellation/resume and old-cache
+preservation pass (`scratch/v178-reviewed-player/validation.json`); archive-stage
+cancellation and incompatible-volume rejection also pass without shader/native
+work (`scratch/v178-reviewed-volume-safety/validation.json`). These remain reuse
+checks, not a new whole-starter fresh compilation or live stutter measurement.
+All executable validation is sequential. Source/helper/cache binaries remain
+local; the reviewed feature is pushed with `[skip ci]` and no release change.
+The rebuilt local candidate also passes strict packaging and an actual ZIP
+manifest/exclusion check: 202 selected files, no game/cache contents
+(`scratch/v178-reviewed-package-validation.json`). It is not distributed.
+
 ## Phase 178 - Read the player's existing packed game directly (2026-11-01)
 
 The optional development launcher now passes its configured disc/PS3_GAME folder

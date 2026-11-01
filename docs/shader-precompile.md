@@ -114,6 +114,9 @@ tests gate its use. Python's bounded raw-deflate stream handles supported
 compressed members. Each complete decoded container must match its existing
 SHA-256 before selected program slices are accepted; every program identity is
 then checked, followed by the unchanged shader/native pipeline verification.
+The Phase 179 reader also drains zlib's buffered output when a full output chunk
+consumes all available compressed input; every drain retains the same chunk cap
+and cancellation/deadline checks. Truncation and trailing data remain errors.
 No external unpacker code or key data is shipped. The format investigation used
 the public [GTToolsSharp readers](https://github.com/Nenkai/GTToolsSharp); original
 local volume bytes and existing container/program hashes are the acceptance oracles.

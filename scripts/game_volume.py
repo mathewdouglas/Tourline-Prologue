@@ -132,12 +132,17 @@ def decoded_chunks(stream,row,crypt,params,check):
             data=data[8:]
         position+=len(raw)
         if decoder:
-            while data:
+            drain=False
+            while data or drain:
+                check()
                 block=decoder.decompress(data,CHUNK)
                 if block:yield block
                 tail=decoder.unconsumed_tail
-                if tail==data and not block:raise ValueError('Compressed volume stream made no progress')
+                if data and tail==data and not block:raise ValueError('Compressed volume stream made no progress')
                 data=tail
+                # max_length can stop inside a match after consuming all input.
+                # Drain pending output with empty input, retaining the same cap.
+                drain=len(block)==CHUNK and not decoder.eof
             if decoder.unused_data:raise ValueError('Trailing compressed member data')
         else:yield data
     if decoder and not decoder.eof:raise ValueError('Incomplete compressed member')

@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 178)
+## Start here: state of play (2026-11-01, Phase 179)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 178 is the latest).
+has the evidence, newest phase first (Phase 179 is the latest).
 
 ### What works now
+
+- **Packed-reader review (Phase 179):** Grok static reviews found no integrity
+  bypass. A reported valid-deflate rejection was reproduced and fixed: bounded
+  output is drained even after compressed input is consumed. Nine reader tests
+  pass, including the production chunk size. Compatibility/map generation now
+  share the 64 MiB ELF read limit; game-folder normalization matches the launcher.
+  The rebuilt frozen helper again verifies all 976 programs / 2,334 native
+  pipelines, cancellation/resume, safe rejection and old-cache preservation.
+  No new coverage, settings, release or stutter claim. Keep tests sequential.
 
 - **Direct game-file preparation (Phase 178):** the development launcher uses
   the configured disc folder; a bounded reader locates all 976 starter programs

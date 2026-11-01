@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from pipeline_asset_map import read as read_programs,files
 from game_volume import SCHEMA,validate,resolve
+from shader_coverage import bounded_read
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     a=ap.parse_args()
     if a.output.exists():ap.error('Choose a fresh metadata output')
     locations=read_programs(a.program_map)
-    elf_id=hashlib.sha256(a.elf.read_bytes()).hexdigest()
+    elf_id=hashlib.sha256(bounded_read(a.elf,64*1024**2)).hexdigest()
     wanted={r['container']:r['container_size'] for r in locations['records'] if r['container']!=elf_id}
     if a.entries.stat().st_size>4*1024**2:raise ValueError('Archive listing budget exceeded')
     pattern=re.compile(r'^(.*?) - Flags: (.*?) \| FileIndex: (\d+) .*?\| SegIndex: (\d+), ZSize: ([0-9A-Fa-f]+) \| Size: ([0-9A-Fa-f]+) \|')

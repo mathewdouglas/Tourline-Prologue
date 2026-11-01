@@ -72,6 +72,20 @@ class VolumeTests(unittest.TestCase):
             self.assertEqual(crypt.apply(code,keys,offset),plain)
             self.assertEqual(crypt.apply(plain[:127],keys,offset)+crypt.apply(plain[127:],keys,offset+127),code)
 
+    def test_pending_deflate_output_without_unconsumed_input(self):
+        if LIBRARY is None:self.skipTest('No native volume library supplied')
+        crypt=tool.Crypt(LIBRARY)
+        for limit,size in ((16,21),(128*1024,131101)):
+            self.plain=b'a'*size
+            path=self.fixture(True);self.member['size']=size
+            checks=[]
+            with path.open('rb') as stream,patch.object(tool,'CHUNK',limit):
+                blocks=list(tool.decoded_chunks(stream,self.member,crypt,
+                    tool.parameters(self.elf,self.location),lambda:checks.append(True)))
+            self.assertEqual(b''.join(blocks),self.plain)
+            self.assertTrue(all(len(block)<=limit for block in blocks))
+            self.assertGreater(len(checks),1)
+
     def test_map_versions_bounds_overlap_and_unknown_fields(self):
         self.fixture()
         changes=[lambda x:x.update(version=2),lambda x:x.update(keys='forbidden'),
@@ -87,6 +101,14 @@ class VolumeTests(unittest.TestCase):
         path=self.fixture();self.elf_path.write_bytes(b'other game')
         with patch('game_volume.Crypt',side_effect=AssertionError('Loaded for wrong game')):
             with self.assertRaises(ValueError):tool.resolve(self.programs,self.map,path,self.elf_path)
+
+    def test_elf_read_limit_applies_before_native_loading(self):
+        from pipeline_template import compatibility
+        path=self.fixture()
+        with self.elf_path.open('wb') as stream:stream.truncate(64*1024**2+1)
+        with patch('game_volume.Crypt',side_effect=AssertionError('Loaded for oversized ELF')):
+            with self.assertRaises(ValueError):tool.resolve(self.programs,self.map,path,self.elf_path)
+        with self.assertRaises(ValueError):compatibility(path,path,self.elf_path)
 
     def test_corrupt_volume_and_container_are_rejected(self):
         path=self.fixture();path.write_bytes(path.read_bytes()[:-1]+b'X')

@@ -87,7 +87,7 @@ def main():
     if a.game:
         from game_volume import read as read_volume
         game=a.game.resolve()
-        if (game/'PS3_GAME').is_dir():game=game/'PS3_GAME'
+        if not (game/'PARAM.SFO').exists() and (game/'PS3_GAME').is_dir():game=game/'PS3_GAME'
         volume=game/'USRDIR/GT.VOL';volume_map=bundle/'volume-map.json'
         metadata_items.append(read_volume(volume_map))
     metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
