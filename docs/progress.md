@@ -9,6 +9,55 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 186 - First-run preparation choice and managed settings restart (2026-11-01)
+
+At the user's request, successful first-run file setup now offers **Prepare now**
+and **Skip and play** before starting the game. Skip, Escape and closing the offer
+continue normal play. Preparation uses the existing owned helper, progress UI,
+packed-file lookup and cache contract. Cancel waits for the helper to exit and
+continues into play, preserving completed work for the existing CMD resume entry.
+Failures are reported and allow play. Already configured ordinary launches do
+not offer again. `GT5P_PREPARE_OFFER=0` restores the old setup flow. Explicit
+`--prepare` remains standalone and does not start the game.
+
+The reported settings restart failure has a concrete ownership cause: the game
+spawned its replacement inside the launcher's kill-on-close job. After the old
+game exited, launcher cleanup could kill that replacement. New engine/launcher
+pairs use a reserved process exit code when `GT5P_LAUNCHER_RESTART=1`; the launcher
+waits and retires its old job before starting a replacement, retaining both
+storage locks and normal logs/cache configuration. A fresh child inherits the
+launcher environment, not settings-derived renderer variables from the old game.
+The F1 action still saves changes before requesting restart. Unset selects this
+managed path through the updated launcher; `=0` rolls back to legacy spawning.
+Direct engine launches retain their earlier behavior. Both updated binaries are
+required; a new launcher cannot repair an older engine's direct-spawn action.
+
+The launcher builds cleanly under /W4. Sequential synthetic native checks pass
+actual folder setup followed by Prepare, Skip, offer-close, custom/legacy UI
+cancel, unavailable-helper fallback, offer rollback and setup cancellation.
+Accepted setup reaches the normal child afterward; cancelled setup starts none.
+A second ordinary launch does not offer again. Existing launcher checks also
+pass managed replacement with distinct PIDs and saved settings, explicit packed
+preparation, helper cancellation, duplicate-launch blocking, owner death, cache
+selection and storage relocation. No test kills another session by name.
+
+A private engine links the changed production settings UI against read-only CI
+objects into this checkout's ignored output; CI objects/runtime and the original
+checkout are unchanged. Through the actual F1 settings window, 720p -> 1080p,
+16:9 -> 21:9 and 21:9 -> 16:9 each exit with the protocol code and reopen a new
+game/settings window under the same launcher. Boot logs show saved 1080p and
+ultrawide aspect patches only in the ultrawide leg. All four owned game handles
+are signalled on cleanup. Original game files are read in place, no GT.VOL copy.
+Evidence: `scratch/launcher-flow-186/production-final/{validation.json,*-play.out}`.
+`scripts/test/settings_restart_native.py` is the ownership-safe production test;
+the older process-name-killing PowerShell restart test was not used. Initial
+test automation failures were premature window readiness/file-picker input,
+corrected before the passing runs; they are not renderer regression evidence.
+
+Documentation records the setup flow, CMD entry and rollback switches. No live
+race/frame-time/rendering claim or new release follows. Development commits use
+`[skip ci]`; main, tag and published v0.2.1 remain unchanged.
+
 ## Phase 185 - Calibrated local translation variants and verified reuse (2026-11-01)
 
 Development preparation now accepts `--translation default|native-scaled|ultrawide-native`;

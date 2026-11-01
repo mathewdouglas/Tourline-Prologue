@@ -124,6 +124,15 @@ def main():
         p = subprocess.run([launcher], env=env, timeout=15, capture_output=True)
         assert p.returncode == 0 and settings.read_text() == '# existing personal settings\n'
         print('second launch and settings preservation: passed')
+        restarted=subprocess.run([launcher],env=dict(env,GT5P_PROBE_RESTART_ONCE='1'),timeout=30,capture_output=True)
+        assert restarted.returncode==0,(restarted.returncode,restarted.stderr)
+        restarted_pids=(data/'restart-pids.txt').read_text(encoding='utf-8-sig').splitlines()
+        assert len(restarted_pids)==2 and restarted_pids[0]!=restarted_pids[1]
+        assert 'resolution = "1440p"' in settings.read_text()
+        probe=dict(line.split('=',1) for line in (data/'probe.txt').read_text(encoding='utf-8-sig').splitlines())
+        assert probe['GT5P_LAUNCHER_RESTART']=='1' and probe['pid']==restarted_pids[1]
+        assert 'probe stdout' in (data/'logs/play.out').read_text()
+        print('managed restart retires the old child and relaunches with saved settings: passed')
         prepared=data/'preparation/version/shadercache';prepared.mkdir(parents=True)
         (prepared/'keep.txt').write_text('cache preserved')
         (data/'prepared-cache.txt').write_text('preparation/version/shadercache')

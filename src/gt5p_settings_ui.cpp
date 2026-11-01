@@ -33,6 +33,7 @@
  * (read, known_key, save), and a row in items() below.
  */
 #include <windows.h>
+#include "gt5p_restart.h"
 #include <windowsx.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -376,6 +377,11 @@ std::wstring widen(const std::string& s)
 
 void relaunch()
 {
+    if (tourline_restart::managed()) {
+        tourline_restart::request();
+        s_status = L"Could not request a restart; close the game and launch it again.";
+        return;
+    }
     /* The environment holds the variables loading the old file set; the new
      * process must read the new file instead. Clear the ones it set. */
     for (const Item& it : items())

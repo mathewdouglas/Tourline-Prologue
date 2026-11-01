@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 185)
+## Start here: state of play (2026-11-01, Phase 186)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 185 is the latest).
+has the evidence, newest phase first (Phase 186 is the latest).
 
 ### What works now
+
+- **First-run offer and settings restart (Phase 186):** development launchers
+  offer optional preparation after successful setup, before play. Skip/close,
+  helper cancellation and reported failure continue to the game; the CMD entry
+  remains available. `GT5P_PREPARE_OFFER=0` disables the offer. Settings Restart
+  now requests launcher-owned replacement after the old process/job exits,
+  preserving storage locks and fresh settings. `GT5P_LAUNCHER_RESTART=0` restores
+  legacy behavior. Sequential synthetic setup/cancel/failure/ownership tests and
+  three actual resolution/aspect settings restarts pass in a private install.
+  Both new launcher and engine are required. No release/build was triggered;
+  feature pushes `[skip ci]`, main/tag/published v0.2.1 remain unchanged.
 
 - **Additional translations and verified reuse (Phase 185):** explicit development
   `GT5P_PREPARE_TRANSLATION=ultrawide-native|native-scaled` adds local variants

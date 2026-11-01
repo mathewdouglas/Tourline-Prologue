@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cwctype>
 #include "preparation_ui.h"
+#include "first_run_preparation.h"
+#include "../src/gt5p_restart.h"
 
 namespace fs = std::filesystem;
 struct Failure { std::wstring message; };
@@ -97,7 +99,7 @@ static std::wstring hash(const fs::path& file) {
     return out;
 }
 static std::vector<unsigned char> read_small(const fs::path& p) {
-    if (!fs::is_regular_file(p) || fs::file_size(p) > 65536) fail(L"Missing or invalid PARAM.SFO.");
+    if (!fs::is_regular_file(p) || fs::file_size(p) > 65536) fail(L"Missing or invalid PARAM.SFO:\n\n"+p.wstring());
     std::ifstream f(p, std::ios::binary);
     return std::vector<unsigned char>(std::istreambuf_iterator<char>(f), {});
 }
@@ -393,6 +395,24 @@ static fs::path storage_picker() {
     if (choice == 100) return data;
     return pick(true, L"Choose an empty folder for Project Tourline Prologue saves, settings and cache");
 }
+static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game) {
+    auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
+    if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
+        fail(L"The preparation helper is missing or does not match this release. Re-extract the full ZIP.");
+    bool packed=prepare_assets.empty() && env(L"GT5P_PREPARE_VOLUME")!=L"0";
+    if (prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,packed?
+        L"Experimental preparation covers known menu/HSR/Daytona pipelines, not the whole game.\n\nPreparation reads your already selected game files in place. No separate GT.VOL extraction is needed. It may take several minutes and stores local shader/driver files. No consistent stutter reduction is established. You can cancel and resume, or launch normally without preparation.":
+        L"Legacy preparation: choose your already unpacked GT.VOL asset folder. Preparation remains partial and optional.",L"Project Tourline Prologue - optional preparation",MB_OK|MB_ICONINFORMATION);
+    auto assets=packed?fs::path{}:prepare_assets.empty()?pick(true,L"Choose your unpacked GT.VOL asset folder"):prepare_assets;
+    if (!packed && assets.empty()) return 2;
+    fs::remove(data/L"prepare.cancel");
+    std::ofstream(data/L"prepare-status.txt") << "Starting preparation...";
+    auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
+    DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
+    if (result && result!=2) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
+    if (!result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
+    return result;
+}
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     try {
@@ -477,30 +497,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             try { disc = game_folder(disc); valid = hash(data/L"input"/L"EMAIN.ELF") == expected; }
             catch (const Failure&) {} catch (const fs::filesystem_error&) {}
         }
+        bool completed_setup=false;
         if (!valid) {
             if (quiet || env(L"GT5P_LAUNCHER_SETUP") == L"0") fail(L"Setup is missing or no longer valid. Run tourline-prologue.exe --setup.");
             if (!setup(expected)) { CoUninitialize(); return 0; }
             disc = game_folder(profile(data/L"setup.ini", L"game", L"directory"));
+            completed_setup=true;
         }
         if (quiet) { CoUninitialize(); return 0; }
         if (prepare) {
-            auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
-            if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
-                fail(L"The preparation helper is missing or does not match this release. Re-extract the full ZIP.");
-            bool packed=prepare_assets.empty() && env(L"GT5P_PREPARE_VOLUME")!=L"0";
-            if (prepare_assets.empty()) MessageBoxW(nullptr,packed?
-                L"Experimental preparation covers known menu/HSR/Daytona pipelines, not the whole game.\n\nPreparation reads your already selected game files in place. No separate GT.VOL extraction is needed. It may take several minutes and stores local shader/driver files. No consistent stutter reduction is established. You can cancel and resume, or launch normally without preparation.":
-                L"Legacy preparation: choose your already unpacked GT.VOL asset folder. Preparation remains partial and optional.",L"Project Tourline Prologue - optional preparation",MB_OK|MB_ICONINFORMATION);
-            auto assets=packed?fs::path{}:prepare_assets.empty()?pick(true,L"Choose your unpacked GT.VOL asset folder"):prepare_assets;
-            if (!packed && assets.empty()) { CoUninitialize();return 0; }
-            fs::remove(data/L"prepare.cancel");
-            std::ofstream(data/L"prepare-status.txt") << "Starting preparation...";
-            auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
-            DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
-            if (result==2) { CoUninitialize();return 0; }
-            if (result) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
-            if (prepare_assets.empty()) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
+            prepare_cache(disc,prepare_assets,false);
             CoUninitialize();return 0;
+        }
+        if (completed_setup && env(L"GT5P_PREPARE_OFFER")!=L"0" && first_run_preparation::offer(brand_icon())) {
+            try { prepare_cache(disc,{},true); }
+            catch (const Failure& e) { report(e.message+L"\n\nThe game will now start. You can run Prepare shaders.cmd later."); }
+            catch (const std::exception&) { report(L"Optional preparation could not finish. The game will now start. You can run Prepare shaders.cmd later."); }
         }
         // Keep all mutable state outside the ZIP/install directory. Assets are
         // small, distributable glyph art; this never copies the game dump.
@@ -528,8 +540,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             setenv(L"RSX_SHADER_CACHE",cache.wstring());
         }
         if (env(L"PS3_VERBOSE").empty()) setenv(L"PS3_VERBOSE", L"0");
-        DWORD code = run(game, quote(data/L"input"/L"EMAIN.ELF"), data, L"play");
-        if (code) fail(L"The game exited with code " + std::to_wstring(code) + L". Logs are in:\n\n" + (data/L"logs").wstring());
+        auto restart=env(L"GT5P_LAUNCHER_RESTART");
+        if (!restart.empty() && restart!=L"0" && restart!=L"1") fail(L"GT5P_LAUNCHER_RESTART must be 0 or 1.");
+        if (restart.empty()) setenv(L"GT5P_LAUNCHER_RESTART",L"1");
+        for (;;) {
+            DWORD code = run(game, quote(data/L"input"/L"EMAIN.ELF"), data, L"play");
+            // run() has waited for the old process and closed its private job
+            // before another instance starts. Keep both storage locks throughout.
+            if (code==tourline_restart::exit_code && tourline_restart::managed()) continue;
+            if (code) fail(L"The game exited with code " + std::to_wstring(code) + L". Logs are in:\n\n" + (data/L"logs").wstring());
+            break;
+        }
         CoUninitialize(); return 0;
     } catch (const Failure& e) {
         report(e.message);

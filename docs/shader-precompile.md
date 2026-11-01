@@ -309,6 +309,16 @@ correctness, ownership, integrity or bounds defect.
 
 ### Preparation window (Phase 181)
 
+Development launchers now offer preparation after successful first-run file
+setup, before the first game process starts. **Skip and play**, Escape or closing
+the offer starts normal play. **Prepare now** uses the existing helper/UI/cache
+contract. Cancelling waits for the helper's owned cancellation, then continues
+into the game; completed files and any earlier selection are preserved. A failed
+optional step reports its error and allows play. Later configured launches do
+not repeat the offer; **Prepare shaders.cmd** remains the explicit prepare/resume
+entry. `GT5P_PREPARE_OFFER=0` disables the new offer. This is development behavior
+after v0.2.1, not a change to the published ZIP or asynchronous draw policy.
+
 The optional launcher `--prepare` uses the in-game PC Settings visual language:
 grey panels, dotted rows, black values and a focused pill Cancel button. It is
 standalone Win32/GDI code in `launcher/preparation_ui.h`; it does not depend on a
