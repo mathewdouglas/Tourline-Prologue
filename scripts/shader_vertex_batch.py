@@ -60,11 +60,11 @@ class ProtocolError(ValueError):
 
 
 def player_mode(environ=None):
-    """Unset and 0 stay serial. Only 1 opts into the bounded batch."""
+    """Default to bounded batches; 0 explicitly restores serial compilation."""
     if environ is None:
         environ = os.environ
     if 'GT5P_PREPARE_VERTEX_BATCH' not in environ:
-        return 'serial'
+        return 'batch'
     value = environ['GT5P_PREPARE_VERTEX_BATCH']
     if value == '0':
         return 'serial'

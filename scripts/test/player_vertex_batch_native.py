@@ -1,4 +1,4 @@
-"""Frozen opt-in vertex workers: cancellation, verified resume and zero-worker reuse.
+"""Frozen default vertex workers: cancellation, verified resume and zero-worker reuse.
 
 Uses a local release ZIP and original assets; no guest entry or game-data copy.
 All tests run sequentially in fresh ignored storage. No shadercache is removed.
@@ -51,8 +51,9 @@ def main():
     pointer.write_text(previous)
     command = [str((install/'preparation/GT5P-Prepare.exe').resolve()), '--install', str(install.resolve()),
         '--storage', str(storage.resolve()), '--assets', str(a.assets.resolve())]
-    env = dict(os.environ, PS3_VERBOSE='0', GT5P_PREPARE_VERTEX_BATCH='1',
+    env = dict(os.environ, PS3_VERBOSE='0',
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
+    env.pop('GT5P_PREPARE_VERTEX_BATCH', None)  # Exercise the real unset default.
     started = time.perf_counter()
     with (out/'cancel.log').open('wb') as log:
         child = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -84,6 +85,7 @@ def main():
             creationflags=subprocess.CREATE_NO_WINDOW, check=True, timeout=900)
     first = json.loads((state.parent/'report.json').read_text())
     assert first['counts'] == {'prepared': len(document['records'])}
+    assert first['vertex_preparation']['mode'] == 'batch'
     assert first['resume']['vertex_programs_reused'] >= kept
     assert first['vertex_preparation']['launches'] <= 2
     assert first['vertex_preparation']['ownership'] == 'private-job'
@@ -100,7 +102,7 @@ def main():
     assert cached['fragment_preparation']['processes'] == 0
     assert pointer.read_text() == selected and marker.read_text().startswith('Prior selection')
     serial_env = env.copy()
-    serial_env.pop('GT5P_PREPARE_VERTEX_BATCH')
+    serial_env['GT5P_PREPARE_VERTEX_BATCH'] = '0'
     with (out/'serial-rollback.log').open('wb') as log:
         subprocess.run(command, env=serial_env, stdout=log, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW, check=True, timeout=900)
@@ -115,7 +117,7 @@ def main():
     result = dict(counts=first['counts'], kept_vertices=kept, resumed=first['vertex_preparation'],
         cached=cached['vertex_preparation'], cancellation_preserved_selection=True,
         invalid_mode_preserved_selection=True, source_preserved=True, clean_path=True,
-        serial_default_rollback_passed=True,
+        unset_default_batch_passed=True, explicit_serial_rollback_passed=True,
         seconds=time.perf_counter()-started,
         limitation='Small original-asset proof, warm OS/driver caches; no gameplay/stutter measurement.')
     (out/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

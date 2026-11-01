@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 183)
+## Start here: state of play (2026-11-01, Phase 184)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 183 is the latest).
+has the evidence, newest phase first (Phase 184 is the latest).
 
 ### What works now
+
+- **Default vertex batching (Phase 184):** developer preparation and development
+  helpers now default to the bounded two-worker path. `--vertex-mode serial` /
+  `GT5P_PREPARE_VERTEX_BATCH=0` restores serial compilation. Sequential default
+  source/frozen 32-pipeline proofs pass cancellation/resume, exact keys and
+  zero-worker reuse; preparation itself remains optional. Investigation confirms
+  an uncovered ultrawide vertex epilogue: pixel dimensions alone generally reuse
+  shaders, but current default preparation does not generate ultrawide variants.
+  Repeated cache I/O and settings-aware preparation are documented next targets.
+  No live draw-policy/stutter claim; feature pushes `[skip ci]`, release unchanged.
 
 - **Opt-in vertex batching (Phase 183):** two hidden persistent compiler workers
   reproduce all 351 starter vertex variants exactly. One local vertex-only pair

@@ -38,7 +38,8 @@ and a consistent live stutter benefit remain separate requirements.
    Phase 176 adds verified reuse across template/engine generations, so extending
    a catalogue need not recompile unchanged shaders. Cancellation/resume is also
    available through the optional Phase 173 player entry.
-   Phase 183 adds opt-in bounded vertex workers, with serial remaining the default.
+   Phase 183 adds bounded vertex workers; Phase 184 makes them the default,
+   retaining explicit serial rollback.
 5. **Demonstrate consistent stutter reduction.** Fewer runtime shader compiles have
    not yet produced a consistent frame-time win. Separate driver creation, cache
    reads, scheduling and unrelated game work; load prepared resources at useful
@@ -60,12 +61,14 @@ The immediate order is broader coverage reporting/session merging, then fixing
 the measured performance bottleneck. GT5 additionally needs its asset formats
 and rendering contexts verified; GT5P's template does not supply GT5 coverage.
 
-### Opt-in exact vertex batching (Phase 183)
+### Exact vertex batching (Phases 183-184)
 
-Developer template preparation accepts `--vertex-mode batch`; `serial` remains
-the default and rollback. Development frozen helpers accept
-`GT5P_PREPARE_VERTEX_BATCH=1` for batch, with unset or `0` selecting serial.
-Other values fail safely. These switches are a feature-branch change and are
+Developer template preparation defaults to `--vertex-mode batch`;
+`--vertex-mode serial` restores serial compilation. Development frozen helpers
+default to batching when `GT5P_PREPARE_VERTEX_BATCH` is unset or `1`; `0`
+restores serial compilation. Other values fail safely. Phase 184 changes only
+the algorithm inside optional preparation, not whether preparation runs.
+These switches are a feature-branch change and are
 not implemented by the already published v0.2.1 helper.
 
 `shader_vertex_batch.py` deduplicates exact program/GPU-input variants and
@@ -121,6 +124,65 @@ and a fresh `--output`. The ownership test
 nested owner while an outer job survives. Run every executable check one at a
 time. Preparation timing is distinct from gameplay frame-time/stutter evidence;
 see Phase 183 progress for measured results and limitations.
+
+### Next preparation speed opportunities
+
+Keep fresh-cache and incremental-update measurements separate. The Phase 183
+all-vertex comparison isolates compilation, while the Phase 180 player evidence
+is an incremental expansion with most shaders reused. Neither establishes a
+gameplay stutter improvement.
+
+The next useful targets are:
+
+- **Repeated cache I/O and verification.** The Phase 180 expansion spends
+  27.55 s copying verified hints and 30.50 s verifying its existing cache.
+  Investigate a bounded per-run inventory that reuses verified bytes and avoids
+  reading/hashing the same file repeatedly. Retain ownership, file-change and
+  compatibility checks; do not trust a prior manifest alone.
+- **Duplicate native-request shader files.** Current request staging writes two
+  DXBC files per pipeline, even when many records share code. A shared immutable
+  content-addressed staging store could reduce small-file writes/reads and
+  storage. It needs a compatible bounded native reader and exact-key validation;
+  do not hard-link mutable user caches or distribute the shader contents.
+- **Remaining compilation and driver work.** Fragment requests already use
+  deduplicated batches. Measure fresh-cache fragment and native stages after
+  default vertex batching before changing concurrency. Driver pipeline creation
+  is separate from shader compilation and must still run on the user's hardware.
+  More workers or overlapping stages need measured CPU/memory budgets, existing
+  queue ownership and cancellation guarantees.
+
+In that same Phase 180 incremental run, packed lookup is 9.27 s, fragment work
+16.31 s, and the native batch reports 18.55 s for 2,892 driver calls (2,335 with
+cached blobs). Native checksums already reduce hashing to 1.36 s. These are
+stage observations, not additive predictions of a new total or fresh-run
+bottleneck. Prefer avoiding repeated I/O over removing integrity/native checks.
+Evidence: `scratch/c180-player/validation.json` and its generation's `native.log`.
+
+### Resolution, ultrawide and first-use visibility (Phase 184)
+
+Pixel width/height and viewport/scissor are not fields in the native graphics
+pipeline descriptor/key. A pixel-size change alone generally reuses shader code;
+MSAA count, target/depth formats and other changed pass state can require new
+pipelines. Guest display modes can also select different passes. Do not infer
+complete settings coverage from preparation completing the starter template.
+
+Ultrawide is a concrete translation exception: `rsx_vp_decompiler.c` conditionally
+emits an edge-adjustment epilogue when `RSX_ULTRAWIDE` is enabled. The game maps
+the ultrawide setting to that environment before translation. A production-decoder
+probe of the same original vertex program in separate default/ultrawide processes
+confirms different generated source and DXBC. The current default-translation
+starter/helper does not generate that additional variant or read the player's
+display settings to derive a new template. Repeating default preparation does
+not close that gap. Settings-aware vertex/fragment identity generation and exact
+native-key validation remain roadmap work, not implemented by Phase 184.
+
+Offline preparation leaves verified shader/driver files on disk. A later game
+process still creates live GPU pipelines, possibly on the background worker.
+Missing/unready asynchronous draws can appear late even with a prepared cache.
+The newest player log inspected in Phase 184 is a 1080p/16:9 run with MSAA 4,
+not the reported ultrawide-1440p occurrence; it cannot identify that occurrence's
+cause. Asset/scene loading remains another possibility. No async policy change
+or ultrawide rendering/stutter fix is claimed.
 
 ### Preparation window (Phase 181)
 

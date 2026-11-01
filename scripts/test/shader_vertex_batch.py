@@ -1,12 +1,14 @@
 """Vertex batch protocol, dedup, ownership flags and parent acceptance. No processes."""
 import ctypes
+from contextlib import redirect_stdout
 import hashlib
 import inspect
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 import struct
 import sys
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import pipeline_template
@@ -135,7 +137,7 @@ def clock():
 
 
 # Mode, command and ownership flags. No compiler and no process.
-assert batch.player_mode({}) == 'serial'
+assert batch.player_mode({}) == 'batch'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '0'}) == 'serial'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '1'}) == 'batch'
 assert_raises(lambda: batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': ''}))
@@ -166,8 +168,18 @@ if ctypes.sizeof(ctypes.c_void_p) == 8:
     assert ctypes.sizeof(process_type) == 24
     assert ctypes.sizeof(batch._extended_limits(ctypes)) == 144
 prepare_signature = inspect.signature(pipeline_template.prepare)
-assert prepare_signature.parameters['vertex_mode'].default == 'serial'
+assert prepare_signature.parameters['vertex_mode'].default == 'batch'
 assert prepare_signature.parameters['fragment_mode'].default == 'batch'
+assert inspect.signature(pipeline_template.prepare_document).parameters['vertex_mode'].default == 'batch'
+# Exercise CLI dispatch without starting compilers or accessing game inputs.
+cli = ['pipeline_template.py', 'prepare']
+for option in ('template', 'elf', 'engine', 'decoder', 'game-root', 'output'):
+    cli += ['--' + option, 'unused']
+for arguments, expected in (([], 'batch'), (['--vertex-mode', 'serial'], 'serial')):
+    with patch.object(sys, 'argv', cli + arguments), patch.object(pipeline_template, 'prepare',
+            return_value=dict(counts={}, lookup={}, preparation_seconds=0)) as dispatched, redirect_stdout(StringIO()):
+        pipeline_template.main()
+    assert dispatched.call_args.kwargs['vertex_mode'] == expected
 # Classification: dedup, gpu split, reuse bypass, conflict and unresolved inputs.
 reused_code = b'DXBCreused-vertex'
 reused_source = '00000000000000ab'

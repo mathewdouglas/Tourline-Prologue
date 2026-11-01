@@ -338,7 +338,7 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='serial'):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch'):
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -481,7 +481,7 @@ def _prepare_vertex_batch(document, vertices, fragments, reused, decoder, cache,
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None,vertex_mode='serial'):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None,vertex_mode='batch'):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
@@ -622,7 +622,7 @@ def main():
     m.add_argument('templates', type=Path, nargs='+')
     p = sub.add_parser('prepare')
     p.add_argument('--fragment-mode',choices=('batch','legacy'),default='batch',help='Exact-request batching by default; legacy rollback')
-    p.add_argument('--vertex-mode',choices=('serial','batch'),default='serial',help='Serial vertex rollback by default; opt-in exact batch')
+    p.add_argument('--vertex-mode',choices=('serial','batch'),default='batch',help='Bounded exact vertex batches by default; serial restores the serial compiler')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
     p.add_argument('--volume',type=Path,help='Read directly from the original GT.VOL without unpacking')

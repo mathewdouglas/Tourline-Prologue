@@ -156,9 +156,11 @@ def main():
     # Full independent empty caches still verify both shaders, exact keys and D3D12 creation.
     reports = {}
     for mode in ('serial', 'batch'):
+        options = {'vertex_mode': 'serial'} if mode == 'serial' else {}
         report = template.prepare(selected, None, a.elf, a.engine, a.decoder, out, out/mode,
-            asset_map=locations, assets=a.assets, vertex_mode=mode)
+            asset_map=locations, assets=a.assets, **options)
         assert report['counts'] == {'prepared': a.count}
+        assert report['vertex_preparation']['mode'] == mode
         reports[mode] = dict(seconds=report['preparation_seconds'], vertex=report['vertex_preparation'])
     serial_files = {p.name:p.read_bytes() for p in (out/'serial/shadercache').glob('*.dxbc')}
     batch_files = {p.name:p.read_bytes() for p in (out/'batch/shadercache').glob('*.dxbc')}

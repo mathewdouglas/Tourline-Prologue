@@ -9,6 +9,66 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 184 - Default vertex batches and settings coverage audit (2026-11-01)
+
+At the user's request, developer CLI/API and development player helpers now
+default to the Phase 183 bounded two-worker vertex compiler. Explicit developer
+`--vertex-mode serial` or player `GT5P_PREPARE_VERTEX_BATCH=0` restores serial
+compilation. Unset/1 selects batching; other player values still fail closed.
+Optional preparation remains optional. No worker, memory/time limit, template
+schema, queue ownership, root signature or asynchronous draw policy changed.
+
+Sequential checks pass: protocol/dedup/acceptance, actual CLI default/rollback
+dispatch, template contracts/bundles, checkpoint/link ownership, nine reuse tests
+and packaging exclusions/digests. A fresh frozen helper build with the unchanged
+production decoder passes eight native checksum and nine packed-reader tests.
+The player's running game was left untouched; native checks began only after
+the user confirmed closing it.
+
+The rebuilt helper is tested with the vertex switch **unset**, System32-only
+PATH, original read-only assets and a 32-record subset. Cancellation preserves
+two accepted vertices and prior selection. Resume uses two frozen workers,
+reuses those vertices and creates/persists all 32 exact native pipelines. A
+cached rerun starts zero shader compiler workers. Explicit `=0` serial rollback
+revalidates the cache; invalid mode preserves selection. The source native
+proof omits the API option for its batch leg: serial/default-batch each prepare
+32 records in separate empty application caches with identical DXBC. Cancellation,
+owner death and zero-worker resume pass. Evidence:
+`scratch/vertex-default-184/{build.log,frozen32/validation.json,
+native32.log,native32/validation.json}`. OS/driver caches are warm. This repeats
+default selection/integration evidence, not the whole-starter performance or
+live stutter benchmark.
+
+The speed roadmap now identifies repeated cache inventory/reuse I/O and duplicate
+per-pipeline shader staging as concrete next candidates. Phase 180's incremental
+expansion measured 27.55 s verified hint copying, 30.50 s cache verification,
+9.27 s packed lookup, 16.31 s fragment preparation and 18.55 s native batch work.
+These unlike stages/run conditions must not be extrapolated into a promised
+fresh-run total. Native checksums and fragment deduplication already exist;
+integrity/native verification must remain. Additional worker concurrency needs
+measurement and bounded memory/CPU before changing its limit.
+
+The user also reported late menu-background visibility at ultrawide 1440p.
+Native pipeline hashing contains numeric descriptor state, shader bytes, input
+layout and root-signature compatibility; viewport/pixel dimensions are not
+descriptor fields. MSAA/target/pass changes can still select new pipelines.
+Importantly, the production vertex translator conditionally emits an ultrawide
+edge epilogue (`RSX_ULTRAWIDE`), even though its adjustment values are per-draw
+constants. A separate-process production-decoder probe of one identical original
+VP confirms different source and DXBC with ultrawide enabled:
+`scratch/vertex-default-184/resolution-probe.json`. Current offline defaults and
+starter do not derive this additional variant from player settings. Repeating
+default preparation cannot provide that coverage. Settings-aware preparation
+needs explicit translation identities and exact native-key validation, not just
+passing a resolution to an unchanged template.
+
+The user's newest available player logs were inspected read-only. They show a
+1080p/16:9, MSAA-4 run, so cannot diagnose the reported ultrawide occurrence.
+Background native creation remains possible after offline disk preparation;
+scene/asset loading is another unexcluded cause. No cache/settings were changed,
+and no rendering regression or stutter fix is claimed. Main/tag/published v0.2.1
+remain unchanged; feature-only push uses `[skip ci]`.
+
 ## Phase 183 - Bounded exact vertex compilation batches (2026-11-01)
 
 The next efficiency step batches the previously serial vertex translation /
