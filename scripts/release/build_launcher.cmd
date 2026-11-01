@@ -22,5 +22,5 @@ cl /nologo /std:c++17 /O2 /W4 /MT /EHsc /DUNICODE /D_UNICODE /D_WIN32_WINNT=0x0A
   /Fo"%~1\launcher.obj" /Fe"%~1\tourline-prologue.exe" "%~dp0..\..\launcher\launcher.cpp" "%~1\launcher.res" ^
   /link /SUBSYSTEM:WINDOWS /MANIFEST:EMBED ^
   /MANIFESTINPUT:"%~dp0..\..\launcher\launcher.manifest" ^
-  user32.lib shell32.lib ole32.lib uuid.lib bcrypt.lib comctl32.lib
+  user32.lib gdi32.lib shell32.lib ole32.lib uuid.lib bcrypt.lib comctl32.lib
 exit /b %errorlevel%

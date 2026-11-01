@@ -47,7 +47,9 @@ and a consistent live stutter benefit remain separate requirements.
    metadata only; shader contents and GPU-specific binaries remain local.
    Phase 173 implements an optional standalone player path with manual unpacked
    asset selection. Phase 178 removes that additional extraction for the supported
-   original disc volume; wider settings support and broader acceptance remain open.
+   original disc volume. Phase 181 adds a preparation window matching PC Settings,
+   with real per-step status and the existing owned cancellation/resume path;
+   wider settings support and broader acceptance remain open.
 7. **Validate the complete player path.** Exercise fresh caches, multiple GPUs,
    settings changes and representative routes. Measure loading time, memory,
    actual preparation hits and hitches; inspect rendering before enabling any
@@ -56,6 +58,43 @@ and a consistent live stutter benefit remain separate requirements.
 The immediate order is broader coverage reporting/session merging, then fixing
 the measured performance bottleneck. GT5 additionally needs its asset formats
 and rendering contexts verified; GT5P's template does not supply GT5 coverage.
+
+### Preparation window (Phase 181)
+
+The optional launcher `--prepare` uses the in-game PC Settings visual language:
+grey panels, dotted rows, black values and a focused pill Cancel button. It is
+standalone Win32/GDI code in `launcher/preparation_ui.h`; it does not depend on a
+running game or change its settings UI. `GT5P_PREPARE_UI=0` restores the existing
+TaskDialog. A creation failure falls back; a failed wait unwinds the launcher's
+owned process job instead of orphaning preparation or claiming completion.
+
+The existing helper writes `prepare-status.txt`. A read is bounded to 32,769
+bytes and accepts at most 32,768 bytes of valid UTF-8. The first nonempty line is
+shown. A trailing `completed/total` is counted only for two decimal fields of at
+most 18 digits, positive total and completed no greater than total. Unknown
+phases remain visible; malformed fractions remain uncounted. Archive progress is
+labelled as bytes. Phase/detail display text is bounded; exact counts remain
+accessible through native controls. Large counts use a scaled control range,
+while the text and painted bar preserve the real 64-bit values. Other phases
+remain indeterminate; there is no invented overall percentage or ETA.
+
+The UI waits on the existing owned helper handle, polling at 200 ms and reading
+status at most every 100 ms. Cancellation writes the same existing request file
+and waits for helper exit. No worker queue, shader lookup, cache selection,
+generation/resume contract, compiler policy or runtime draw behavior changes.
+Preparation remains optional. No coverage or performance gain follows from UI
+work, and published v0.2 is unchanged.
+
+Sequential developer checks: build the launcher with
+`scripts/release/build_launcher.cmd <output>`, then run
+`scripts/test/launcher_native.py --launcher <launcher.exe> --probe <launcher-probe.exe>`
+with the UI switch unset and with `GT5P_PREPARE_UI=0`. Build
+`scripts/test/preparation_ui_native.cpp` with C++17, `/EHsc /MT /DUNICODE
+/D_UNICODE /D_WIN32_WINNT=0x0A00`, linking `user32.lib gdi32.lib comctl32.lib`.
+Run `scripts/test/preparation_ui_native.py --probe <ui-probe.exe>
+--output <ignored-shots-directory>`. The stand-in checks status bounds, cancellation
+inputs, waiting for owned completion, failed cancel writes, resource cleanup and
+scaled layout. Screenshots use synthetic status, not a measured preparation run.
 
 ### Compare representative sessions before more collection
 

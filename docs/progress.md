@@ -9,6 +9,57 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 181 - PC Settings-style preparation window (2026-11-01)
+
+The user requested one Grok agent to implement a preparation window resembling
+the in-game settings menu. That agent edited source only; the parent reviewed,
+built and ran the executable checks sequentially. The standalone Win32/GDI
+window follows the existing grey-28 panel, grey-178 heading, grey-76 rules,
+dotted rows, black fields and red-focused pill button. The existing launcher
+icon is passed through. Preparation remains optional; only explicit preparation
+uses the new window. `GT5P_PREPARE_UI=0` restores the existing TaskDialog.
+
+Phase, detail, per-step counts and Cancel are native accessible controls. The
+status reader bounds the read itself as well as the accepted file size, so a
+growing/replaced status file cannot cause an unbounded read. Invalid UTF-8 and
+failed reads keep the last good status. Counts require a valid trailing decimal
+fraction, positive total, completed <= total, and at most 18 digits per field.
+Archive counts are bytes; other uncounted phases remain indeterminate. No
+overall completion percentage, ETA or inferred shader/pipeline total is shown.
+Unknown phases remain visible with bounded text. User-facing help explains that
+additional pipelines may still compile during play.
+
+The window reads status at most every 100 ms and waits for the existing helper
+handle with a 200 ms timeout. Close/Escape/Enter/Space/Cancel request cancellation
+without abandoning the wait. A failed cancellation write displays an error and
+still waits. Creation failure falls back to TaskDialog; an unexpected window or
+wait failure unwinds the existing owned kill-on-close process job. Helper exit
+codes, successful selection, source verification, resume, logs and async draw
+policy are unchanged. No renderer/runtime or helper implementation is modified.
+
+The parent corrected the missing explicit `gdi32.lib` link, a shadowed-variable
+warning, the status read race, and native print-client handling needed to capture
+the custom drawing. Final launcher and stand-in builds pass `/W4` without
+warnings. Both custom and legacy launcher integration runs pass configuration,
+helper arguments, progress/cancel, cache preservation, duplicate ownership,
+owned-child shutdown and storage relocation. Focused native checks pass valid/
+invalid/large counts, UTF-8/file bounds, first-line/BOM handling, unknown phases,
+completion, failed wait and repeated-window GDI cleanup. Sequential windows test
+each cancellation input, compatibility message and failed cancel write, proving
+the wait remains until the owned stand-in signals completion. A 144-DPI layout
+message keeps Cancel inside the window; this is not broad multi-monitor/high-DPI
+acceptance. No game or real shader compilation was needed for this UI change.
+
+Evidence: `scratch/preparation-ui-181/{build.log,test-build.log,launcher-native.log,
+launcher-legacy.log,ui-native.log}`, `screenshots/{vertex,archive,fragment,scaled}.png`
+and `live-window.jpg`. Screenshots use synthetic status through the production
+window, not measured preparation progress. The live Windows capture confirms the
+heading, progress bar, button and focus ring; native capture is also inspected
+after print-client support. No whole-game coverage, loading/memory performance or
+stutter improvement is claimed. The starter stays at 2,892 records. Original
+checkout/runtime/cache/processes remain untouched. Feature-branch source/docs
+only, `[skip ci]`; no main/tag/release change or distributed game/cache contents.
+
 ## Phase 180 - Fuji Speedway F session and incremental coverage (2026-11-01)
 
 The user requested more coverage with Grok assistance and strictly sequential

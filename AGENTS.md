@@ -36,13 +36,21 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 180)
+## Start here: state of play (2026-11-01, Phase 181)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 180 is the latest).
+has the evidence, newest phase first (Phase 181 is the latest).
 
 ### What works now
+
+- **Preparation window (Phase 181):** optional preparation now has a native
+  PC Settings-style window with real per-step status/counts, accessible controls
+  and owned cancellation/resume. `GT5P_PREPARE_UI=0` restores the TaskDialog.
+  Both launcher paths and focused status/input/wait/resource checks pass
+  sequentially; live and native screenshots are inspected using synthetic status.
+  No coverage, performance, renderer or preparation-default change. Published
+  v0.2 remains unchanged; feature pushes use `[skip ci]`.
 
 - **Fuji session coverage (Phase 180):** 558 additional observed pipelines pass
   both-stage reconstruction, exact native keys and persistence in an empty

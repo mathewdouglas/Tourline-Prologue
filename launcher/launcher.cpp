@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cwctype>
+#include "preparation_ui.h"
 
 namespace fs = std::filesystem;
 struct Failure { std::wstring message; };
@@ -236,16 +237,24 @@ static DWORD run(const fs::path& exe, const std::wstring& args, const fs::path& 
     }
     if (ResumeThread(thread.h) == (DWORD)-1) fail(L"Could not resume the launched application.");
     if (preparation) {
-        PrepareDialog state{process.h};
-        TASKDIALOGCONFIG td{};td.cbSize=sizeof td;
-        td.dwFlags=(TASKDIALOG_FLAGS)(TDF_CALLBACK_TIMER|TDF_SHOW_MARQUEE_PROGRESS_BAR|TDF_ALLOW_DIALOG_CANCELLATION);
-        td.pszWindowTitle=L"Project Tourline Prologue - experimental shader preparation";
-        td.pszMainInstruction=L"Preparing known shaders and pipelines";
-        td.pszContent=L"Verifying your game and preparation inputs...";
-        td.dwCommonButtons=TDCBF_CANCEL_BUTTON|TDCBF_OK_BUTTON;
-        td.pfCallback=prepare_dialog;td.lpCallbackData=(LONG_PTR)&state;
-        brand(td);
-        if (FAILED(TaskDialogIndirect(&td,nullptr,nullptr,nullptr))) fail(L"Could not open preparation progress.");
+        // GT5P_PREPARE_UI=0 keeps the TaskDialog. Unset or any other value uses the preparation window.
+        preparation_ui::Result shown = preparation_ui::Result::Unavailable;
+        if (env(L"GT5P_PREPARE_UI") != L"0")
+            shown = preparation_ui::show(process.h, data/L"prepare-status.txt", data/L"prepare.cancel", brand_icon());
+        if (shown == preparation_ui::Result::Failed)
+            fail(L"Could not keep the preparation window open.");
+        if (shown != preparation_ui::Result::Finished) {
+            PrepareDialog state{process.h};
+            TASKDIALOGCONFIG td{};td.cbSize=sizeof td;
+            td.dwFlags=(TASKDIALOG_FLAGS)(TDF_CALLBACK_TIMER|TDF_SHOW_MARQUEE_PROGRESS_BAR|TDF_ALLOW_DIALOG_CANCELLATION);
+            td.pszWindowTitle=L"Project Tourline Prologue - experimental shader preparation";
+            td.pszMainInstruction=L"Preparing known shaders and pipelines";
+            td.pszContent=L"Verifying your game and preparation inputs...";
+            td.dwCommonButtons=TDCBF_CANCEL_BUTTON|TDCBF_OK_BUTTON;
+            td.pfCallback=prepare_dialog;td.lpCallbackData=(LONG_PTR)&state;
+            brand(td);
+            if (FAILED(TaskDialogIndirect(&td,nullptr,nullptr,nullptr))) fail(L"Could not open preparation progress.");
+        }
     }
     // Keep this thread's dialogs responsive while either child is running.
     for (;;) {

@@ -22,7 +22,15 @@ Game files stay read only. Parameters/keys and decoded assets are not distribute
 `--prepare-assets <folder>` option, or `GT5P_PREPARE_VOLUME=0`, selects the legacy
 unpacked-asset flow if needed; unknown volumes fail safely rather than guessing.
 
-Progress and cancellation appear in a native dialog. Repeat the option to resume
+Development Phase 181 shows preparation in a standalone window styled after the
+in-game PC Settings menu. It displays the helper's current phase and real counts
+for that step; uncounted steps use an animated bar. Counts are not overall progress
+or an estimated completion time. `GT5P_PREPARE_UI=0` restores the Windows TaskDialog;
+failure to create the new window also falls back to that dialog. This development
+change does not update the published v0.2 download or enable preparation by default.
+
+Cancel, Escape or closing the window requests cancellation and keeps the window
+open until its owned helper exits. Repeat the preparation option to resume
 the same metadata/helper generation. Original assets are reverified, completed
 shader bytecode is checked, and native pipelines are recreated/checked locally.
 The launcher owns the helper and its child processes in its existing Windows
