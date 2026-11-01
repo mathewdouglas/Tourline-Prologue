@@ -24,9 +24,14 @@ import sys
 
 MAX_BYTES = 1_000_000          # largest legitimate file today is ~160 KB of text
 MAX_BINARY_BYTES = 64_000      # no binary file belongs here at all, bar a small image
-# Player branding, not game data. The PNG is the supplied logo; the ICO is the
-# multi-size icon embedded in the executables. Both stay under the text limit.
-BRAND_ICONS = {"launcher/tourline-prologue.png", "launcher/tourline-prologue.ico"}
+# Player branding, not game data. The launcher PNG is the supplied logo, the
+# ICO is the multi-size icon embedded in the executables, and the banner is
+# the README title image made from that logo. All stay under the text limit.
+BRAND_ICONS = {
+    "launcher/tourline-prologue.png",
+    "launcher/tourline-prologue.ico",
+    "assets/banner.png",
+}
 # The ps3recomp local-changes patch (patches/*.patch) is our own source diff and
 # passed 1 MB in Phase 60. Text diffs there get a larger limit; anything else
 # keeps MAX_BYTES.
