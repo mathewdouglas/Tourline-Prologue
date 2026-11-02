@@ -5,6 +5,13 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Opt-in collection now verifies after the game closes (Phase 202), using original
+packed assets and a separate resumable native cache. Only passing records are
+exported; unknown/rejected records remain private and pending. It adds no new
+per-draw instrumentation or normal-play preparation. See
+[collection verification](pipeline-contributions.md#automatic-verification-after-play-phase-202)
+for controls, search scope, rollback and maintainer acceptance requirements.
+
 The Phase-201 development starter contains 4,450 verified observed pipelines /
 1,581 original program identities. Dealership test 1 contributes 1,348 additions,
 all reconstructed from original assets with exact fresh native keys and persisted

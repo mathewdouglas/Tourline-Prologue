@@ -61,3 +61,14 @@ setup will request the matching game file again.
 No game data, saves, firmware, keys or RPCS3 are supplied in this download.
 All shader contents and driver binaries are generated locally. First visits may
 still compile shaders even after optional preparation.
+
+To contribute learned pipelines, run Collect pipeline template.cmd and play
+normally with supported 720p/1080p 16:9 settings. Close the game normally when
+finished. Verification then reads your original game files and checks shaders
+and native pipelines in a separate private cache. Keep the console open; this
+can take several minutes. Ctrl+C cancels verification and keeps completed work.
+Use Resume pipeline verification.cmd to continue the latest captured session
+after closing the game. Ordinary play can continue after verification stops.
+Share only the verified JSON path printed when verification finishes. Unresolved
+records stay in pending-template.json; keep it, the recorder and caches private.
+Nothing is uploaded automatically. A maintainer still verifies release additions.

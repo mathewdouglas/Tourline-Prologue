@@ -1,6 +1,13 @@
-This optional developer starter contains 3,102 verified pipeline records for
+This optional developer starter contains 4,450 verified pipeline records for
 BCUS98158 version 3. It contains program identifiers and numeric translation/native
 state only. It contains no shader microcode, source, DXBC or driver binaries.
+
+Phase 201 adds 1,348 verified dealership records and preserves the previous 3,102.
+There are 1,581 original program identities (443 VP / 1,138 FP).
+The separate search-map.json adds verified numeric locations for 592 original
+shader-bearing containers for post-play contribution verification. It contains
+no program contents and adds no pipeline coverage by itself. The player map and
+ordinary preparation volume map still describe exactly the starter's programs.
 
 The records came from local menu/High Speed Ring/Daytona play and an additional
 Fuji Speedway F (Course Select slot 2) session covering the grid/opening section. Both
@@ -46,7 +53,7 @@ locally before compilation; captured programs are not needed by users.
 See [the preparation workflow](../../../docs/shader-precompile.md). Pass this
 directory to `scripts/pipeline_template.py prepare --template`. The optional
 player preparation helper uses `player-map.json`, a complete
-hash/offset map for all 1,162 unique programs (353 vertex, 809 fragment), using
+hash/offset map for all 1,581 unique programs (443 vertex, 1,138 fragment), using
 the user's original game files and verified ELF, without a developer
 catalogue. The smaller `asset-map.json` remains the supplemental developer map.
 Templates do not establish menu/race preload ownership. The separately verified
@@ -54,10 +61,10 @@ warmup plan contains observed notifier membership, including prepass requests;
 unknown keys stay out. This update changes development metadata, not the published
 release, async draw policy or preparation choice. No zero-stutter claim is made.
 
-Development direct preparation uses `volume-map.json`, numeric locations for 104 required
+Development direct preparation uses `volume-map.json`, numeric locations for 165 required
 archive members plus parameter locations in the user's verified ELF. It contains
 no keys or file names. The optional helper can read the original GT.VOL directly,
-verify each decoded container and all 1,162 programs, and avoid an unpacked asset
+verify each decoded container and all 1,581 programs, and avoid an unpacked asset
 copy. Both ELF and volume SHA-256 must match this supported disc build. The
 legacy unpacked-assets flow remains available. Other builds/modded volumes need
 separately verified maps. The published v0.2 package remains unchanged.

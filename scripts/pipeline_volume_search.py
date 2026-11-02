@@ -14,7 +14,7 @@ import time
 import game_volume as volume
 import pipeline_asset_map as locations
 from preparation_reuse import cache_root, regular_read
-from shader_coverage import MAX_FP, fnv64
+from shader_coverage import MAX_FP, fnv64, fp_identity
 from shader_reconstruct import word_swap
 
 MAX_BUFFER = 128 * 1024**2
@@ -43,7 +43,13 @@ def search(records, traces, archive, elf, volume_map, known=(), progress=None):
                     raw=regular_read(path,MAX_FP)
                     if path.stem!=f'{stage}_{fnv64(raw):016x}':raise ValueError('Invalid recorder program')
                 except (OSError,ValueError):invalid+=1;continue
-                for size in {n for s,_,n in wanted if s==stage and n<=len(raw)}:
+                # FP END fixes the identity length. Avoid normalizing every raw
+                # program against every unrelated requested length (quadratic).
+                sizes = {n for s,_,n in wanted if s==stage and n<=len(raw)}
+                if stage == 'fp':
+                    try:sizes = {fp_identity(raw)['size']} & sizes
+                    except ValueError:invalid+=1;continue
+                for size in sizes:
                     code=raw[:size]
                     try:key=(stage,locations.identity(stage,code),size)
                     except ValueError:continue

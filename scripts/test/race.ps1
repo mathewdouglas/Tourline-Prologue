@@ -45,6 +45,7 @@ param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track =
       [string]$Engine = "", [string]$GameRoot = "", [string]$OutputDirectory = "",
       [switch]$PlayerLauncher,
       [switch]$ContributionCollector,
+      [ValidateRange(60,3600)][int]$CollectionVerificationTimeout = 1800,
       [switch]$GracefulClose,
       [switch]$RequireForeground,
       [switch]$NoPrepared,
@@ -175,6 +176,9 @@ if ($ContributionCollector) {
     $set.Remove('GT5P_NO_SETTINGS'); $set.Remove('GT5P_RESOLUTION'); $set.Remove('RSX_MSAA')
 }
 $set['GT5P_ROOT'] = $GameRoot
+if ($ContributionCollector -and $PSBoundParameters.ContainsKey('GameRoot')) {
+    $set['GT5P_USER_DIR'] = $GameRoot
+}
 if ($FrameTest) { $set["GT5P_FRAME_LOG"] = (Join-Path $dir "$Tag.frames.csv") }
 foreach ($v in $Vars) { if ($v) { $k, $val = "$v" -split "=", 2; $set[$k] = $val } }
 $p = $null
@@ -390,9 +394,9 @@ try {
         if (Test-Path $gameErr) { Copy-Item -LiteralPath $gameErr -Destination "$dir/$Tag.err" }
     }
     if ($collectorOwner) {
-        if (-not $collectorOwner.WaitForExit(120000)) {
+        if (-not $collectorOwner.WaitForExit($CollectionVerificationTimeout*1000)) {
             $collectorOwner.Kill(); $collectorOwner.WaitForExit(10000) | Out-Null
-            throw 'Owned contribution helper did not finish exporting'
+            throw 'Owned contribution helper did not finish post-play verification'
         }
         [uint32]$collectorCode = 259
         if (-not [RaceWindowShot]::GetExitCodeProcess($collectorHandle,[ref]$collectorCode) -or $collectorCode -ne 0) {

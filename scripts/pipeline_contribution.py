@@ -178,16 +178,22 @@ def default_storage():
     return Path(selected.value) if selected.value else home
 
 
-def player_main(argv, collect=False):
+def player_main(argv, collect=False, resume=False):
     """Frozen-helper export. Recorder data remains on this computer."""
     from preparation_settings import select, verify
     from train_pipeline_cache import idle
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--install',type=Path,required=True)
-    for name in ('storage','trace','output','cache'):ap.add_argument('--'+name,type=Path)
+    for name in ('storage','trace','output','cache','session'):ap.add_argument('--'+name,type=Path)
     a=ap.parse_args(argv)
     idle()
     storage=cache_root(a.storage or default_storage())
+    if resume:
+        if any((a.trace,a.output,a.cache)):ap.error('Resume uses the saved collection session')
+        from pipeline_collection import verify_session
+        verify_session(a.install,storage,a.session)
+        return
+    if a.session:ap.error('--session is only for --verify-contribution')
     selection=select(storage)
     if (selection['requested']!='auto' or selection['mode']!='default'
             or selection['source'] not in ('launcher-settings','launcher-first-run-preset')
@@ -198,7 +204,7 @@ def player_main(argv, collect=False):
     baseline=template.read(install/'assets/pipeline-templates/gt5p-disc-v2')
     if baseline['compatibility']!=compatibility:raise ValueError('Installed template/game/renderer mismatch')
     if collect:
-        if a.trace or a.cache:raise ValueError('Collection chooses its own recorder and cache')
+        if a.trace or a.cache or a.output:raise ValueError('Collection chooses its own recorder, cache and verified output')
         if shutil.disk_usage(storage).free<1024**3:raise ValueError('Collection needs at least 1 GiB free for private recorder data')
         parent=storage/'pipeline-contributions'
         if parent.exists():cache_root(parent)
@@ -209,7 +215,8 @@ def player_main(argv, collect=False):
             raise ValueError('This recorder currently requires an ASCII path shorter than 448 characters')
         if a.output is None:a.output=session/'share-this-template.json'
         env=dict(os.environ,RSX_PSO_PROVENANCE=str(a.trace),RSX_PSO_PROVENANCE_LIMIT='4096',PS3_VERBOSE='0',GT5P_USER_DIR=str(storage))
-        print('Play normally, keep these video settings, then close the game. Only share the exported JSON; recorder/cache files stay private.',flush=True)
+        print('Play normally and keep these video settings. After closing the game, original-asset/native verification runs automatically. Ctrl+C cancels verification; Resume pipeline verification.cmd continues later.',flush=True)
+        print('Private recording: '+str(session),flush=True)
         # The launcher owns its game job, storage locks and settings restarts.
         # Never terminate another game or change ordinary asynchronous draws.
         subprocess.run([str(install/'tourline-prologue.exe')],env=env,check=True)
@@ -231,6 +238,10 @@ def player_main(argv, collect=False):
     result,rejected=capture(a.trace,cache,compatibility)
     if any(Path(a.output).absolute().is_relative_to(p) for p in (cache_root(a.trace),cache_root(cache))):
         raise ValueError('Keep the shared export separate from private recorder/cache inputs')
+    if collect:
+        from pipeline_collection import begin
+        begin(install,storage,session,result,rejected,selection)
+        return
     write_json(a.output,result)
     print(json.dumps(dict(output=str(a.output),pipelines=len(result['template']['records']),excluded=rejected,
         share='Send only the exported JSON. Keep recorder, shadercache, game files and logs private.')))

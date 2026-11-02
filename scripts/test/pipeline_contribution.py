@@ -123,7 +123,7 @@ def main():
     # Collect starts only its launcher with a private opt-in recorder. It never
     # changes async settings, sends data or copies raw files into the share file.
     from types import SimpleNamespace
-    import train_pipeline_cache,preparation_settings
+    import train_pipeline_cache,preparation_settings,pipeline_collection
     storage=work/'Storage';(storage/'shadercache').mkdir(parents=True)
     selected=storage/'preparation'/('a'*24)/'shadercache';selected.mkdir(parents=True)
     (storage/'prepared-cache.txt').write_text(selected.relative_to(storage).as_posix())
@@ -134,6 +134,7 @@ def main():
             patch.object(template,'read',return_value=document), \
             patch.object(template,'compatibility',return_value=document['compatibility']), \
             patch.object(contribution,'capture',return_value=(shared,{})) as capture, \
+            patch.object(pipeline_collection,'begin') as begin, \
             patch.object(contribution.subprocess,'run',return_value=SimpleNamespace(returncode=0)) as run, \
             patch.object(contribution.shutil,'disk_usage',return_value=SimpleNamespace(free=2*1024**3)), \
             patch.dict(os.environ,{'RSX_SHADER_CACHE':str(storage/'wrong-cache')}):
@@ -145,9 +146,8 @@ def main():
         for key in ('RSX_SHADER_ASYNC','RSX_PSO_ASYNC'):
             assert env.get(key)==os.environ.get(key)
         assert capture.call_args.args[1]==selected
-        exported=list((storage/'pipeline-contributions').glob('*/share-this-template.json'))
-        assert len(exported)==1 and json.loads(exported[0].read_text())==shared
-        assert 'private-recorder' not in exported[0].read_text() and str(storage) not in exported[0].read_text()
+        assert begin.call_count==1 and begin.call_args.args[3]==shared
+        assert not list((storage/'pipeline-contributions').glob('*/share-this-template.json'))
     if os.name=='nt':
         home=work/'Home';home.mkdir()
         (home/'storage.ini').write_text('[game]\ndirectory='+str(storage)+'\n',encoding='utf-16')

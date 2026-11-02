@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 201)
+## Start here: state of play (2026-11-03, Phase 202)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 201 is the latest).
+has the evidence, newest phase first (Phase 202 is the latest).
 
 ### What works now
+
+- **Post-play collection verification (Phase 202):** opt-in collection now verifies
+  original assets and both shaders/native keys after game exit. Only prepared
+  rows become shareable; pending input stays private. Resume CMD, Ctrl+C, separate
+  cv checkpoints, the launcher storage lease and private kill-on-close native jobs
+  preserve ordinary cache selection/ownership. A 592-container numeric search map
+  adds no pipeline coverage itself. Frozen retained 1,484-record lookup/native
+  cancel/resume/rejection and an actual packaged 1,632-record HSR collect-to-verify
+  flow pass, alongside policy/package/process-lifetime checks. Verification stays
+  offline and can take minutes; unknowns stay pending. GT5P_COLLECT_VERIFY=0 leaves
+  collection pending. Maintainer release proof remains mandatory. Starter remains
+  4,450; no runtime/default normal-play, stutter, main or release claim.
 
 - **Verified dealership expansion (Phase 201):** all 1,348 test-1 candidates pass
   fresh both-stage reconstruction, exact native keys and persistence. Starter:

@@ -1,5 +1,51 @@
 # Contributing pipeline templates
 
+## Automatic verification after play (Phase 202)
+
+`Collect pipeline template.cmd` records during ordinary launcher-owned play as
+before. After the game closes and the collection settings check passes, it saves
+the complete captured metadata privately, then finds original programs and
+independently reconstructs both shaders and exact native pipelines. Verification
+never runs alongside the owned game. It uses the launcher's exclusive storage
+lease and separate private `cv/<identity>` checkpoints; it never selects or edits
+the player's prepared cache. Native children have private kill-on-close jobs,
+offline-entry guards, bounded logs and timeouts; vertex worker budgets stay intact.
+
+Keep the collection console open. Status counts describe lookup/compilation/native
+work. Ctrl+C cancels verification; `Resume pipeline verification.cmd` continues
+the most recent captured session without launching a game. Completed lookup is
+reused, cached shader bytes are checked, and native pipelines are revalidated.
+Cancellation during an unfinished lookup restarts that bounded search on resume.
+An optional session-local `verify.cancel` marker also requests cancellation; only
+that marker is cleared on the next owned resume. Game/cache/recorder bytes stay
+local. `GT5P_COLLECT_VERIFY=0` leaves collection pending without publishing a share
+file; explicit Resume still requests verification.
+
+Only successful independently prepared records reach `share-this-template.json`.
+Unresolved or rejected records stay in private `pending-template.json`, and the
+local `verification.json` reports both counts. After a later search-map/decoder
+update, newly verified rows can produce an additive, digest-named share file;
+the earlier verified export remains unchanged. Share the path printed by the
+latest successful run. No report, recorder, original shader, DXBC or driver blob
+is included in that metadata envelope. Failed/cancelled work retains the captured
+input and previous exports. Nothing is uploaded or accepted into a release.
+An incomplete native-process batch stops verification safely; partial native
+logs never authorize publication. Resume revalidates completed cache work.
+
+The packaged numeric search map covers 592 original SHDS-bearing/reference
+containers, independently of the starter's 165 archive members. Whole volume,
+ELF, decoded-member and program hashes gate reconstruction. This is a wider
+bounded search, not archive-wide semantic discovery: unknown programs remain
+pending. Existing limits remain 600 seconds/search, 128 MiB/oracle pool and
+decoded member, 8,192 recorder files, 4,096 records/session. No new renderer
+instrumentation, per-draw work, async policy or driver-cache clearing is added.
+
+Player verification is useful local evidence, not authentication. Maintainers
+must still locate/reconstruct candidates against their own original assets and
+repeat native acceptance before updating a starter or release. The explicit
+developer `export`/`--export-contribution` paths remain untrusted metadata export
+tools; they do not claim post-play verification.
+
 The development merged catalogue permits 65,536 records / 128 MiB, independently
 of the existing 4,096-record collection-session and 32 MiB submission budgets.
 Collect additional sessions as needed; review and original-asset/native proof

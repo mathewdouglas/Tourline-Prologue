@@ -36,6 +36,14 @@ def template_files():
         raise ValueError('Volume locations must cover exactly the player map containers')
     index=json.loads((folder/'index.json').read_text())
     names={'README.md','index.json','asset-map.json','player-map.json','volume-map.json'}|{p['file'] for p in index['parts']}
+    if (folder/'search-map.json').exists():
+        search=read_volume(folder/'search-map.json')
+        if any(search[k]!=volume[k] for k in ('elf_sha256','volume_sha256','volume_size','key_location')):
+            raise ValueError('Collection search map game identity differs')
+        rows={r['container']:r for r in search['records']}
+        if any(rows.get(r['container'])!=r for r in volume['records']):
+            raise ValueError('Collection search map must preserve every player container')
+        names.add('search-map.json')
     if {p.name for p in folder.iterdir()}!=names:raise ValueError('Unreviewed template file')
     return {'assets/pipeline-templates/gt5p-disc-v2/'+n:regular(folder/n) for n in names}
 
@@ -146,7 +154,8 @@ def main():
              'START-HERE.txt': regular(ROOT / 'launcher/START-HERE.txt'),
              'Change storage.cmd': regular(ROOT / 'launcher/Change storage.cmd'),
              'Prepare shaders.cmd': regular(ROOT / 'launcher/Prepare shaders.cmd'),
-             'Collect pipeline template.cmd': regular(ROOT / 'launcher/Collect pipeline template.cmd')}
+             'Collect pipeline template.cmd': regular(ROOT / 'launcher/Collect pipeline template.cmd'),
+             'Resume pipeline verification.cmd': regular(ROOT / 'launcher/Resume pipeline verification.cmd')}
     files.update(preparation_files(args.preparer_dir))
     files.update(template_files())
     for name in RUNTIME:

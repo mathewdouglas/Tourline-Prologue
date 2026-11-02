@@ -9,6 +9,94 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 202 - Automatic post-play contribution verification (2026-11-03)
+
+At the user's request, opt-in collection now retains its captured metadata and
+automatically verifies it after the normal launcher-owned game exits. The game
+gets no new asset scans, compiler work, instrumentation or queue changes. Saved
+settings still gate collection to the existing supported default context. The
+post-play pass locates original programs, reconstructs both stages, checks exact
+native keys and driver persistence, and exports only prepared rows. Unknown and
+rejected rows stay private in pending-template.json. No data is uploaded or
+accepted into the starter automatically; maintainer original-asset/native proof
+remains mandatory. The starter remains 4,450 records / 1,581 programs.
+
+The private collected-template.json survives before verification starts. A
+storage-relative last-session pointer supports Resume pipeline verification.cmd
+without another game launch. Verification holds the normal launcher's exclusive
+storage lease and its own checkpoint lock, uses a separate cv/<identity> output,
+and never changes prepared-cache.txt or seeds from the played shader cache.
+Ctrl+C or a session verify.cancel marker interrupts; completed lookup and checked
+shader/native cache files resume. An interrupted unfinished search restarts its
+bounded lookup. GT5P_COLLECT_VERIFY=0 retains pending input without a share file;
+explicit Resume requests verification. Completed exports are immutable; a later
+successful promotion of pending records publishes an additive digest-named file.
+Partial native-process completion cannot authorize publication.
+
+The separate metadata-only search-map.json contains 592 verified original
+SHDS-bearing/reference archive containers (2,865,176,912 decoded bytes), beyond
+the starter's 165 members. The maintainer builder checks existing numeric archive
+locations against a private listing, hashes original reference containers, and
+verifies every decoded packed member against the original volume/ELF. No names,
+keys, program bytes or compiled contents are published. Existing count, 4 GiB
+decode-map, 128 MiB member/oracle and 600-second search bounds remain. The FP
+oracle path now uses the bounded END-derived identity length once per program,
+instead of normalizing each file at every unrelated requested length. All
+original volume/ELF/member/program hashes still gate reconstruction.
+
+Hidden offline children are created suspended into a private kill-on-close job
+atomically, then resumed; cancellation/timeout/owner death retires only owned
+processes and descendants. Existing bounded vertex jobs remain unchanged. Real
+Windows normal-exit, failure, timeout, cancellation and nested-owner-death tests
+pass while an unrelated sentinel process survives. Synthetic policy checks cover
+verified-only publication, unresolved/rejected pending rows, cancellation/resume,
+unchanged selected cache, immutable/additive exports and pointer traversal.
+Search/map/package, contribution, template, translation and report checks pass.
+
+A frozen retained-session proof uses the original 1,484-record dealership export
+and an older 3,102-record install/map. Wider search independently locates all 419
+missing original programs in 353 containers, about 109.15 s. Cancellation at the
+native stage publishes no share and keeps all pending input and the old cache
+selection. Resume recompiles no shaders and prepares/persists all 1,484 native
+pipelines; all 534 session program identities resolve. Incompatible-volume retry
+rejects without changing the existing verified export or selected cache. Total
+cancel/resume/rejection harness time is about 261.82 s; the final resume proof is
+42.39 s. These are one PC/driver with preserved OS/driver caches, not cold-driver
+or general performance guarantees.
+
+An actual packaged foreground HSR collection at 1080p/2x/16:9 (aniso16, smooth
+colour, retained Integra fixture, 4,450-record prepared seed, PS3_VERBOSE=0) closes
+normally and starts verification automatically. All 1,632 exported records / 715
+programs pass, pending zero. The fresh post-play pass compiles 216 VP variants and
+1,403 exact FP requests, then creates/persists 1,632 native pipelines with zero
+application-cached driver calls, about 215.58 s. The printed verified envelope is
+metadata-only; the selected preparation cache stays selected. Window-only menu,
+intro/race/mirror samples and presentation are inspected; collection I/O and a
+short variable route make this unsuitable as a stutter comparison. No new starter
+acceptance or rendering guarantee for every captured car/settings context.
+
+The initial end-to-end harness attempt safely refuses before launch because its
+explicit isolated GameRoot was not bound to GT5P_USER_DIR. The collector harness
+now binds it and permits a bounded 1,800-second post-play wait (configurable),
+instead of assuming export finishes within 120 seconds. The retry completes
+through automatic verification with exit zero. A packaging fixture was updated
+for the new Resume CMD; the archive listing's identical aliases are deduplicated
+while conflicting physical locations reject.
+
+Evidence stays private: scratch/c202q (retained-session frozen proof), c202h2
+(private helper build), c202live and scratch/lod-camera/game/pipeline-contributions
+(actual normal collection); c202p retains the safely failed test bootstrap.
+The tested 225-file package SHA256 is
+412b4d7297a3d13b6832b35373b6b1ba9f7dfc2ebd389075956d88d669f3159f.
+Final strict repackaging, with the README's current program/member counts tidied
+and identical tested engine/helper binaries, produces SHA256
+649c4ebfb37f5a33dd1a05be1cb826c2f9958dfba5245d6aadfcf147a052fd8b.
+Every build/compiler/native/synthetic/game operation owns the common Windows
+validation mutex through all children and cleanup. The existing owned game
+fixture is reused without another full game-data copy. All caches/evidence remain;
+no shared runtime, main/tag/release, CI build or normal asynchronous policy change.
+Push this feature branch with [skip ci].
+
 ## Phase 201 - Verified dealership contribution enters the starter (2026-11-03)
 
 The user authorized original-asset shader/native proof and starter acceptance for
