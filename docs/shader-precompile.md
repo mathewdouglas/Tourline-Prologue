@@ -78,6 +78,14 @@ should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
 
+Phase 199 adds [frame-level hitch diagnosis](frame-hitch-diagnosis.md) and a
+separate default-off texture LRU experiment. A foreground HSR rollback/LRU pair
+substantially reduces texture allocation churn during the close-car passage;
+the approach to the camera handoff also makes fewer allocations, but retains a
+large hitch. No shader compile or native PSO completion occurs in the cited
+long-frame intervals. This is a texture-retention result on one route, not new
+template coverage, a whole-game stutter claim or a player-default change.
+
 ### Community template contributions (Phase 196)
 
 The existing format-2 template already contains both program SHA-256 identities

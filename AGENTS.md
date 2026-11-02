@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 197)
+## Start here: state of play (2026-11-02, Phase 199)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 197 is the latest).
+has the evidence, newest phase first (Phase 199 is the latest).
 
 ### What works now
+
+- **Bounded texture retention experiment (Phase 199):** separate default-off
+  `RSX_TEX_LRU=1` overlay retains recently used textures within the existing
+  1,024-slot cap and same-batch protection. Frame traces identify allocation
+  bursts with no shader/driver-PSO completion in the hitch intervals. One
+  same-engine/cache-seed foreground HSR rollback/LRU pair reduces close-car
+  allocations 1,404->95 and window max 152.8->73.9 ms; two LRU routes agree on
+  reduced churn. Camera approach allocations also fall, but its max remains
+  96.3 ms. This is one save/route/GPU, not an exact car-LOD attribution or a
+  solved camera hitch. Native selection, analyzer and inspected rendering
+  checks pass. See docs/frame-hitch-diagnosis.md and progress. Runtime overlays
+  remain explicit; no player defaults, async policy, release or CI change.
 
 - **Real community collection and expansion (Phase 197):** normal packaged
   launcher play exports 1,582 metadata-only HSR records; review finds 210 new

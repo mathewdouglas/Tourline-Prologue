@@ -25,6 +25,9 @@
 # with an experimental slot is rejected.
 # -GracefulClose asks only the owned game window to close before the existing
 # owned-process timeout cleanup, allowing diagnostic shutdown summaries.
+# -RequireForeground activates the owned window at the grid and rejects focus
+# loss during intro/sampling. Native activation may be needed before the grid
+# when Windows refuses SetForegroundWindow. Shot intervals go to .shots.json.
 # -ContributionCollector with -PlayerLauncher exercises the frozen opt-in
 # recorder/export around normal player launch; use saved supported settings.
 # -Engine/-GameRoot/-OutputDirectory support isolated audit runs. Another game
@@ -43,6 +46,7 @@ param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track =
       [switch]$PlayerLauncher,
       [switch]$ContributionCollector,
       [switch]$GracefulClose,
+      [switch]$RequireForeground,
       [switch]$NoPrepared,
       [string]$ExtraHold = "",
       [Parameter(ValueFromRemainingArguments = $true)] $Vars)
@@ -68,6 +72,7 @@ public class RaceWindowShot {
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,System.Text.StringBuilder text,int count);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int how);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  public static IntPtr GameWindow(int pid) {
   IntPtr result=IntPtr.Zero;
   EnumWindows((h,data)=>{uint owner;GetWindowThreadProcessId(h,out owner);
@@ -82,7 +87,9 @@ public class RaceWindowShot {
 }
 '@
 }
+$shotTimes = [Collections.Generic.List[object]]::new()
 function Save-RaceWindowShot($Proc, [string]$Path) {
+    $shotStart = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $Proc.Refresh(); $h = $Proc.MainWindowHandle
     $r = New-Object RaceWindowShot+Rect
     [RaceWindowShot]::GetClientRect($h, [ref]$r) | Out-Null
@@ -91,6 +98,8 @@ function Save-RaceWindowShot($Proc, [string]$Path) {
     try { [RaceWindowShot]::PrintWindow($h, $dc, 3) | Out-Null }
     finally { $g.ReleaseHdc($dc); $g.Dispose() }
     try { $bmp.Save($Path) } finally { $bmp.Dispose() }
+    $shotTimes.Add([pscustomobject]@{ file = [IO.Path]::GetFileName($Path);
+        start_ms = $shotStart; end_ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() })
 }
 function Watch-RaceIdle($Proc, [string]$Stage, [int]$Duration) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -106,6 +115,11 @@ function Watch-RaceIdle($Proc, [string]$Stage, [int]$Duration) {
         Start-Sleep -Milliseconds 250
     }
     Save-RaceWindowShot $Proc (Join-Path $dir "$Tag.$Stage-idle-end.png")
+}
+function Assert-RaceForeground {
+    if ($RequireForeground -and [RaceWindowShot]::GetForegroundWindow() -ne $gameWindow) {
+        throw 'Owned game lost foreground; timing run rejected. No other window was activated.'
+    }
 }
 $slot = 0
 $courseIdentity = "measured"
@@ -248,10 +262,16 @@ try {
     }
     if ((Wait-Milestone $p $tail "QuickArcadeRoot" 240) -lt 0) { throw "Starting grid not reached" }
     $gridMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    if ($RequireForeground) {
+        [RaceWindowShot]::ShowWindow($gameWindow,5) | Out-Null
+        [RaceWindowShot]::SetForegroundWindow($gameWindow) | Out-Null
+        Assert-RaceForeground
+    }
     if ($GridIdleSeconds -gt 0) { Watch-RaceIdle $p "grid" ($GridIdleSeconds + 4) }
     # Allow the first Start press and camera transition before sampling.
     if ($IntroShots) {
         for ($s = 0; $s -lt 25; $s++) {
+            Assert-RaceForeground
             $p.Refresh()
             if ($p.HasExited) { throw "Game exited during the race introduction" }
             Save-RaceWindowShot $p (Join-Path $dir ("$Tag.intro{0:D2}.png" -f $s))
@@ -271,6 +291,7 @@ try {
         $cpuP = (Get-Process -Id $p.Id).TotalProcessorTime.TotalSeconds
     }
     for ($s = 0; $s -lt $Seconds; $s++) {
+        Assert-RaceForeground
         $p.Refresh()
         if ($p.HasExited) { throw "Game exited during the race" }
         $sampleLog += Read-LogTail $profTail
@@ -342,6 +363,13 @@ try {
     if ($ordered.Count) { "$trackLabel`: median $($ordered[[int]($ordered.Count/2)]) fps over $Seconds s" }
     "Cache warming finished for the materials seen in this run; logs and shot: $dir/$Tag.*"
 } finally {
+    # PrintWindow/PNG encoding can itself disturb frame timing. Preserve exact
+    # intervals, including intro shots (whose one-second sleeps drift), so a
+    # diagnostic can flag overlaps instead of assigning them to game work.
+    try {
+        ConvertTo-Json -InputObject @($shotTimes.ToArray()) -Depth 3 |
+            Set-Content (Join-Path $dir "$Tag.shots.json")
+    } catch { Write-Warning "Could not save shot timestamps: $_" }
     if ($GracefulClose -and $p) {
         try {
             $p.Refresh()

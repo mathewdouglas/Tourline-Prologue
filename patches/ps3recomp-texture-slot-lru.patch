@@ -1,0 +1,49 @@
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -287,6 +287,7 @@
+                          * shift it, so keying on off never matches the raw offset
+                          * a later draw arrives with, and every draw re-uploads. */
+     int used;           /* referenced this frame */
++    u64 last_used_frame; /* render-thread-owned recency; never replaces a used slot */
+     u32 levels;             /* uploaded mip levels, part of resource identity */
+     u64 up_frame;       /* frame of the last upload through `up` (tex_upload_sweep) */
+     u8  repl_cand;      /* the port's replacer manages this texture */
+@@ -312,6 +313,15 @@
+     if (!n) { const char* e = getenv("RSX_TEX_SLOTS"); n = e ? atoi(e) : VP_TEX_SLOTS;
+               if (n < 4) n = 4; if (n > VP_TEX_SLOTS) n = VP_TEX_SLOTS; }
+     return n;
++}
++/* Developer experiment: prefer the least recently used unreferenced slot.
++ * Existing empty-slot preference and same-frame protection remain authoritative.
++ * RSX_TEX_LRU=0/unset restores first-unused eviction and the same slot cap. */
++static int tex_lru_on(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e=getenv("RSX_TEX_LRU"); on=e && !strcmp(e,"1"); }
++    return on;
+ }
+ /* Slot last found for a bound offset (hashed): checked before the scan. */
+ #define TEX_HINT_N 4096u
+@@ -7194,11 +7204,12 @@
+              * every one of them every frame was ~70% of the frame's CPU time. */
+             u32 nb = chain_bytes;
+             u32 cs = TEX_CSUM(cube ? vm_base + c->off : tex_src(c->off, nb), nb);
+-            if (cs == c->csum && !(c->repl_cand && c->repl_gen != s_tex_repl_gen)) { c->used = 1; return i; }
++            if (cs == c->csum && !(c->repl_cand && c->repl_gen != s_tex_repl_gen)) { c->used = 1; c->last_used_frame = s_d3d.frame_count; return i; }
+             if (!cube && c->off == off) tex_vol_mark(off, nb);
+             slot = i; break;                      /* stale: fall through and redo */
+         }
+-        if (!c->used && freeslot < 0) freeslot = i;
++        if (!c->used && (freeslot < 0 || (tex_lru_on() &&
++                c->last_used_frame < s_d3d.vp_tex[freeslot].last_used_frame))) freeslot = i;
+         if (!c->res && emptyslot < 0) emptyslot = i;
+     }
+     /* An empty slot before one whose texture another frame may want again. */
+@@ -7777,6 +7788,7 @@
+ 
+     t->off = off; t->key = key_off; t->w = w; t->h = h; t->fmt = fmt;
+     t->cube = cube; t->depth = depth; t->used = 1; t->levels = levels;
++    t->last_used_frame = s_d3d.frame_count;
+     t->repl_cand = (u8)repl_cand; t->repl_gen = repl_gen;
+     { u32 nb = chain_bytes;
+       t->csum = TEX_CSUM(cube ? vm_base + off : tex_src(off, nb), nb); }

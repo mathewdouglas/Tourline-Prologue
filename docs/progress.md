@@ -9,6 +9,117 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 199 - Frame-correlated allocation hitches and bounded texture retention (2026-11-02)
+
+This work uses the isolated `feature/lod-camera-stutter` worktree at shared base
+`cc47cee`, with the provenance runtime/reference build inputs read-only. Only
+private backend objects, runtime library and executable are rebuilt. Authored
+runtime changes are separate patches; no shared runtime, release/player engine,
+starter or preparation contract changes. Every build, native/analyzer test and
+game route owns `Local\Tourline-Prologue-Isolated-Validation`, preflights existing
+processes and joins/cleans only its own children before releasing the mutex.
+
+Five-second counters could not locate the reported close-car/mirror or
+pre-gameplay-camera hitches. The separate default-off
+`ps3recomp-frame-hitch-trace.patch` adds bounded batch-level timestamps, existing
+PERF stage snapshots, shader/driver/demand completions, successful DXBC file-read
+time, texture resource allocation/decode/hash/Map/copy/SRV splits, Present and
+foreground state. It writes at most 32,768 buffered rows, without per-draw log
+bursts. Unset/empty/`RSX_HITCH_LOG=0` rolls it back. Async stage completions are
+correlations, not critical-path durations; stage times overlap. Guest model/file
+streaming remains uninstrumented. See docs/frame-hitch-diagnosis.md for details.
+
+The route harness now records actual screenshot intervals, including encoding,
+and can require foreground during intro/sampling. A first route's early intro
+was background and is excluded from acceptance; its later foreground samples
+remain diagnostic only. A second route rejects safely at the grid when Windows
+refuses SetForegroundWindow. Native computer-use activation of the exact owned
+private executable permits the subsequent foreground routes. They independently
+record foreground throughout both reported windows and actually present frames.
+All window images and original/cache bytes remain ignored/private.
+
+Settings are HSR, the fixture's Honda Integra Type R '04, 1080p/16:9, 2x MSAA,
+anisotropy 16, smooth colour, VSync and existing async shader/PSO policy. The
+expanded Phase 197 learned cache is copied, with runtime packs and indexed
+warming enabled, provenance/coverage recording disabled and `PS3_VERBOSE=0`.
+OS/driver caches are preserved and uncontrolled. The final rollback/LRU pair
+uses the same engine SHA, identical starting menu/race pack and membership
+hashes, identical save SHA, separate copied application caches and fresh
+processes. Save SHA-256 is
+`3ab57a9b25480e399e870a5737f9e7222b022c401f6a8fed80091328b6a0855a`;
+the verified ELF is `8ee3523e8c05d6a27d3cc32f6caeb530059473e8b9ae04ad92fdbfb677603036`.
+This is prepared application-cache testing, not application/OS/driver-cold proof.
+
+The rollback close-car burst at grid +44.696 s lasts 152.834 ms. Replay is
+142.778 ms, including 101.065 ms texture handling and 67.042 ms creating
+163 texture/167 staging allocation calls. Decode is 0.413 ms, replacement hashing
+4.913 ms, Map 0.856 ms, copy/barrier recording 2.259 ms and uploader SRV
+creation 0.421 ms. Present is 0.296 ms, the measured frame-start GPU wait is
+0.011 ms and the previous GPU sample is 4.617 ms. Shader compiles, driver PSO
+calls and successful DXBC file reads all have zero deltas in this interval.
+It does not overlap a screenshot. This falsifies shader/PSO compilation as the
+cause of this particular burst; it does not exclude unmeasured work elsewhere.
+
+The existing cache chooses the first unused slot after exact lookup, even when
+an older unused texture remains elsewhere. The separate
+`ps3recomp-texture-slot-lru.patch` adds opt-in `RSX_TEX_LRU=1`: choose the oldest
+unused slot, retaining empty preference, exact dirty/replacement hits and the
+same-batch protection/exhaustion rule. Unset/`=0` retains first-unused behavior.
+Capacity remains 1,024 slots; no worker, scan, draw wait or queue policy changes.
+More useful retention can change resident byte sizes, so memory is measured.
+
+The final same-engine ordered pair gives the following backend display-batch
+interval results. Windows are relative to observed grid arrival, not guessed
+from screenshot numbering. Intro 16 is still overhead (rollback +18.403 s;
+LRU +18.475 s), intro 17 is gameplay (+19.597/+19.657 s), bounding the camera
+handoff. The 16..19.5 s approach/handoff window includes the preceding hitches;
+it is not a sub-frame camera-state probe. Close-car shots at about +39.5 s show
+reflected nearby cars; by about +50 s the pack has passed. Individual car/LOD
+identity and the exact reflection-enable threshold remain untraced.
+
+| Window / metric | First-unused rollback | LRU repeat |
+| --- | ---: | ---: |
+| Camera approach 16..19.5 s: texture allocations | 285 | 96 |
+| Camera approach: allocation wall ms | 135.9 | 47.9 |
+| Camera approach: max interval ms / intervals >50 ms | 105.7 / 5 | 96.3 / 2 |
+| Close cars 40..47 s: texture allocations | 1,404 | 95 |
+| Close cars: allocation wall ms | 597.9 | 49.4 |
+| Close cars: p99 / max interval ms | 75.0 / 152.8 | 27.0 / 73.9 |
+| Close cars: intervals >50 ms | 13 | 2 |
+| Sampled peak process private MiB | 3,380.2 | 3,361.3 |
+
+An earlier LRU route independently gives 96 close-window texture allocations,
+52.8 ms allocation time, 30.9 ms p99 / 81.2 ms max and three intervals >50 ms.
+An earlier foreground first-unused route gives 1,485 allocations and 156.2 ms
+max. The early pair predates the extra texture substage probes; only the final
+pair uses identical instrumentation/engine/cache seed. This is an alternating
+exploration, not randomized/ABBA or multi-GPU acceptance. AI/game progress differs
+slightly even with the same scripted route. Both LRU samples retain a roughly
+94..99 ms pre-camera hitch: reduced churn is not a solved camera transition.
+All final-pair shader compile counters remain zero; warmed native calls and
+demand counts still differ slightly. Coverage/readiness are separate concepts.
+
+The actual production selector loop passes 10 native cases in each mode with
+fake resource handles: empty preference, protected/exhausted current batch,
+hit recency, dirty/replacement generation, incompatible shapes and ties. This
+does not prove GPU lifetime. Live inspected intro contact sheets, close-car
+mirror shots and later race shots retain cars, reflections, scenery, track and
+HUD; no new missing-draw regression is evident in those samples. Three analyzer
+checks validate offscreen joining, screenshot/focus flags, counter/clock/reset
+rejection and explicit killed-writer tail handling. Private builds pass. Raw
+trace prefixes are timing evidence, not successful-shutdown/coverage snapshots.
+
+Evidence in this worktree: `scratch/lod-camera/{foreground,lru1,rollback1,lru2}/`
+contains context/frame/trace/shot/memory data and analysis; `comparison.json`
+contains fixed-window totals. `first/` and rejected `second/` remain preserved.
+Native selector evidence is `scratch/texture-slot-policy-b8d6b272cd0c4b9f87e3ad9881f6e614/`.
+All caches and the private game copy remain. Next investigate genuine first
+resource creation and non-allocation prepass work at the camera handoff, and
+identify the exact car/model/LOD/streaming events before broadening attribution.
+The experiment stays default-off, outside the shipped runtime patch. Main,
+published v0.2.2, tags, launcher/preparation defaults and CI are unchanged;
+development push uses `[skip ci]`.
+
 ## Phase 197 - Real collection, packed lookup and verified starter expansion (2026-11-02)
 
 The frozen opt-in contribution command now has a real-player acceptance run.
