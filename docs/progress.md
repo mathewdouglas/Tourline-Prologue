@@ -9,6 +9,75 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 201 - Verified dealership contribution enters the starter (2026-11-03)
+
+The user authorized original-asset shader/native proof and starter acceptance for
+dealership test 1. All 1,348 unambiguous additions pass; the starter now contains
+4,450 records / 1,581 original programs (443 VP, 1,138 FP). Every prior 3,102
+record is preserved exactly. This is observed default-context coverage, not a
+whole-game, GT5, arbitrary-settings or stutter result.
+
+The initial bounded packed search locates 80 of 419 new programs in the existing
+104 mapped members plus ELF (197.84 s); 339 remain unresolved there. The existing
+maintainer SHDS catalogue and extracted reference assets supply all remaining
+locations. A fresh local archive listing agrees with all old numeric locations;
+the expanded numeric volume map covers 165 members (61 additions). Direct packed
+verification hashes the original volume/ELF, every decoded container and all
+1,581 program slices: 166 containers including ELF, 1,432,884,744 decoded bytes,
+about 11.19 s. Original reference assets/runtime remain read-only; no new full
+extraction or game-data copy is made.
+
+Fresh candidate preparation (empty application cache, preserved OS/driver caches)
+compiles 124 exact VP variants and 718 exact FP requests in bounded workers. All
+1,348 reconstructed native keys create and persist; native summary is
+requests/created/driver_calls/cached_blob_calls = 1348/1348/1348/0. End-to-end
+preparation takes 150.66 s. The local contribution acceptance gate verifies the
+exact candidate digest, both-stage proof rows and driver inventory before merge.
+Player/supplemental maps add 419 verified original program identities.
+
+Observed notifier membership adds 1,342 menu keys. Six additions have no observed
+phase membership and are not guessed into the plan. The coherently reissued plan
+has 1,466 menu / 2,113 race keys, 3,546 distinct, pinned to the new bundle digest.
+
+The first full frozen acceptance catches a Phase-200 bug: native chunk progress
+supplied completed/requested without the total expected by the player UI. It
+fails before native creation and leaves the old selection/cache intact. Both
+default and additive-translation callbacks now supply total. A fresh private
+helper build and full retry pass rejection, cancellation/resume, unchanged old
+source cache, all 4,450 native pipelines and local shader packs. Actual native
+chunks are 4,096 + 354; aggregate counts are 4450/4450/4450/3102. The old generation
+contributes 356 reused VP variants; 91 new variants and 690 exact FP requests are
+compiled. Resume wall time is 299.53 s (265.23 s internal preparation), with a
+clean PATH. The frozen regression now aggregates every bounded native log instead
+of expecting a single oversized native summary.
+
+A separate visible production-engine replay uses a copy of the passing frozen
+cache, 1080p/2x MSAA/16:9, aniso16/smooth-colour defaults and the retained fixture
+save (Integra Type R '04 on My Page). Provenance/coverage collection is off and
+PS3_VERBOSE=0. The owned window is activated with computer-use; the existing
+guest-pad dealership route reaches DealerTopRoot and the Acura NSX showroom.
+Four window-only shots span 60 s, reporting 29/30/30/30 FPS; inspected first/last
+shots show complete car bodies, glass, wheels and floor reflections as the camera
+moves. This is a rendering/presentation sanity check, not a controlled stutter
+comparison or visual acceptance of every new dealership/car/translation. The
+last inspected metrics still report four shader compiles and 129 demand PSO
+jobs; prepared template coverage is partial and does not eliminate demand work.
+The owned game exits and mutex releases; no other game/process is stopped.
+
+Focused template, contribution, warmup-plan, shader-pack and translation
+regressions pass. Final coherence checks verify all old records and archive rows
+are unchanged, complete program/container coverage, the pinned plan digest, both
+fresh/frozen native results, and the failed fixture's retained selection/cache.
+
+Private evidence remains under scratch/dealership-collection-20261103,
+scratch/d201p (fresh proof), d201f (preserved failed fixture), d201g (passing
+frozen growth), d201live (window-only replay) and d201h2 (private helper build). The strict 223-file candidate
+package contains no game/cache data; SHA256
+d2d7e8bfe31b94922c028583913db80a5882f77fb9bf8dbe95b53c4368b51758.
+All compiler/native/build/package tests own the shared validation mutex through
+children and cleanup. Published release, main, runtime defaults, async policy and
+driver/user caches remain unchanged; push only this feature branch with [skip ci].
+
 ## Phase 200 - Bounded catalogue growth after dealership collection (2026-11-03)
 
 The first user dealership session exported 1,484 metadata records, excluding three

@@ -100,7 +100,47 @@
     },
     {
       "file": "part-0024.json",
-      "sha256": "ed4b35cf865dfe83d7a2799e2f74a3a368dab42a83089401ac2a7dd1ec7db16f"
+      "sha256": "5c6d82ac17b331027821d294470c87988320da36645a67f4d3af87586006f57f"
+    },
+    {
+      "file": "part-0025.json",
+      "sha256": "24a747bdee2f6e6d64d6e49408915257365a1e8cadaecaca2c0d5d068b7e3a9e"
+    },
+    {
+      "file": "part-0026.json",
+      "sha256": "1b2c38516f4567bb23e65ac430478de1f532f7d44c81ec8f4f3baeb548d2680e"
+    },
+    {
+      "file": "part-0027.json",
+      "sha256": "59bf5a67a9f5dd368ea39f97ac65443457011d743c0b54cb41bdcfa6cce15dde"
+    },
+    {
+      "file": "part-0028.json",
+      "sha256": "079a198653dfa854a5516107c7c381016f22d08cd5d54421bf52d3f45f6d5220"
+    },
+    {
+      "file": "part-0029.json",
+      "sha256": "29ca6d2fce381404593cdb122650fa0fcf743c51a6e97ad6b562ebd4ef106d6a"
+    },
+    {
+      "file": "part-0030.json",
+      "sha256": "0f25fe107aa4499cff5eacdfeecf622f66c1f487b2b02e07892c2ff54254d833"
+    },
+    {
+      "file": "part-0031.json",
+      "sha256": "a0594e974b92e9918cf68bced74656d7dd75b3590affad488ee19025641b52f0"
+    },
+    {
+      "file": "part-0032.json",
+      "sha256": "ed490a1e811c77801693a2f6a4e7c6881c1f2233fc83cd34078039c2b8a806d1"
+    },
+    {
+      "file": "part-0033.json",
+      "sha256": "8d6d2e68ca36dc2e8e4ad675c2fb00a6eaeb3057c1f7b792aec6698b4b2044b8"
+    },
+    {
+      "file": "part-0034.json",
+      "sha256": "7d66b2f06020cd6cdfa61c89489eed87f4e02b41be8fd59e7c81c87472cb5460"
     }
   ]
 }

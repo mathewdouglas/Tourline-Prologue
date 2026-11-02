@@ -162,16 +162,23 @@ def main():
     assert report['cache_reuse']['driver_blobs_copied']==seed_drivers
     assert hashes(source)==before and pointer.read_text()==(state.parent/'shadercache').relative_to(storage).as_posix()
     assert json.loads(state.read_text())['phase']=='complete'
-    match=re.search(r'requests=(\d+) created=(\d+) driver_calls=(\d+) cached_blob_calls=(\d+)',
-                    (state.parent/'native.log').read_text(errors='replace'))
-    assert match and list(map(int,match.groups()))==[len(document['records'])]*3+[seed_drivers]
+    native_counts=[0]*4
+    logs=[state.parent/'native.log']+sorted(state.parent.glob('native-[0-9][0-9][0-9][0-9].log'))
+    for log in logs:
+        matches=re.findall(r'\[pso-material-batch\] valid=1 requests=(\d+) created=(\d+) driver_calls=(\d+) cached_blob_calls=(\d+)',
+                           log.read_text(errors='replace'))
+        assert len(matches)==1
+        values=list(map(int,matches[0]))
+        assert 0<values[0]<=4096 and values[0]==values[1]
+        native_counts=[a+b for a,b in zip(native_counts,values)]
+    assert native_counts==[len(document['records'])]*3+[seed_drivers]
     (out/'validation.json').write_text(json.dumps(dict(template_rejection_preserved_selection=True,
         cancellation_preserved_selection=True,source_cache_unchanged=True,counts=report['counts'],
         clean_path=True,seconds=time.monotonic()-started,reuse=report['cache_reuse'],
         expanding=a.expanding,seed_shaders=seed_shaders,seed_driver_blobs=seed_drivers,missing_seed_files=len(missing),
         shader_work=report['resume'],fragment_work=report['fragment_preparation'],hashing=report.get('hashing'),
         preparation_seconds=report['preparation_seconds'],lookup=report['lookup'],
-        native_counts=list(map(int,match.groups()))),indent=2)+'\n')
+        native_counts=native_counts,native_chunks=len(logs)),indent=2)+'\n')
     print('Frozen generation reuse, cancellation/resume, safe selection and every native pipeline passed')
     if a.learned_cache_repeat:learned_repeat(command,env,storage,out,document)
 

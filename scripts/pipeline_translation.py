@@ -227,7 +227,7 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             env.update(RSX_PSO_PREPARE_BATCH=str(native_root), RSX_PSO_TEMPLATE_PREPARE='1',
                        RSX_PSO_RECIPE_KEEP_DAYS='0')
             native_counts = run_batches(requests, native_root, engine, game_root, env, root/'native.log', runner,
-                lambda done, total: stage('translation-native', completed=done, requested=total))
+                lambda done, total: stage('translation-native', completed=done, total=total, requested=total))
         for row in derived:
             result = json.loads(bounded_read(native_root/seen[row['key']]/'pipeline/result.json', 65536))
             if not result.get('created') or result.get('actual') != result.get('expected') or result['actual'] != row['key']:

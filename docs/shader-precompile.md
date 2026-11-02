@@ -5,6 +5,14 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+The Phase-201 development starter contains 4,450 verified observed pipelines /
+1,581 original program identities. Dealership test 1 contributes 1,348 additions,
+all reconstructed from original assets with exact fresh native keys and persisted
+driver blobs. Full frozen-helper growth from the older 3,102-record cache passes
+cancellation/resume and both bounded native chunks. The expanded lookup maps and
+observed warmup plan are issued together. This remains default-context observed
+coverage; it does not establish whole-game, all-settings or GT5 support.
+
 Catalogue growth (Phase 200) supports up to 65,536 metadata records, 512 shards
 of 128 records, and 128 MiB total payload. These are safety ceilings, not a
 coverage target or a measured full-catalogue preparation capacity. Native jobs

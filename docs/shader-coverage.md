@@ -1,5 +1,13 @@
 # Shader and pipeline coverage audit
 
+Phase 201 adds 1,348 verified dealership records to the development starter:
+4,450 observed pipelines / 1,581 original programs (443 VP, 1,138 FP). Original
+packed slices, both reconstructed stages, exact native keys and persisted blobs
+verify. Full frozen growth passes both 4,096/354 native chunks. These counts
+describe collected default-context recipes, not whole-game shader coverage or
+first-draw readiness. See [progress](progress.md) and
+[preparation](shader-precompile.md) for evidence and limits.
+
 For the subsequent asset-to-bytecode and native pipeline proof, see
 [shader reconstruction](shader-reconstruction.md). Earlier phases verify small
 samples using captured state; Phase 157 prepares an explicit conditional subset

@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 200)
+## Start here: state of play (2026-11-03, Phase 201)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 200 is the latest).
+has the evidence, newest phase first (Phase 201 is the latest).
 
 ### What works now
+
+- **Verified dealership expansion (Phase 201):** all 1,348 test-1 candidates pass
+  fresh both-stage reconstruction, exact native keys and persistence. Starter:
+  4,450 records / 1,581 programs (443 VP, 1,138 FP); previous 3,102 unchanged.
+  Maps add 419 verified program identities and cover 165 archive members. The
+  observed plan has 1,466 menu / 2,113 race keys, 3,546 distinct; six additions
+  without membership stay out. Full frozen growth/cancel/resume/source-cache
+  preservation and both 4,096/354 native chunks pass, using 3,102 cached blobs.
+  Native progress totals are fixed for the player UI. Default-context observed
+  coverage only; no whole-game, GT5, all-settings or stutter claim. See progress.
 
 - **Catalogue growth (Phase 200):** metadata allows 65,536 records / 512 shards /
   128 MiB independently of 4,096-record collection sessions and native process

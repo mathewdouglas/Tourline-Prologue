@@ -656,7 +656,7 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
         env = offline_env(game_root, cache)
         env.update(RSX_PSO_PREPARE_BATCH=str(root), RSX_PSO_TEMPLATE_PREPARE='1', RSX_PSO_RECIPE_KEEP_DAYS='0')
         run_batches(requests, root, engine, game_root, env, output/'native.log', run_offline,
-                    lambda done, total: checkpoint.stage('native', completed=done, requested=total))
+                    lambda done, total: checkpoint.stage('native', completed=done, total=total, requested=total))
     for identity in requests:
         r = by_id[identity][0]
         result = json.loads((root / identity / 'pipeline/result.json').read_text())
