@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 import struct
 import time
+from preparation_io import read_pool, worker_count
 
 from shader_coverage import bounded_read, fnv64
 
@@ -185,47 +186,53 @@ def _seed_cache(document, source, destination, progress, collected):
     requests = [(key, key + '.dxbc', 'shader', value) for key, value in sorted(shaders.items())]
     requests += [(None, f'pso_{key}.bin', 'driver_blob', None)
                  for key in sorted({record['key'] for record in document['records']})]
-    for number, (storage_key, name, kind, expected) in enumerate(requests):
-        if progress:
-            progress('reusing-cache', dict(completed=number, total=len(requests)))
-        if time.monotonic() - started > MAX_SECONDS:
-            report['budget_skipped'] += len(requests) - number
-            break
-        target = destination / name
-        if target.exists():
-            report['already_present'] += 1
-            continue
+    report['io_workers']=worker_count()
+    def read_request(request):
+        storage_key,name,kind,expected=request
+        if time.monotonic()-started>MAX_SECONDS:return request,'budget',None
+        if (destination/name).exists():return request,'present',None
         try:
-            data = regular_read(source / name, (4 if kind == 'shader' else 32) * 1024**2)
-        except FileNotFoundError:
-            report['missing_' + ('shaders' if kind == 'shader' else 'driver_blobs')] += 1
-            continue
-        except (OSError, ValueError):
-            report['rejected_' + ('shaders' if kind == 'shader' else 'driver_blobs')] += 1
-            continue
-        valid = shader_matches(data, *expected) if expected else driver_blob_valid(data)
-        if not valid:
-            report['rejected_' + ('shaders' if kind == 'shader' else 'driver_blobs')] += 1
-            continue
-        byte_field = kind + '_bytes'
-        if report[byte_field] + len(data) > (MAX_SHADERS if expected else MAX_BLOBS):
-            report['budget_skipped'] += 1
-            continue
-        # The destination is protected by the caller's preparation lock. Keep
-        # complete files across cancellation; never write into the source cache.
-        pending = target.with_suffix(target.suffix + '.reuse.tmp')
-        pending.write_bytes(data)
-        pending.replace(target)
-        report['shaders_copied' if expected else 'driver_blobs_copied'] += 1
-        report[byte_field] += len(data)
-        if collected is not None and expected is not None:
-            code_id, length = expected
-            if storage_key in collected:
-                raise ValueError('Template source/bytecode mapping conflicts')
-            if len(data) == length:
-                stamp = destination_stamp(target, length)
-                if stamp is not None:
-                    collected[storage_key] = (code_id, data, stamp)
+            data=regular_read(source/name,(4 if kind=='shader' else 32)*1024**2)
+        except FileNotFoundError:return request,'missing',None
+        except (OSError,ValueError):return request,'rejected',None
+        valid=shader_matches(data,*expected) if expected else driver_blob_valid(data)
+        return request,'valid' if valid else 'rejected',data if valid else None
+    with read_pool(read_request,requests,report['io_workers']) as results:
+        for number, ((storage_key, name, kind, expected), status, data) in enumerate(results):
+            if progress:
+                progress('reusing-cache', dict(completed=number, total=len(requests)))
+            if time.monotonic() - started > MAX_SECONDS:
+                report['budget_skipped'] += len(requests) - number
+                break
+            target = destination / name
+            if status=='present':
+                report['already_present'] += 1
+                continue
+            if status=='missing':
+                report['missing_' + ('shaders' if kind == 'shader' else 'driver_blobs')] += 1
+                continue
+            if status=='rejected':
+                report['rejected_' + ('shaders' if kind == 'shader' else 'driver_blobs')] += 1
+                continue
+            byte_field = kind + '_bytes'
+            if report[byte_field] + len(data) > (MAX_SHADERS if expected else MAX_BLOBS):
+                report['budget_skipped'] += 1
+                continue
+            # The destination is protected by the caller's preparation lock. Keep
+            # complete files across cancellation; never write into the source cache.
+            pending = target.with_suffix(target.suffix + '.reuse.tmp')
+            pending.write_bytes(data)
+            pending.replace(target)
+            report['shaders_copied' if expected else 'driver_blobs_copied'] += 1
+            report[byte_field] += len(data)
+            if collected is not None and expected is not None:
+                code_id, length = expected
+                if storage_key in collected:
+                    raise ValueError('Template source/bytecode mapping conflicts')
+                if len(data) == length:
+                    stamp = destination_stamp(target, length)
+                    if stamp is not None:
+                        collected[storage_key] = (code_id, data, stamp)
     report['seconds'] = time.monotonic() - started
     return report
 

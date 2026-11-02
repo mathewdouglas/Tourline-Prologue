@@ -83,13 +83,17 @@ def stage(plan, document, report, cache, resume=False, progress=None, destinatio
             progress('packing-shaders', counts)
     # Verify every dependency before creating either pack. Source identifiers
     # are not bytecode hashes: both the bytecode hash and length must match.
-    for index, source in enumerate(sources, 1):
-        poll('verifying', index, len(sources))
+    from preparation_io import read_pool,worker_count
+    def checked(source):
         code_id, length = expected[source]
         data = regular_read(cache/(source+'.dxbc'), MAX_SHADER)
         if not shader_matches(data, code_id, length):
             raise ValueError('Shader pack dependency failed verification: '+source)
-        blobs[source] = data
+        return source,data
+    with read_pool(checked,sources) as results:
+        for index,(source,data) in enumerate(results,1):
+            poll('verifying',index,len(sources))
+            blobs[source]=data
     pending, rows = [], {}
     for phase, sources in phases.items():
         poll('checking '+phase)
@@ -136,7 +140,7 @@ def stage(plan, document, report, cache, resume=False, progress=None, destinatio
         # learned shader, recipe, driver blob or another attempt's artifact.
         for temporary, _ in publish:
             temporary.unlink(missing_ok=True)
-    return dict(format=VERSION, phases=rows, unique_shaders=len(blobs),
+    return dict(format=VERSION, phases=rows, unique_shaders=len(blobs),io_workers=worker_count(),
                 verified_shader_bytes=sum(map(len, blobs.values())),
                 packs_written=len(pending), seconds=time.perf_counter()-started,
                 limitation='Local bytecode lookup packs; not driver pipelines, new coverage, GPU residency or a stutter measurement.')

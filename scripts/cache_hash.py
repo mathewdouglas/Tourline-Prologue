@@ -10,11 +10,13 @@ import os
 from pathlib import Path
 import sys
 import time
+import threading
 
 _native = None
 _configured = False
 _backend = dict(backend='python', reason='not-configured')
 _counts = dict(calls=0, bytes=0, native_calls=0, python_calls=0, seconds=0.0)
+_counts_lock = threading.Lock()
 
 
 def python_fnv64(data):
@@ -75,20 +77,22 @@ def fnv64(data):
     if _native is not None and byte_payload:
         payload = data if isinstance(data, bytes) else bytes(data)
         result = _native(ctypes.c_char_p(payload), len(payload))
-        _counts['native_calls'] += 1
+        kind='native_calls'
     else:
         result = python_fnv64(data)
-        _counts['python_calls'] += 1
-    _counts['calls'] += 1
-    _counts['bytes'] += len(data) if hasattr(data, '__len__') else 0
-    _counts['seconds'] += time.perf_counter() - begin
+        kind='python_calls'
+    with _counts_lock:
+        _counts[kind] += 1
+        _counts['calls'] += 1
+        _counts['bytes'] += len(data) if hasattr(data, '__len__') else 0
+        _counts['seconds'] += time.perf_counter() - begin
     return result
 
 
 def statistics(before=None):
     if not _configured:
         configure()
-    values = _counts.copy()
+    with _counts_lock:values = _counts.copy()
     if before is not None:
         values = {key:value-before[key] for key,value in values.items()}
     return dict(_backend, **values)

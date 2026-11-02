@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 204)
+## Start here: state of play (2026-11-03, Phase 205)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 204 is the latest).
+has the evidence, newest phase first (Phase 205 is the latest).
 
 ### What works now
+
+- **Faster preparation reads (Phase 205):** four bounded readers check reusable
+  shaders/driver hints, persisted cache and pack dependencies; all writes and
+  publication remain on the owner. GT5P_PREPARE_IO_WORKERS=1 restores serial I/O.
+  A same-seed full cached 4,450-record pair measures 261.34 -> 202.52 s, with
+  identical packs, every native key/persisted blob valid, and source/selection
+  unchanged. Frozen 121-record cancellation/resume/rejection passes. Existing
+  byte/time budgets, compiler jobs, renderer and async policy stay unchanged.
+  One ordered local cached pair; no fresh-compile, whole-game or stutter claim.
 
 - **F1 pipeline tools and matched styling (Phase 204):** Debug provides Collect
   pipelines, Verify last collection and Prepare shaders. Managed requests wait

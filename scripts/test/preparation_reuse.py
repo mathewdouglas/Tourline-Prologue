@@ -11,6 +11,8 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -65,6 +67,27 @@ class ReuseTests(unittest.TestCase):
         self.assertEqual(len(list(self.dest.iterdir())),3)
         self.assertEqual(self.snapshot(),before)
         self.assertEqual(seed_cache(self.document,self.source,self.dest)['already_present'],3)
+
+    def test_parallel_reads_keep_publication_on_owner(self):
+        owner=threading.get_ident();reads=[];writes=[]
+        read=preparation_reuse.regular_read;write=Path.write_bytes
+        def checked(path,limit):
+            reads.append(threading.get_ident());time.sleep(.02)
+            return read(path,limit)
+        def publish(path,data):
+            writes.append(threading.get_ident())
+            return write(path,data)
+        before=self.snapshot()
+        with patch.dict(os.environ,{'GT5P_PREPARE_IO_WORKERS':'4'}), \
+                patch('preparation_reuse.regular_read',side_effect=checked),patch.object(Path,'write_bytes',publish):
+            report,verified=seed_cache(self.document,self.source,self.dest,handoff=True)
+        self.assertEqual(report['shaders_copied'],2)
+        self.assertEqual(report['driver_blobs_copied'],1)
+        self.assertGreater(len(set(reads)),1)
+        self.assertNotIn(owner,reads)
+        self.assertEqual(set(writes),{owner})
+        self.assertEqual(len(verified),2)
+        self.assertEqual(before,self.snapshot())
 
     def test_corrupt_and_missing_inputs_fall_back(self):
         (self.source/('2'*16+'.dxbc')).write_bytes(self.code+b'corrupt')

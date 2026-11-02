@@ -33,6 +33,8 @@ not been established; other draws/settings still compile on demand.
 Run tourline-prologue.exe --no-prepared to use the ordinary cache without deleting either cache.
 For the legacy unpacked-asset path, use tourline-prologue.exe --prepare-assets <folder>.
 Set GT5P_PREPARE_UI=0 to restore the Windows preparation dialog if needed.
+Preparation uses bounded parallel cache reads. GT5P_PREPARE_IO_WORKERS=1 restores
+serial cache reads without disabling any verification checks.
 
 Optional pipeline template contribution:
 After ordinary setup and one normal launch, close the game and run

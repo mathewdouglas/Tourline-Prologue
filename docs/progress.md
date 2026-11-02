@@ -9,6 +9,78 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 205 - Bounded parallel preparation reads (2026-11-03)
+
+Preparation now defaults to four bounded read workers for verified cache reuse,
+recipe/driver-blob inventory and shader-pack dependencies. The owner still makes
+every cache write, atomic replacement, progress/cancellation call and publication.
+An ordered pool retains at most four outstanding requests plus the currently
+consumed result, with the existing per-file limits (4 MiB shader / 32 MiB driver
+blob). This adds bounded read buffers; it does not raise the 128 MiB shader-copy,
+256 MiB driver-copy or 60-second reuse budgets, compiler concurrency/memory caps,
+or native batch limits. All original asset, shader, recipe, native-key and driver
+persistence checks remain. No renderer/runtime or draw/queue change.
+
+GT5P_PREPARE_IO_WORKERS=1 restores serialized reads; 2 is also supported. Invalid
+settings reject safely. Executor shutdown explicitly cancels queued reads and
+joins every started read before a checkpoint/lease can be released or a verified
+handoff published, including when an exception traceback retains the generator.
+Only reads/checksums happen on workers; source caches remain read-only. Native
+checksum counters are synchronized and the native backend initializes before the
+read pool. The frozen build explicitly includes concurrent.futures.thread.
+
+A full cached 4,450-record diagnostic profile found substantial file-open/read
+overhead: reuse reached its 60-second budget, inventory took about 36.09 s and
+pack verification/publication 16.06 s; native job waits took about 138.05 s.
+That profiled run took 282.84 s and is diagnostic, not the speed comparison.
+No shaders needed compilation. Repeated inventory-only checks preserve identical
+4,450 recipe/driver sets: serial 98.996 s, four readers 23.599 / 22.856 s, serial
+38.208 s. The slow initial serial observation is retained; warming or other
+machine activity is not isolated, so it is not used as a steady-state baseline.
+
+The separate unprofiled full pair uses the same original volume/ELF, engine,
+decoder, template, maps, phase plan and read-only complete shader/driver seed.
+Application output caches are fresh and separate; OS/driver caches stay intact.
+Four readers run first, serial rollback second on this i5-12400F / RTX 4060:
+
+| Measured preparation work | Serial reads | Four readers |
+| --- | ---: | ---: |
+| Full 4,450-record preparation | 261.34 s | 202.52 s |
+| Verified cache reuse | 60.00 s | 24.79 s |
+| Driver hints copied within unchanged budgets | 2,702 | 3,471 |
+| Menu/race shader-pack stage | 15.97 s | 5.28 s |
+
+The full preparation is 58.82 s / 22.5% shorter in this one ordered local pair.
+Both reuse all 447 vertex variants and all 4,450 fragment jobs with no compiler
+workers. Every exact native key is created and persisted in the two existing
+4,096/354 chunks; all 4,450 driver blobs and recipe dependencies validate. Both
+shader packs are byte-identical, and full source-cache SHA256 snapshots plus the
+selected-cache pointer remain unchanged. Faster reads allow more driver hints
+through the existing time budget; byte budgets and native revalidation stay in
+force. These results cover cached preparation, not first-time shader compilation,
+OS/driver-cold performance, other storage/GPU hardware, or live stutter. The
+remaining native creation and fresh shader compilation work is not removed.
+
+Default-four and serial source checks pass reuse corruption/missing/link/budget
+rejection, verified handoff, cancellation, pack preservation, template/translation,
+contribution, collection and packaging checks. Focused pool tests prove ordering,
+bounded submissions, two/four-reader caps, error propagation and joined cleanup;
+reuse tests verify worker reads with owner-only writes. A final frozen real
+121-record acceptance passes original packed assets, both shaders, native keys,
+persistence, cancellation/resume with zero resumed shader compiles, incompatible
+volume rejection, and old selected-cache/verified-share preservation. Its roughly
+35.54 s total includes cancellation/rejection; it is not another speed comparison.
+
+Private evidence: scratch/s205profile and s205b (diagnostic), s205micro (repeated
+inventory checks), s205pair / s205p1 / s205p4 (full ordered pair), s205checks,
+s205frozen / s205f (frozen lifecycle), and s205h (helper). Strict packaging and ZIP
+integrity pass for a private 230-file candidate containing the frozen read-pool
+dependencies and no game/cache data; SHA256
+ba8e78c80a08606d2a10ce1c294f7bdf268813c8eb175d37f9819a77930e2b0f.
+Caches and evidence are preserved. Starter remains 4,450 observed records; no
+coverage expansion, guest execution, release, main merge, tag or CI build.
+Development push uses [skip ci].
+
 ## Phase 204 - Settings pipeline tools and matched verification styling (2026-11-03)
 
 The existing F1 Debug page now includes Collect pipelines, Verify last collection

@@ -663,7 +663,7 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
         passed = result.get('created') and result.get('actual') == result.get('expected') == r['key']
         report['records'].append(dict(key=r['key'], status='prepared' if passed else 'key-rejected', result=result))
     checkpoint.stage('verifying-cache')
-    report['inventory'] = inventory(cache, True)
+    report['inventory'] = inventory(cache, True, checkpoint.progress)
     report['counts'] = dict(Counter(r['status'] for r in report['records']))
     prepared = {r['key'] for r in report['records'] if r['status'] == 'prepared'}
     if not prepared <= set(report['inventory']['valid_driver_blobs']) or report['inventory']['rejected']:

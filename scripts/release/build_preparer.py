@@ -30,6 +30,7 @@ def main():
         '--distpath',str(out/'dist'),'--workpath',str(out/'work'),
         '--specpath',str(out),'--paths',str(ROOT/'scripts'),
         '--hidden-import','shader_vertex_batch',
+        '--hidden-import','concurrent.futures.thread',
         '--add-data',str(ROOT/'config/ps3recomp.json')+os.pathsep+'config',
         '--add-data',str(plan)+os.pathsep+'config/pipeline-warmup',
         '--add-data',str(ROOT/manifest['patch'])+os.pathsep+'patches',

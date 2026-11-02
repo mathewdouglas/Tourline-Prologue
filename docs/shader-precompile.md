@@ -5,6 +5,15 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Preparation uses up to four bounded readers for cache reuse, persisted-cache
+validation and shader-pack dependencies (Phase 205). Publication and cancellation
+stay on the owner, and every shader/native/persistence check remains enabled.
+`GT5P_PREPARE_IO_WORKERS=1` restores serial reads; 2 is also supported. One local
+full cached 4,450-record pair measures 261.34 -> 202.52 seconds with identical
+packs and unchanged source/selection. This improves cached preparation overhead;
+fresh shader compilation, driver creation and different hardware/storage remain
+separate costs. See [measured evidence and limits](progress.md#phase-205---bounded-parallel-preparation-reads-2026-11-03).
+
 Opt-in collection now verifies after the game closes (Phase 202), using original
 packed assets and a separate resumable native cache. Only passing records are
 exported; unknown/rejected records remain private and pending. It adds no new

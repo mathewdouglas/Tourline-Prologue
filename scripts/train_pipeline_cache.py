@@ -162,24 +162,37 @@ def validate_recipe(path, codes=None):
     return f'{key:016x}'
 
 
-def inventory(cache, validate_blobs=False):
+def inventory(cache, validate_blobs=False, progress=None):
+    from preparation_io import read_pool
     keys, rejected, codes = [], [], set()
-    for path in sorted((cache / 'warmup-v1').glob('*.recipe')):
+    paths=sorted((cache/'warmup-v1').glob('*.recipe'))
+    def recipe(path):
         try:
-            keys.append(validate_recipe(path, codes))
+            return validate_recipe(path,codes),None
         except (ValueError, OSError) as exc:
-            rejected.append(dict(file=path.name, reason=str(exc)))
+            return None,dict(file=path.name,reason=str(exc))
+    with read_pool(recipe,paths) as results:
+        for number,(key,error) in enumerate(results,1):
+            if error is None:keys.append(key)
+            else:rejected.append(error)
+            if progress:progress('verifying-cache',dict(completed=number,total=len(paths),detail='recipes'))
     blobs = []
-    for key in keys if validate_blobs else ():
+    def blob(key):
         path = cache / f'pso_{key}.bin'
         try:
             data = bounded_read(path, 32 * 1024 * 1024)
             if len(data) > 24:
                 magic, size, checksum = struct.unpack_from('<QQQ', data)
                 if magic == 0x31534f5035505447 and size == len(data) - 24 and fnv64(data[24:]) == checksum:
-                    blobs.append(key)
+                    return key
         except (ValueError, OSError):
             pass
+        return None
+    if validate_blobs:
+        with read_pool(blob,keys) as results:
+            for number,key in enumerate(results,1):
+                if key is not None:blobs.append(key)
+                if progress:progress('verifying-cache',dict(completed=number,total=len(keys),detail='driver blobs'))
     return dict(recipes=keys, valid_driver_blobs=blobs, rejected=rejected)
 
 
