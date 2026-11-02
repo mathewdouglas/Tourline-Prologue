@@ -98,6 +98,26 @@ overlap/conflict report, not shader or native-pipeline verification.
 
 Locate candidate program hashes in your own original assets, adding verified
 asset locations where necessary. Hashes alone do not supply missing asset offsets.
+The maintainer can search the original packed game directly, using a private
+recorder only for search anchors:
+
+```powershell
+python scripts/pipeline_volume_search.py --template <candidates.json> `
+  --trace <private-recorder> --volume <original-GT.VOL> --elf <original-EMAIN.ELF> `
+  --volume-map assets/pipeline-templates/gt5p-disc-v2/volume-map.json `
+  --known-map assets/pipeline-templates/gt5p-disc-v2/player-map.json `
+  --output scratch/new-program-locations
+```
+
+Use the production `volume_reader.dll` through `GT5P_PREPARE_VOLUME_LIBRARY` in
+source runs. This searches only already verified archive members plus the ELF;
+it is not an archive-wide catalogue. Whole archive, ELF, member and program
+identities must verify. Members over 128 MiB are skipped; missing programs stay
+unresolved. Search is bounded to ten minutes and keeps decoded members in memory,
+without extracting another asset copy. Merge positively verified location rows
+into the player/supplemental maps, retaining exact container coverage in the
+volume map. New containers require separate verified numeric archive locations.
+
 Use the existing `pipeline_template.py prepare` with `candidates.json`, your own
 game/production decoder/engine and a fresh private output. Verify both shaders,
 exact native keys and persisted driver blobs as usual. Unsupported or unresolved

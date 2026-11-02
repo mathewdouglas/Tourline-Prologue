@@ -1,4 +1,4 @@
-This optional developer starter contains 2,892 verified pipeline records for
+This optional developer starter contains 3,102 verified pipeline records for
 BCUS98158 version 3. It contains program identifiers and numeric translation/native
 state only. It contains no shader microcode, source, DXBC or driver binaries.
 
@@ -10,7 +10,13 @@ or unavailable programs and branching vertex contexts are excluded. This is an
 observed-state template, not independent recovery of material/pass ownership or
 whole-game coverage. It does not cover every car or every part of these tracks.
 
-The previous 2,334 records are unchanged. Phase 180 adds 558 verified records;
+Phase 197 preserves all previous 2,892 records and adds 210 records from a real
+1080p/2x High Speed Ring player collection. All 210 pass both-stage reconstruction,
+exact native keys and persisted native creation in an empty application cache.
+Nineteen additional program locations verify directly in the original ELF/GT.VOL;
+no new archive members are needed. Branching contexts remain excluded.
+
+Earlier history: the previous 2,334 records are unchanged. Phase 180 adds 558 verified records;
 nine conflicting session keys were quarantined, and three branching contexts and
 eleven missing joins were excluded at export. The original 2,334-record batch
 and the new 558-record batch each passed an empty-application-cache shader/native
@@ -29,28 +35,29 @@ Matching checkpointed template output supports `--resume`, verifying cached
 shader identifiers and revalidating native pipelines before acceptance. A changed
 template can read verified hints from an older cache using `--reuse-cache`.
 
-`asset-map.json` is a separately versioned hash/offset map with 286 supplemental
-locations: the earlier 119 programs outside supported SHDS tables plus all 167
-new program identities. The new locations can overlap supported SHDS lookup.
+`asset-map.json` is a separately versioned hash/offset map with 305 supplemental
+locations: the earlier 119 programs outside supported SHDS tables, 167 Phase 180
+program identities and 19 Phase 197 program identities. The new locations can overlap supported SHDS lookup.
 Supply `--assets <original unpacked GT.VOL directory>`
 to select it automatically. It contains container/program hashes, file offsets,
 sizes and byte order only. Container hashes and program identities are verified
 locally before compilation; captured programs are not needed by users.
 
 See [the preparation workflow](../../../docs/shader-precompile.md). Pass this
-directory to `scripts/pipeline_template.py prepare --template`. Nothing loads it
-by default. The optional v0.2 player helper uses `player-map.json`, a complete
-hash/offset map for all 1,143 unique programs (348 vertex, 795 fragment), using
+directory to `scripts/pipeline_template.py prepare --template`. The optional
+player preparation helper uses `player-map.json`, a complete
+hash/offset map for all 1,162 unique programs (353 vertex, 809 fragment), using
 the user's original game files and verified ELF, without a developer
 catalogue. The smaller `asset-map.json` remains the supplemental developer map.
-Templates do not establish menu/race preload ownership; preparation
-does not fabricate those membership indices. No launcher/release default or
-zero-stutter claim is made.
+Templates do not establish menu/race preload ownership. The separately verified
+warmup plan contains observed notifier membership, including prepass requests;
+unknown keys stay out. This update changes development metadata, not the published
+release, async draw policy or preparation choice. No zero-stutter claim is made.
 
 Development direct preparation uses `volume-map.json`, numeric locations for 104 required
 archive members plus parameter locations in the user's verified ELF. It contains
 no keys or file names. The optional helper can read the original GT.VOL directly,
-verify each decoded container and all 1,143 programs, and avoid an unpacked asset
+verify each decoded container and all 1,162 programs, and avoid an unpacked asset
 copy. Both ELF and volume SHA-256 must match this supported disc build. The
 legacy unpacked-assets flow remains available. Other builds/modded volumes need
 separately verified maps. The published v0.2 package remains unchanged.

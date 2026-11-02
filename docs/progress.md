@@ -9,6 +9,99 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 197 - Real collection, packed lookup and verified starter expansion (2026-11-02)
+
+The frozen opt-in contribution command now has a real-player acceptance run.
+It starts the ordinary packaged launcher using private storage, a copied prepared
+cache, the verified original disc folder and saved 1080p/16:9/2x settings. The
+existing HSR script reaches the race, saves window-only screenshots and closes
+the owned game normally. Export produces 1,582 complete metadata records, with
+five branching-vertex joins excluded. Review against the prior starter finds
+210 new records and zero conflicts: 168 use existing program identities, while
+42 need at least one new original-program location. No private recorder/program/
+source/cache files enter the contribution or tracked tree.
+
+The initial route wrapper incorrectly reports failure after a successful export:
+Windows PowerShell loses the redirected Start-Process object's exit code. The
+collector itself returns normally and prints its successful JSON. The harness
+now retains its owned process handle before exit and queries the exit code from
+that handle. `race.ps1 -PlayerLauncher -ContributionCollector` drives the existing
+helper -> launcher -> game chain, uses saved settings instead of renderer
+overrides, waits for export and keeps collector logs separate. It never searches
+for or terminates another session's game. Ordinary route modes are unchanged.
+
+Searching the private installed game-data copy locates only one of 19 additional
+program identities. `pipeline_volume_search.py` adds a maintainer-only alternative:
+search existing verified GT.VOL members and the ELF directly, using recorder
+programs as anchors. Original archive, ELF, complete decoded member and full
+program identities must all match before a numeric location is accepted. It
+does not trust captured bytes as preparation input, scan guest memory, write
+extracted assets or invent archive locations. Unknown programs remain unresolved.
+Bounds include 128 MiB of oracles, 128 MiB per decoded member, 8,192 recorder
+files, 16 traces, 4,096 anchor candidates and ten minutes. The existing archive
+map caps total decode and member count. Oversized members are skipped explicitly.
+Synthetic checks cover decoys, endian conversion, identity failures, archive/ELF/
+member rejection, memory/file limits, cancellation and unresolved results.
+
+The packed search finds all 19 programs in already mapped containers: 104
+containers searched including the ELF, 1,057,541,560 decoded archive bytes and
+19.84 seconds locally. This is a bounded known-member search, not a whole-archive
+shader catalogue. A fresh candidate preparation from original packed files
+reconstructs 58 vertex variants and 196 exact fragment requests, then creates and
+persists all 210 native pipelines with exact keys. Total 51.17 seconds, with warm
+OS/driver caches; this is preparation work, not gameplay hitch measurement.
+Proof-gated acceptance appends only these verified records. All previous records
+are preserved, including their original shard encoding wherever shards are full.
+
+The development starter now has 3,102 records / 1,162 program identities
+(353 VP, 809 FP). Player/supplemental maps contain 1,162/305 locations; the same
+104 archive-member map remains sufficient. No new member or key parameters are
+guessed. The phase plan is rebound to the new bundle and merges only successful
+candidate keys actually present in the private runtime notifier lists. It has
+124 menu / 2,113 race entries, 2,204 distinct. Seventy-six new records lack that
+recorded membership and receive no guessed phase. Existing plan evidence remains.
+
+A rebuilt frozen helper under System32-only PATH grows a prior generation from
+packed game files. Invalid metadata and actual cancellation preserve selection;
+resume verifies all 3,102 records and driver blobs, reusing 351 vertex variants,
+compiling five additional vertex variants and 44 exact fragment requests. All
+3,102 native requests create successfully, with 2,892 cached-blob driver calls.
+The old source cache stays byte-identical. Completed local packs/indices publish
+only after native verification. Resume wall time is 145.91 seconds in this run;
+it includes lookup, verified reuse, compilation, native creation and publication.
+
+The actual candidate ZIP contains 213 allowlisted files and no game/cache data;
+its SHA-256 is `f383c8afee6336daee257c0a0c158a5e3cabb9878fe704e56a87e6d2053543ef`.
+Its normal launcher/helper completes a second HSR collection route with the
+expanded private cache. The harness returns zero and the collector exports 1,951
+records, excluding three branching joins. Saved menu/grid/race/mirror window
+shots were inspected; no new missing-draw regression is evident in those samples.
+Different draw/AI workloads and recording I/O prevent treating these sessions as
+a controlled stutter comparison. A screenshot cannot establish that the reported
+first-use mirror hitch is fixed.
+
+Separate offline native-scaled and ultrawide-native checks each prepare all 210
+new records plus all 210 locally derived pipelines with exact calibrated native
+keys and persisted driver files. They retain the default records and compile
+both required stages through the existing modes. These are additive 210-record
+proofs, not a new single-batch full-starter translation measurement or live
+ultrawide acceptance. Contribution collection still rejects these settings.
+Focused template, contribution, lookup, warmup, pack and package checks pass
+sequentially. The final packed-search memory/file/cancellation tests pass too.
+
+Evidence: `scratch/contributions-197/route/`, the private recorder and exported
+share file under `Storage/pipeline-contributions/`, `review/`, `new-locations/`,
+`packed-locations/`, `new-native-proof/`, `accepted-template.json`, `warmup-audit.json`
+and `frozen/validation.json`, `replay/`, `settings-rs/`, `settings-uw/` and
+`validation.json`. The earlier installed-data search is retained as
+negative lookup evidence. No whole-game coverage percentage, GPU residency,
+consistent stutter reduction or mirror LOD fix follows. Broader contribution
+settings and mirror first-use diagnosis remain open. Published v0.2.2, main/tag,
+runtime, queue ownership and asynchronous draw policy are unchanged. Push only
+development with `[skip ci]`.
+Automatic approval review blocked removal of the private temporary game-data
+copy; it remains under this phase's Storage folder. Every shadercache is preserved.
+
 ## Phase 196 - Metadata-only community pipeline contributions (2026-11-02)
 
 The referenced Helghast discussion predates/overlooks this fork's existing

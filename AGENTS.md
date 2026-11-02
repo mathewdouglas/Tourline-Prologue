@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 196)
+## Start here: state of play (2026-11-02, Phase 197)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 196 is the latest).
+has the evidence, newest phase first (Phase 197 is the latest).
 
 ### What works now
+
+- **Real community collection and expansion (Phase 197):** normal packaged
+  launcher play exports 1,582 metadata-only HSR records; review finds 210 new
+  unambiguous candidates. A bounded maintainer packed search verifies all 19 new
+  original program locations without extraction. All 210 pass fresh shader/key/
+  native/persistence checks. The development starter has 3,102 records / 1,162
+  programs, with previous records preserved. Observed warmup membership and maps
+  are reissued together. Full frozen packed-game growth, cancellation/resume,
+  old-cache preservation and all 3,102 native pipelines pass sequentially.
+  Published v0.2.2 and runtime/draw policy stay unchanged; no whole-game or mirror
+  hitch claim. See progress evidence; development pushes use `[skip ci]`.
 
 - **Shareable pipeline contributions (Phase 196):** a checked metadata-only
   JSON envelope carries existing version-2 vertex/fragment SHA-256 identifiers

@@ -25,6 +25,8 @@
 # with an experimental slot is rejected.
 # -GracefulClose asks only the owned game window to close before the existing
 # owned-process timeout cleanup, allowing diagnostic shutdown summaries.
+# -ContributionCollector with -PlayerLauncher exercises the frozen opt-in
+# recorder/export around normal player launch; use saved supported settings.
 # -Engine/-GameRoot/-OutputDirectory support isolated audit runs. Another game
 # makes launch fail; cleanup stops only this script's own process.
 # -Cpu also reports per-thread CPU over the sampling window, named from the log
@@ -39,11 +41,15 @@ param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track =
       [ValidateRange(0,3600)][int]$SampleDelay = 25,
       [string]$Engine = "", [string]$GameRoot = "", [string]$OutputDirectory = "",
       [switch]$PlayerLauncher,
+      [switch]$ContributionCollector,
       [switch]$GracefulClose,
       [switch]$NoPrepared,
       [string]$ExtraHold = "",
       [Parameter(ValueFromRemainingArguments = $true)] $Vars)
 . "$PSScriptRoot/milestone.ps1"
+if ($ContributionCollector -and (-not $PlayerLauncher -or $NoPrepared)) {
+    throw '-ContributionCollector requires -PlayerLauncher and its selected prepared/ordinary cache'
+}
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $dir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root "scratch/pv" }
 if (-not $Engine) { $Engine = Join-Path $root "build/gt5p.exe" }
@@ -71,6 +77,7 @@ public class RaceWindowShot {
  }
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r);
+ [DllImport("kernel32.dll")] public static extern bool GetExitCodeProcess(IntPtr process, out uint code);
  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left,Top,Right,Bottom; }
 }
 '@
@@ -148,11 +155,18 @@ if ($FrameTest) {
 $set = @{ GT5P_NO_SETTINGS = "1"; FS_HIDE = "grim/file/contents"; PS3_VERBOSE = "0";
           GT5P_PROFVIEW = "0"; PAD_HOLD = $hold; GT5P_RESOLUTION = "720p";
           RSX_MSAA = "2"; GT5P_PRESENT_PROF = "1"; RSX_PSO_TIMING = "1" }
+if ($ContributionCollector) {
+    # Exercise saved player settings, rather than overriding the context that
+    # the contribution command verifies before and after normal launcher play.
+    $set.Remove('GT5P_NO_SETTINGS'); $set.Remove('GT5P_RESOLUTION'); $set.Remove('RSX_MSAA')
+}
 $set['GT5P_ROOT'] = $GameRoot
 if ($FrameTest) { $set["GT5P_FRAME_LOG"] = (Join-Path $dir "$Tag.frames.csv") }
 foreach ($v in $Vars) { if ($v) { $k, $val = "$v" -split "=", 2; $set[$k] = $val } }
 $p = $null
 $launcherOwner = $null
+$collectorOwner = $null
+$collectorHandle = [IntPtr]::Zero
 $gameOut = "$dir/$Tag.out"
 $gameErr = "$dir/$Tag.err"
 try {
@@ -165,7 +179,27 @@ try {
         if (-not $PlayerLauncher) { throw '-NoPrepared requires -PlayerLauncher' }
         $launch.ArgumentList = '--no-prepared'
     }
+    if ($ContributionCollector) {
+        $install = Split-Path $Engine -Parent
+        $launch.FilePath = Join-Path $install 'preparation/GT5P-Prepare.exe'
+        $launch.ArgumentList = @('--collect-contribution', '--install', ('"' + $install + '"'))
+        $launch.RedirectStandardOutput = "$dir/$Tag.collector.out"
+        $launch.RedirectStandardError = "$dir/$Tag.collector.err"
+    }
     $p = Start-Process @launch
+    if ($ContributionCollector) {
+        # Retain the handle before exit: Windows PowerShell can otherwise lose
+        # ExitCode after its redirected Start-Process child has finished.
+        $collectorOwner = $p; $collectorHandle = $collectorOwner.Handle; $p = $null
+        $wait = [Diagnostics.Stopwatch]::StartNew()
+        while (-not $p -and $wait.Elapsed.TotalSeconds -lt 30) {
+            $owned = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($collectorOwner.Id)" |
+                Where-Object { $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath) -eq $Engine })
+            if ($owned.Count -eq 1) { $p = Get-Process -Id $owned[0].ProcessId }
+            else { Start-Sleep -Milliseconds 100 }
+        }
+        if (-not $p) { throw 'Contribution helper did not create its expected launcher child' }
+    }
     if ($PlayerLauncher) {
         $launcherOwner = $p
         $p = $null
@@ -319,12 +353,23 @@ try {
     }
     if ($launcherOwner) {
         $launcherOwner.Refresh()
+        if ($ContributionCollector -and $p -and $p.HasExited) { $launcherOwner.WaitForExit(15000) | Out-Null }
         if (-not $launcherOwner.HasExited) { $launcherOwner.Kill(); $launcherOwner.WaitForExit(10000) | Out-Null }
     }
     if ($p) { $p.Refresh(); if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit(10000) | Out-Null } }
     if ($PlayerLauncher) {
         if (Test-Path $gameOut) { Copy-Item -LiteralPath $gameOut -Destination "$dir/$Tag.out" }
         if (Test-Path $gameErr) { Copy-Item -LiteralPath $gameErr -Destination "$dir/$Tag.err" }
+    }
+    if ($collectorOwner) {
+        if (-not $collectorOwner.WaitForExit(120000)) {
+            $collectorOwner.Kill(); $collectorOwner.WaitForExit(10000) | Out-Null
+            throw 'Owned contribution helper did not finish exporting'
+        }
+        [uint32]$collectorCode = 259
+        if (-not [RaceWindowShot]::GetExitCodeProcess($collectorHandle,[ref]$collectorCode) -or $collectorCode -ne 0) {
+            throw "Contribution helper failed: $collectorCode; inspect $dir/$Tag.collector.err"
+        }
     }
     foreach ($k in $set.Keys) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
 }
