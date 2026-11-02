@@ -191,7 +191,7 @@ def player_main(argv, collect=False, resume=False):
     if resume:
         if any((a.trace,a.output,a.cache)):ap.error('Resume uses the saved collection session')
         from pipeline_collection import verify_session
-        verify_session(a.install,storage,a.session)
+        verify_session(a.install,storage,a.session,show_ui=True)
         return
     if a.session:ap.error('--session is only for --verify-contribution')
     selection=select(storage)

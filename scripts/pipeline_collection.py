@@ -118,18 +118,21 @@ def begin(install, storage, session, value, excluded, selection):
     if os.environ.get('GT5P_COLLECT_VERIFY')=='0':
         print('Post-play verification disabled. Recording retained as pending; no share file published.',flush=True)
         return dict(verified=0,pending=len(value['template']['records']),disabled=True)
-    return verify_session(install,storage,session)
+    return verify_session(install,storage,session,show_ui=True)
 
 
-def verify_session(install, storage, session=None):
+def verify_session(install, storage, session=None, show_ui=False, progress=None):
     storage=cache_root(storage);session=session_path(storage,session)
+    if show_ui and os.environ.get('GT5P_COLLECT_VERIFY_UI')!='0':
+        from collection_ui import show
+        return show(lambda notify:verify_session(install,storage,session,progress=notify))
     idle()
     with storage_lease(storage):
         idle()
-        return _verify(Path(install).resolve(),storage,session)
+        return _verify(Path(install).resolve(),storage,session,progress)
 
 
-def _verify(install, storage, session):
+def _verify(install, storage, session, notify=None):
     value=contribution.read_json(session/'collected-template.json')
     document=contribution.decode(value)
     elf=storage/'input/EMAIN.ELF'
@@ -153,6 +156,7 @@ def _verify(install, storage, session):
     cancel=session/'verify.cancel'
     last=[None,0.0]
     def progress(phase,counts=None):
+        if notify:notify(phase,counts)
         if cancel.exists():raise KeyboardInterrupt('Collection verification cancelled; use Resume pipeline verification.cmd')
         now=time.monotonic()
         if phase!=last[0] or now-last[1]>=1:

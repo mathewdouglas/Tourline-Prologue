@@ -11,8 +11,22 @@ lease and separate private `cv/<identity>` checkpoints; it never selects or edit
 the player's prepared cache. Native children have private kill-on-close jobs,
 offline-entry guards, bounded logs and timeouts; vertex worker budgets stay intact.
 
-Keep the collection console open. Status counts describe lookup/compilation/native
-work. Ctrl+C cancels verification; `Resume pipeline verification.cmd` continues
+After play, a small **Tourline Prologue - Collection verification** window shows
+the current lookup/shader/native stage, available stage counts and elapsed time.
+Counts describe that stage, not a whole-operation percentage or estimated time.
+Long compiler/native batches can show a working message until the batch finishes.
+The result stays visible with verified/pending totals and the share filename;
+close it to finish the command. No additional UI libraries are required.
+
+**Cancel** or closing the working window requests cooperative cancellation. The
+window waits for owned child/lease cleanup, then confirms that completed work is
+kept. Close that result window and use `Resume pipeline verification.cmd` to
+continue in a new progress window. Errors also leave a visible result and retain
+the private input/checkpoints. `GT5P_COLLECT_VERIFY_UI=0` restores console-only
+verification without disabling verification or changing its acceptance checks.
+
+Keep the collection process open. Ctrl+C also cancels verification;
+`Resume pipeline verification.cmd` continues
 the most recent captured session without launching a game. Completed lookup is
 reused, cached shader bytes are checked, and native pipelines are revalidated.
 Cancellation during an unfinished lookup restarts that bounded search on resume.

@@ -35,7 +35,18 @@ with tempfile.TemporaryDirectory() as folder:
         summary=p.begin(install,storage,session,value,{},dict(mode='default'))
     assert summary['pending']==3 and not (session/'share-this-template.json').exists()
     assert p.session_path(storage)==session
+    # Player entry points show a window; console rollback uses the same verifier.
+    with patch('collection_ui.show',return_value={'window':True}) as window:
+        assert p.verify_session(install,storage,show_ui=True)=={'window':True}
+        window.assert_called_once()
+    with patch.dict('os.environ',{'GT5P_COLLECT_VERIFY_UI':'0'}), \
+            patch.object(p,'idle'),patch.object(p,'storage_lease',return_value=nullcontext()), \
+            patch.object(p,'_verify',return_value={'console':True}) as console, \
+            patch('collection_ui.show',side_effect=AssertionError('Rollback opened a window')):
+        assert p.verify_session(install,storage,show_ui=True)=={'console':True}
+        assert console.call_count==1
     calls=[]
+    updates=[]
     def prepare(path,*args,**kwargs):
         rows=t.read(path)['records'];calls.append((rows,kwargs))
         result={name:False for name in RESULT_BOOLS}
@@ -61,7 +72,8 @@ with tempfile.TemporaryDirectory() as folder:
             patch.object(t,'compatibility',return_value=document['compatibility']), \
             patch('pipeline_volume_search.search',side_effect=AssertionError('Completed lookup repeated')), \
             patch.object(t,'prepare',side_effect=prepare):
-        summary=p.verify_session(install,storage)
+        summary=p.verify_session(install,storage,progress=lambda phase,counts:updates.append((phase,counts)))
+        assert updates[-1][0]=='publishing'
         assert summary['verified']==1 and summary['pending']==2
         assert {r['key'] for r in c.decode(c.read_json(session/'share-this-template.json'))['records']}=={first['key']}
         assert {r['key'] for r in c.read_json(session/'pending-template.json')['records']}=={second['key'],unknown['key']}

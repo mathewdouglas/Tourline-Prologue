@@ -11,6 +11,9 @@ exported; unknown/rejected records remain private and pending. It adds no new
 per-draw instrumentation or normal-play preparation. See
 [collection verification](pipeline-contributions.md#automatic-verification-after-play-phase-202)
 for controls, search scope, rollback and maintainer acceptance requirements.
+Post-play and resumed verification now show a native stage/count/elapsed/result
+window (Phase 203), with cooperative cancellation. `GT5P_COLLECT_VERIFY_UI=0`
+restores console-only status; it does not disable verification.
 
 The Phase-201 development starter contains 4,450 verified observed pipelines /
 1,581 original program identities. Dealership test 1 contributes 1,348 additions,

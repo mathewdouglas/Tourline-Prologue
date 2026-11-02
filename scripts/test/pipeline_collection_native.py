@@ -44,7 +44,7 @@ def main():
         collection.begin(install,storage,session,value,{},dict(mode='default',source='retained-supported-session'))
     command=[str((install/'preparation/GT5P-Prepare.exe').resolve()),'--verify-contribution',
         '--install',str(install.resolve()),'--storage',str(storage.resolve())]
-    env=dict(os.environ,PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
+    env=dict(os.environ,PS3_VERBOSE='0',GT5P_COLLECT_VERIFY_UI='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_COLLECT_VERIFY',None)
     started=time.monotonic()
     with (out/'cancel.log').open('wb') as log:

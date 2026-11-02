@@ -36,13 +36,20 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 202)
+## Start here: state of play (2026-11-03, Phase 203)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 202 is the latest).
+has the evidence, newest phase first (Phase 203 is the latest).
 
 ### What works now
+
+- **Visible collection verification (Phase 203):** post-play and Resume show a
+  native stage/count/elapsed/result window. Cancel/close/Escape wait for owned
+  cleanup and retain resumable input/cache work. GT5P_COLLECT_VERIFY_UI=0 restores
+  console status. Native UI lifecycle tests and a frozen real 1,353-record
+  cancellation/resume pass, preserving the verified export and selected cache.
+  No gameplay, starter, verification-policy, release or CI change. See progress.
 
 - **Post-play collection verification (Phase 202):** opt-in collection now verifies
   original assets and both shaders/native keys after game exit. Only prepared

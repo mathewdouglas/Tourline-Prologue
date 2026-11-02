@@ -9,6 +9,51 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 203 - Visible post-play verification progress (2026-11-03)
+
+Collection and Resume now open a small repository-authored native Windows window
+after gameplay. It reports the current original-asset/shader/native stage,
+available stage counts, elapsed time, and final verified/pending totals with the
+share filename. Long batches explicitly show that work continues; no fabricated
+whole-operation percentage or ETA is shown. The result stays visible until Close.
+No new GUI dependency, gameplay instrumentation or verification contract is added.
+
+Cancel, window close and Escape during work request cooperative cancellation.
+The UI waits for the verification worker, private child jobs and storage lease
+cleanup before showing the cancelled result. Completed work and captured input
+remain resumable with Resume pipeline verification.cmd. Failure is also visible;
+technical details remain in the console. Tab/Enter/Space use the native button.
+GT5P_COLLECT_VERIFY_UI=0 restores the previous console-only path; verification
+itself stays enabled. The window consumes one bounded in-memory status snapshot,
+without monitoring checkpoint files or changing atomic file publication.
+
+The user's new foreground collection finishes independently under the Phase-202
+helper: 1,353 verified records / 478 original programs, zero pending, exit zero.
+That session's original verified envelope and prepared-cache selection are
+snapshotted unchanged through a separate frozen UI cancellation/resume proof.
+Cancel at the native phase returns 2 after cleanup; Resume independently checks
+all 1,353 native pipelines/persistence and returns 0. The resumed window shows
+1,353 verified, zero pending, elapsed about 35 seconds with warm checked caches.
+This is a retained-cache acceptance run, not a fresh-session timing comparison.
+Window-only working, cancellation, success and failure views are inspected.
+
+Sequential native UI tests cover retained counts across heartbeats, success,
+failure, button/close/Escape cancellation, and worker cleanup before completion.
+Collection tests cover UI routing, console rollback and unchanged verified-only
+publication/pending isolation. Contribution, package and private-job lifecycle
+regressions pass. A final private frozen helper builds with the existing decoder;
+checksum/packed-reader tests pass. A frozen missing-input check rejects visibly,
+publishes no share and closes via Escape with exit 1. The initial UI test harness
+mistook the venv launcher's PID for the actual Python window owner; using the
+base interpreter fixes only the probe. No product process or cache was stopped.
+
+Private evidence: scratch/human-collection-20261103-084525, scratch/c203live
+(real frozen cancellation/resume), scratch/c203final (frozen failure/keyboard),
+scratch/c203final2 (final frozen failure/keyboard), scratch/c203checks (focused
+logs), and scratch/c203h3 (final helper). No game-data
+copy, renderer/runtime change, new starter acceptance, release or CI run. Main
+and published v0.2.2 remain unchanged; development push uses [skip ci].
+
 ## Phase 202 - Automatic post-play contribution verification (2026-11-03)
 
 At the user's request, opt-in collection now retains its captured metadata and
