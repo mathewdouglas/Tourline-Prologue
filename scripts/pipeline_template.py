@@ -338,10 +338,21 @@ def cached_shaders(document,cache):
     return found
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None):
+def packs_enabled(choice, warmup_plan):
+    """None follows the plan. The library default stays off for explicit callers."""
+    if choice is None:
+        return warmup_plan is not None
+    if type(choice) is not bool:
+        raise ValueError('Shader packs require an explicit observed phase plan')
+    return choice
+
+
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False):
     from pipeline_translation import MODES
     if translation not in MODES:
         raise ValueError('Unsupported preparation translation')
+    if type(shader_packs) is not bool or (shader_packs and warmup_plan is None):
+        raise ValueError('Shader packs require an explicit observed phase plan')
     idle()
     output = output_validator(output)
     if output.exists() and not resume:
@@ -379,6 +390,9 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
         if phase_plan['template_sha256'] != template_digest(template) or not keys <= {r['key'] for r in document['records']}:
             raise ValueError('Warmup plan does not match this template')
         contract['warmup_plan'] = sha(json.dumps(phase_plan,sort_keys=True,separators=(',',':')).encode())
+        if shader_packs:
+            from preparation_shader_pack import VERSION as PACK_VERSION
+            contract['shader_packs'] = PACK_VERSION
     if volume is not None:
         from game_volume import read as read_volume
         if assets is not None:raise ValueError('Select packed volume or unpacked assets, not both')
@@ -429,6 +443,10 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
                 raise ValueError('Native preparation must succeed before publishing phase membership')
             from pipeline_warmup_plan import stage
             checkpoint.stage('phase-warmup')
+            if shader_packs:
+                from preparation_shader_pack import stage as stage_packs
+                report['shader_packs'] = stage_packs(phase_plan,document,report,output/'shadercache',
+                    resume=resume,progress=checkpoint.progress)
             report['warmup_plan'] = dict(stage(phase_plan,report,output/'shadercache/warmup-v1',resume=resume),
                 sha256=contract['warmup_plan'])
             report['preparation_seconds'] = time.perf_counter()-started
@@ -675,6 +693,8 @@ def main():
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
     p.add_argument('--warmup-plan',type=Path,help='Explicit observed menu/race membership; default translation only, existing worker consumes it')
+    p.add_argument('--shader-packs',action=argparse.BooleanOptionalAction,default=None,
+                   help='Build verified local menu/race bytecode packs for --warmup-plan. On when a plan is set; --no-shader-packs rolls back. Default translation only')
     p.add_argument('--volume',type=Path,help='Read directly from the original GT.VOL without unpacking')
     p.add_argument('--volume-map',type=Path,help='Verified numeric archive member/ELF parameter locations')
     p.add_argument('--asset-map',type=Path,help='Optional verified hash/offset map for non-SHDS programs')
@@ -692,7 +712,7 @@ def main():
         return
     if args.command == 'prepare':
         result = prepare(*(getattr(args, k).resolve() if getattr(args,k) is not None else None for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode,translation=args.translation,warmup_plan=args.warmup_plan)
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode,translation=args.translation,warmup_plan=args.warmup_plan,shader_packs=packs_enabled(args.shader_packs,args.warmup_plan))
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

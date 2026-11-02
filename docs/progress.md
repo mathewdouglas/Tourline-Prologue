@@ -9,6 +9,106 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 194 - Prepare local shader packs before first draw (2026-11-02)
+
+The user confirms the rear-view reflection/LOD hitch in both Phase 193 modes
+and their own sessions. No timestamp or repeatable transition capture identifies
+its cause yet. Three native-key misses recur in both earlier runs; additional
+misses differ. Neither those misses nor their target formats prove mirror
+ownership. No missing template entry or asset rule is invented from that guess.
+
+The production path shows another concrete gap: native keys require shader
+bytecode, and the existing pack lookup precedes the per-file/memory DXBC path.
+Offline preparation did not build those packs. The earlier indexed log confirms
+menu/race packs both start with zero shaders, then learn during play. Its sampled
+`dxbc` total is 7,923 ms despite only 12 shader compiles. That total includes
+cache lookup/allocation and compilation; it is not isolated disk time or evidence
+that the mirror transition caused those samples. Async lookup still checks file
+existence before the cached lookup; packs do not remove every file operation.
+
+`preparation_shader_pack.py` builds the existing `GT5PSPK1` local cache format
+from both shader stages of explicit observed default-template phase targets.
+Source-key to bytecode hash/length mappings must be consistent. All needed DXBC
+files are verified before writing. The plan/report/template must agree; unknown,
+unprepared, corrupt, missing, redirected or hard-linked dependencies reject.
+Caps are 64 MiB/12,288 entries per scope, 128 MiB unique payload, 4 MiB per input
+and a polled 60-second work budget. No workers, compiler calls or runtime changes
+are added. This is not an independently generated pipeline set or new coverage.
+
+Explicit developer `pipeline_template.py prepare --warmup-plan ... --shader-packs`
+publishes packs only after successful native preparation, under its existing
+checkpoint lock. The contract pins pack version 1. Existing learned files are
+preserved/rejected; resume accepts identical generated files, publishes a missing
+scope and does not accumulate temporary files. Cancellation/write failure cleans
+only this attempt's unique partial temporaries; complete cache files remain.
+A standalone command reads an idle source cache and writes only packs plus
+metadata in a fresh locked ignored output. No game-derived bytes are tracked.
+
+Synthetic both-stage identity, deduplication, missing/corrupt/conflicting inputs,
+byte/count/time caps, learned-file preservation, cancellation during verification
+and second-file writing, partial publication and actual checkpoint enable/resume/
+rollback checks pass. Existing phase-plan/template/translation, frame-statistics
+and benchmark-storage checks pass sequentially. The native probe compiles the
+actual production pack-reader block and verifies every loaded blob against the
+template's bytecode hash/length, missing-key behavior, retained caller references
+across scope changes and disabled mode. No device or game is created by that probe.
+Its first failed run selected the ordinary root cache because the harness used
+Win32 SetEnvironmentVariable rather than updating the C runtime environment;
+it read existing packs without adding shaders or saving them. The harness now
+uses `_putenv_s` and passes against only the isolated generated packs.
+
+The standalone build verifies 1,978 distinct source keys / 28,148,188 bytecode
+bytes. Its menu pack contains 145 entries / 2,150,276 bytecode bytes; race has
+1,873 / 26,533,912. File sizes including headers are 2,152,028 / 26,556,400 bytes.
+Native-reader hashes match every entry. A separate full packed-game preparation
+passes all 2,892 records, exact native keys and persisted driver blobs with zero
+vertex compiles; all 2,892 driver calls use cached hints. Total is 170.69 s,
+including 10.22 s for packs. This reused-shader run is not a fresh-compile speedup.
+Generated pack SHA-256 values agree between the standalone and integrated paths.
+
+The benchmark's explicit `paired-packs` mode starts both conditions with identical
+indexed warming, async settings and fresh copies of the same prepared files.
+Only seeded trials get generated packs; both keep runtime packs enabled and
+learn normally. Two trials use unseeded/seeded; four use ABBA. Existing source
+packs reject rather than being deleted. Memory, shader/driver/demand counters,
+pack load diagnostics, coverage and screenshots are captured. Cleanup's exact
+new labels are tested; all shadercaches and evidence stay intact.
+
+The user explains that earlier low-FPS test windows were affected by the PC
+going to sleep, now fixed. Those failed collections remain excluded; the refused
+foreground request alone did not establish the cause. The user will keep the
+new test visible. Starter metadata, async policy and the runtime stay unchanged.
+
+The visible paired run finished both 90-second High Speed Ring windows. The
+user reports that the second window, the one seeded with shader packs, had much
+less stuttering. The race-window sample agrees: unpacked 37.7 FPS, interval
+median 21.4 ms, p99 121.7 ms, max 1,306.7 ms, 57.5% of intervals over 20 ms;
+packed 49.4 FPS, median 17.0 ms, p99 44.1 ms, max 425.5 ms, 24.9% over 20 ms.
+The racing half (45–90 s) is 36.8 FPS with p99 131.7 ms and four gaps over
+250 ms without packs, against 51.5 FPS, p99 42.9 ms and no gap over 250 ms
+with packs. Menu/race packs loaded 145 and 1,873 shaders in 15 ms and 31 ms.
+Sampled DXBC time fell from 7,861 ms to 759 ms. Shader compiles did not fall
+(87 unpacked, 107 packed), and native warmup stayed 2,103 loaded pipelines in
+both. This is one ordered pair, unpacked first, so the packed run also had
+warmer OS and driver caches. It is not an ABBA result, a mirror-LOD isolation,
+or a claim that hitches are gone. Evidence:
+`scratch/shader-packs-194/paired/report.json`.
+
+Default-translation player preparation now builds these packs. Developer
+`prepare --warmup-plan` does the same unless `--no-shader-packs` is set. The
+library `shader_packs=False` default stays, so an explicit call without the
+flag remains pack-free and the resume/rollback checks above still hold. The
+helper bundles `config/pipeline-warmup/gt5p-disc-v2.json` and passes it only
+for translation `default` (720p/1080p 16:9, including the first-run preset).
+`native-scaled` and `ultrawide-native` do not take a phase plan. The
+preparation token mixes `shader-packs-v1` when packs are on, so an older
+unpacked generation is left in place and can be imported. `RSX_SHADER_PACK=0`
+disables runtime pack use without deleting caches.
+
+Evidence: `scratch/shader-packs-194/packs/`, `prepared/`,
+`scratch/shader-pack-native-2f4c53ae06844f5d8c1f781b8f6b6976/`, synthetic
+`scratch/shader-pack-test-*`, and `scratch/shader-packs-194/paired/`.
+
 ## Phase 193 - Observed phase membership for native warmup (2026-11-02)
 
 The prepared generation had shader bytes, native recipes and driver hints, but

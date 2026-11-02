@@ -31,7 +31,7 @@ assert not game.exists() and removed==len('disposable')
 assert (target/'keep.txt').read_text()=='source retained'
 assert (trial/'shadercache/keep.txt').is_file() and (trial/'runner.log').is_file()
 
-for mode in ('demand', 'indexed'):
+for mode in ('demand', 'indexed', 'unpacked', 'packed'):
     labeled=root/('3-prepared-'+mode)
     (labeled/'game').mkdir(parents=True)
     (labeled/'logs').mkdir();(labeled/'runner.log').write_text('retained')

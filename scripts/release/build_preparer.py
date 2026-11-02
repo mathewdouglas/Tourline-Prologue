@@ -22,12 +22,16 @@ def main():
     if importlib.metadata.version('pyinstaller')!='6.16.0':raise ValueError('Build requires PyInstaller 6.16.0')
     out.mkdir(parents=True)
     manifest=json.loads((ROOT/'config/ps3recomp.json').read_text())
+    plan=ROOT/'config/pipeline-warmup/gt5p-disc-v2.json'
+    if plan.is_symlink() or plan.is_junction() or not plan.is_file():
+        raise ValueError('Default shader-pack plan is missing or redirected')
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--console',
         '--name','GT5P-Prepare','--icon',str(ROOT/'launcher/tourline-prologue.ico'),
         '--distpath',str(out/'dist'),'--workpath',str(out/'work'),
         '--specpath',str(out),'--paths',str(ROOT/'scripts'),
         '--hidden-import','shader_vertex_batch',
         '--add-data',str(ROOT/'config/ps3recomp.json')+os.pathsep+'config',
+        '--add-data',str(plan)+os.pathsep+'config/pipeline-warmup',
         '--add-data',str(ROOT/manifest['patch'])+os.pathsep+'patches',
         str(ROOT/'scripts/player_prepare.py')],cwd=ROOT,check=True)
     folder=out/'dist/GT5P-Prepare'

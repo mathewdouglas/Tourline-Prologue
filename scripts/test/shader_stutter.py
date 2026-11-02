@@ -66,6 +66,10 @@ def analyze_run(logs, tag, seed_keys=()):
                 observed_dxbc_ms=sum(float(m[2]) for m in misses),
                 observed_pipeline_ms=sum(float(m[4]) for m in misses),
                 compiled_so_far=max((int(m[3]) for m in misses),default=0),
+                shader_pack_loads=[dict(scope=p, shaders=int(n), mib=float(size), read_ms=int(ms))
+                    for p,n,size,ms in re.findall(r'\[shader-pack\] (menu|race) set: (\d+) shaders, ([\d.]+) MiB, read in (\d+) ms',err)],
+                shader_pack_scope_ends=[dict(scope=p, hits=int(h), new_shaders=int(n))
+                    for p,h,n in re.findall(r'\[shader-pack\] (menu|race) set ended: (\d+) pack hits, (\d+) new shaders',err)],
                 grid_seconds=(grid-window['launch_ms'])/1000,
                 milestones=dict((n,int(t)) for n,t in re.findall(r'\[milestone\] (\w+) at (\d+) ms',out)),
                 warmup_summaries=warm,
@@ -87,10 +91,12 @@ def main():
                     help='Single-condition diagnostic route; does not establish a paired performance result')
     ap.add_argument('--warmup-plan',type=Path,
                     help='Observed phase membership for a private indexed trial; never scans all recipes')
+    ap.add_argument('--shader-pack-template',type=Path,
+                    help='Exact template for paired-packs; build local packs only in the seeded private trials')
     ap.add_argument('--trials',type=int,choices=(2,4),default=4)
     ap.add_argument('--keep-game-copies',action='store_true',
                     help='Retain disposable game/save copies for debugging (about 4 GiB per trial)')
-    ap.add_argument('--startup-policy',choices=('scan','demand','indexed','paired-indexed'),default='scan',
+    ap.add_argument('--startup-policy',choices=('scan','demand','indexed','paired-indexed','paired-packs'),default='scan',
                     help='Scan all recipes, use demand only, replay phase indices, or compare indexed against demand with the same prepared files')
     args = ap.parse_args()
     fixture,engine,prepared,output = (getattr(args,k).resolve() for k in ('fixture','engine','prepared','output'))
@@ -116,13 +122,27 @@ def main():
         parse_report(preparation_document)
     plan = None
     if args.warmup_plan:
-        if not preparation_document or args.startup_policy not in ('indexed','paired-indexed'):
+        if not preparation_document or args.startup_policy not in ('indexed','paired-indexed','paired-packs'):
             ap.error('--warmup-plan requires a preparation report and indexed policy')
         from pipeline_warmup_plan import read, validate_preparation
         plan = read(args.warmup_plan)
         validate_preparation(plan, preparation_document)
     if args.startup_policy == 'paired-indexed' and (plan is None or args.condition):
         ap.error('paired-indexed requires --warmup-plan and both prepared-cache conditions')
+    pack_document = None
+    if args.startup_policy == 'paired-packs':
+        if plan is None or args.condition or not args.shader_pack_template:
+            ap.error('paired-packs requires --warmup-plan, --shader-pack-template and both conditions')
+        if any((prepared/(p+'-shaders-v1.pack')).exists() for p in ('menu','race')):
+            ap.error('paired-packs requires a source cache without learned packs; existing packs are preserved')
+        from pipeline_template import read as read_template, template_digest
+        from preparation_shader_pack import dependencies
+        if template_digest(args.shader_pack_template) != plan['template_sha256']:
+            ap.error('Shader pack template differs from the observed phase plan')
+        pack_document = read_template(args.shader_pack_template)
+        dependencies(plan,pack_document,preparation_document)
+    elif args.shader_pack_template:
+        ap.error('--shader-pack-template is only used by paired-packs')
     output.mkdir(parents=True)
     seed_keys = {p.stem[4:] for p in (prepared/'warmup-v1').glob('pso_*.recipe')}
     report = dict(engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
@@ -139,12 +159,19 @@ def main():
     if args.startup_policy == 'paired-indexed':
         report['limitations'].append('Fresh processes/private copies of the same prepared disk files; only phase replay differs.')
     visits = [('prepared', p) for p in ('demand','indexed','indexed','demand')[:args.trials]] if args.startup_policy == 'paired-indexed' else [(c,args.startup_policy) for c in order]
+    if args.startup_policy == 'paired-packs':
+        visits = [('prepared',p) for p in ('unpacked','packed','packed','unpacked')[:args.trials]]
+        report['shader_pack_template_sha256'] = plan['template_sha256']
+        report['limitations'].append('Both conditions use identical indexed native warmup; only initial bytecode packs differ. Packs remain enabled and can learn in both trials.')
     for number,(condition,policy) in enumerate(visits,1):
         if b'gt5p.exe' in subprocess.run(['tasklist','/FI','IMAGENAME eq gt5p.exe','/NH'],capture_output=True).stdout.lower():
             raise SystemExit('Another gt5p.exe is running; nothing was stopped')
         require_space(output,fixture,prepared if condition=='prepared' else None)
         tag = f'{number}-{condition}'
-        if args.startup_policy == 'paired-indexed':tag += '-'+policy
+        if args.startup_policy in ('paired-indexed','paired-packs'):tag += '-'+policy
+        pack_seeded = policy == 'packed'
+        if policy in ('packed','unpacked'):
+            policy = 'indexed'
         trial = output/tag;game = trial/'game';logs=trial/'logs';game.mkdir(parents=True);logs.mkdir()
         print('Creating isolated trial',tag,flush=True)
         shutil.copytree(fixture/'gamedata',game/'gamedata')
@@ -171,6 +198,10 @@ def main():
         if plan is not None and condition == 'prepared' and policy == 'indexed':
             from pipeline_warmup_plan import stage
             plan_result = stage(plan, preparation_document, cache/'warmup-v1',resume=True)
+        pack_result = None
+        if pack_seeded:
+            from preparation_shader_pack import stage as stage_packs
+            pack_result = stage_packs(plan,pack_document,preparation_document,cache)
         env = {k:v for k,v in os.environ.items() if not k.startswith(
             ('GT5P_','RSX_','PS3_','PAD_','FP_','VP_','SPU_','PPU_','D3D12_','CULL_'))}
         env.update(PS3_VERBOSE='0',GT5P_GAME_DIR='input/pkg/',
@@ -180,6 +211,8 @@ def main():
                    RSX_SHADER_WARMUP_BACKGROUND='1',RSX_PSO_ASYNC='1',RSX_SHADER_ASYNC='1',
                    RSX_RACE_PREWARM='1' if policy == 'indexed' else '0',
                    RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
+        if args.startup_policy == 'paired-packs':
+            env.update(RSX_SHADER_PACK='1', RSX_SHADER_PACK_MB='64')
         env['RSX_PIPELINE_METRICS'] = '1'
         if coverage_report:env['RSX_PSO_COVERAGE'] = '1'
         cmd = ['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(ROOT/'scripts/test/race.ps1'),
@@ -199,6 +232,8 @@ def main():
                     proc.wait(timeout=15)
         result = dict(tag=tag,condition=condition,warmup_policy=policy,warmup_plan=plan_result,
                       **analyze_run(logs,tag,seed_keys))
+        if args.startup_policy == 'paired-packs':
+            result['shader_pack_preparation'] = pack_result
         if coverage_report:
             from pipeline_runtime_coverage import evaluate_files
             result['reference_pipeline_coverage'] = evaluate_files(logs/f'{tag}.err', coverage_report, trial/'coverage')
