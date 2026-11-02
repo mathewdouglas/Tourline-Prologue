@@ -101,6 +101,8 @@ def main():
                         assert 'Resume pipeline verification.cmd' in text(hwnd, 3)
                     ui.PostMessageW(hwnd, 0x10, 0, 0)
                     assert process.wait(timeout=10) == 0
+                    log.flush()
+                    assert 'Exception ignored' not in (root/'child.log').read_text()
                     result = json.loads((root/'result.json').read_text())
                     if mode.startswith('cancel'):assert result == dict(cancelled=True)
                     elif mode == 'failed':assert 'Synthetic original-asset rejection' in result['error']

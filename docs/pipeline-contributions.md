@@ -11,7 +11,8 @@ lease and separate private `cv/<identity>` checkpoints; it never selects or edit
 the player's prepared cache. Native children have private kill-on-close jobs,
 offline-entry guards, bounded logs and timeouts; vertex worker budgets stay intact.
 
-After play, a small **Tourline Prologue - Collection verification** window shows
+After play, a **Tourline Prologue - Collection verification** window styled like
+the shader precompiler shows
 the current lookup/shader/native stage, available stage counts and elapsed time.
 Counts describe that stage, not a whole-operation percentage or estimated time.
 Long compiler/native batches can show a working message until the batch finishes.
@@ -77,6 +78,25 @@ They expand observed coverage after verification; they do not require another
 player to repeat every car/track combination.
 
 ## Player workflow (development feature)
+
+In a matching new launcher/engine/helper package, **F1 -> Debug** also provides:
+
+- **Collect pipelines:** closes the current game and restarts through the normal
+  launcher into opt-in collection. Close that game to verify it afterward.
+- **Verify last collection:** closes the game and verifies/resumes the latest
+  saved collection, without launching another game. A missing selection is
+  reported on the settings page before the game is closed.
+- **Prepare shaders:** closes the game and opens the existing shader precompiler
+  for saved settings, with its ordinary progress/cancel/resume behavior. Launch
+  the game normally afterward.
+
+Use Enter/Cross or click **Start**; Left/Right never activates these actions.
+Help text explains that the current game will close. Collection still requires
+the supported default settings below. During an active collection, close the
+game to finish it before starting another tool. Direct engine launches and older
+or incomplete packages cannot start these actions; the CMD entries remain usable.
+`GT5P_PIPELINE_TOOLS=0` disables the new launcher handoffs. They retain normal
+game-job ownership, storage locks, metadata-only export and verification rules.
 
 The next package can include **Collect pipeline template.cmd**. The published
 v0.2.2 package predates this command. Complete ordinary setup and launch the

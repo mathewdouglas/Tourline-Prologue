@@ -14,6 +14,10 @@ for controls, search scope, rollback and maintainer acceptance requirements.
 Post-play and resumed verification now show a native stage/count/elapsed/result
 window (Phase 203), with cooperative cancellation. `GT5P_COLLECT_VERIFY_UI=0`
 restores console-only status; it does not disable verification.
+F1's Debug page also opens preparation, collection or latest-collection
+verification after the launcher stops the current game (Phase 204). This requires
+the matching new launcher/engine/helper package. `GT5P_PIPELINE_TOOLS=0` disables
+those settings actions; the standalone CMD entries remain available.
 
 The Phase-201 development starter contains 4,450 verified observed pipelines /
 1,581 original program identities. Dealership test 1 contributes 1,348 additions,

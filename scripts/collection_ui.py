@@ -97,6 +97,8 @@ def show(operation):
     ui.DispatchMessageW.argtypes = [C.POINTER(W.MSG)]
     ui.IsDialogMessageW.argtypes = [W.HWND, C.POINTER(W.MSG)]
     ui.SetFocus.argtypes = [W.HWND]
+    ui.LoadIconW.argtypes = [W.HINSTANCE,C.c_void_p]
+    ui.LoadIconW.restype = W.HICON
     kernel.GetModuleHandleW.argtypes = [W.LPCWSTR]
     kernel.GetModuleHandleW.restype = W.HMODULE
     gdi.GetStockObject.argtypes = [C.c_int]
@@ -110,6 +112,15 @@ def show(operation):
         ui.EnableWindow(controls['button'], False)
     @proc
     def callback(hwnd, message, wp, lp):
+        if message == 0x14: return 1  # The panel paints its own background.
+        if message == 0xf:
+            theme.paint(hwnd,state.snapshot())
+            return 0
+        if message == 0x138:
+            return theme.colour(wp,lp in (controls.get('phase'),controls.get('detail'),controls.get('elapsed')))
+        if message == 0x2b:
+            theme.button(lp)
+            return 1
         if message == 0x10 or (message == 0x111 and wp & 0xffff in (1, 2)):
             if state.snapshot()['outcome'] is None:
                 cancel()
@@ -141,12 +152,14 @@ def show(operation):
                 else:
                     detail = ('Your collection and completed work are kept.\r\n'
                               'Use Resume pipeline verification.cmd to try again.\r\n'
-                              'Details are in the collection console.')
+                              'Details are in the collection console or launcher logs.')
                 ui.SetWindowTextW(controls['button'], 'Close')
                 ui.EnableWindow(controls['button'], True)
             ui.SetWindowTextW(controls['phase'], title)
             ui.SetWindowTextW(controls['detail'], detail)
-            ui.SetWindowTextW(controls['elapsed'], f'Elapsed: {elapsed // 60}:{elapsed % 60:02d}')
+            ui.SetWindowTextW(controls['elapsed'], f'{elapsed // 60}:{elapsed % 60:02d}')
+            ui.InvalidateRect(hwnd,None,False)
+            ui.InvalidateRect(controls['button'],None,False)
             return 0
         if message == 2:
             ui.PostQuitMessage(0)
@@ -154,28 +167,35 @@ def show(operation):
         return ui.DefWindowProcW(hwnd, message, wp, lp)
     instance = kernel.GetModuleHandleW(None)
     name = 'TourlineCollectionVerification' + uuid.uuid4().hex
-    cls = WindowClass(0, callback, 0, 0, instance, None, None, W.HBRUSH(6), None, name)
+    from collection_theme import Theme
+    theme = Theme(ui,gdi)
+    # LoadIcon returns a shared resource; the frozen helper embeds Tourline's icon.
+    icon = ui.LoadIconW(instance,C.c_void_p(1))
+    cls = WindowClass(0, callback, 0, 0, instance, icon, None, theme.panel, None, name)
     if not ui.RegisterClassW(C.byref(cls)):
+        theme.close()
         raise C.WinError(C.get_last_error())
     hwnd = None
     worker = None
     try:
+        style=0x02ca0000
         hwnd = ui.CreateWindowExW(0, name, 'Tourline Prologue - Collection verification',
-            0x00ca0000, 0x80000000 - 0x100000000, 0, 580, 270, None, None, instance, None)
+            style, 0, 0, 740, 446, None, None, instance, None)
         if not hwnd:
             raise C.WinError(C.get_last_error())
-        font = gdi.GetStockObject(17)
+        theme.position(hwnd,style)
         for key, label, x, y, width, height, kind, identity in (
-            ('phase', 'Checking the collection', 20, 20, 530, 28, 'STATIC', 2),
-            ('detail', 'Your collection is saved. Verification uses your original game files.', 20, 60, 530, 66, 'STATIC', 3),
-            ('elapsed', 'Elapsed: 0:00', 20, 138, 530, 24, 'STATIC', 4),
-            ('note', 'Only verified records can be shared. Pending records remain private.', 20, 171, 530, 22, 'STATIC', 5),
-            ('button', 'Cancel', 438, 199, 110, 28, 'BUTTON', 1)):
-            control = ui.CreateWindowExW(0, kind, label, 0x50000000 | (0x10000 if kind == 'BUTTON' else 0),
-                x, y, width, height, hwnd, W.HMENU(identity), instance, None)
+            ('phase', 'Checking the collection', 164, 94, 534, 32, 'STATIC', 2),
+            ('detail', 'Your collection is saved. Verification uses your original game files.', 164, 162, 534, 60, 'STATIC', 3),
+            ('elapsed', '0:00', 164, 258, 534, 24, 'STATIC', 4),
+            ('note', 'Only verified records can be shared. Pending records remain private.', 28, 338, 684, 32, 'STATIC', 5),
+            ('button', 'Cancel', 291, 396, 158, 37, 'BUTTON', 1)):
+            control = ui.CreateWindowExW(0, kind, label, 0x50000000 | (0x1000b if kind == 'BUTTON' else 0),
+                *(theme.s(v) for v in (x,y,width,height)), hwnd, W.HMENU(identity), instance, None)
             if not control:
                 raise C.WinError(C.get_last_error())
             controls[key] = control
+            font=theme.fonts['help' if key in ('detail','note') else 'row']
             ui.SendMessageW(control, 0x30, font, 1)
         if not ui.SetTimer(hwnd, 1, 200, None):
             raise C.WinError(C.get_last_error())
@@ -202,6 +222,7 @@ def show(operation):
             ui.KillTimer(hwnd, 1)
             ui.DestroyWindow(hwnd)
         ui.UnregisterClassW(name, instance)
+        theme.close()
     if state.error is not None:
         raise state.error
     return state.snapshot()['result']

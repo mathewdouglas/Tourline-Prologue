@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 203)
+## Start here: state of play (2026-11-03, Phase 204)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 203 is the latest).
+has the evidence, newest phase first (Phase 204 is the latest).
 
 ### What works now
+
+- **F1 pipeline tools and matched styling (Phase 204):** Debug provides Collect
+  pipelines, Verify last collection and Prepare shaders. Managed requests wait
+  for the old game/job before starting helpers with the correct storage leases.
+  GT5P_PIPELINE_TOOLS=0 rolls back the handoffs. The verifier matches precompiler
+  styling. Synthetic ownership/rollback checks and real 121-record startup
+  collection/re-verification plus preparation cancellation pass; selected cache
+  stays unchanged. New launcher, engine and helper are required. No renderer,
+  starter, release or CI change. See progress for evidence and narrow limits.
 
 - **Visible collection verification (Phase 203):** post-play and Resume show a
   native stage/count/elapsed/result window. Cancel/close/Escape wait for owned

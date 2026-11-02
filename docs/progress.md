@@ -9,6 +9,73 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 204 - Settings pipeline tools and matched verification styling (2026-11-03)
+
+The existing F1 Debug page now includes Collect pipelines, Verify last collection
+and Prepare shaders, with Start buttons and action-specific help. Enter/Cross
+and clicks activate them; Left/Right remains harmless on action rows. Collection
+requires the existing supported saved context. A missing last-session selection
+reports on the page without exiting. Direct engine launches, incomplete packages,
+legacy restart mode and active collection sessions cannot start a tool. During
+collection, close the game to finish/export/verify before starting another tool.
+GT5P_PIPELINE_TOOLS=0 rolls back the new launcher handoffs; ordinary CMD entries
+and preparation remain available.
+
+Three distinct managed exit codes let the launcher wait for the old game and
+retire its private job before starting a tool. The installed helper's release
+hash gates availability and is checked again before handoff. Preparation keeps
+the launcher's storage leases and uses its existing progress/cancel/resume flow.
+Collection/verification release only that launcher's storage/home leases before
+the normal collector launcher or verifier reacquires them. The parent still owns
+the helper's kill-on-close job, including nested launcher/compiler descendants.
+Nothing runs concurrently with the old game. Finishing/cancelling a tool leaves
+the game closed; launch normally afterward. Both new launcher and engine are
+required. No renderer worker, async draw policy or preparation default changes.
+
+The verification window matches launcher/preparation_ui.h's settings palette,
+Segoe UI sizes, title gradient, black/green fields, grey underlines/dotted rules,
+real counted or indeterminate stage bar, and glass pill button. System DPI and
+work-area fit size the panel at startup. Standard child text/buttons preserve
+keyboard/accessibility behavior; owner-drawn fonts/brushes are released after
+children are gone. The existing one-snapshot progress/cancellation worker and
+verified-only publication rules stay intact. No overall percentage or ETA is
+invented, and no UI dependency is added. Multi-monitor DPI migration and every
+display scale are not claimed by this one-display acceptance.
+
+Sequential synthetic launcher probes pass all three handoffs, success/cancel,
+both lease releases for collection/verification, retained preparation lease,
+active-recorder exclusion, tool rollback and legacy-restart rollback. Existing
+launcher/setup/storage/managed-restart and first-run preparation checks pass.
+Native UI tests cover counts, rejection, cancellation and cleanup; collection,
+contribution and package regressions pass. Private launcher and engine builds
+compile/link the authored settings source; the engine reuses read-only existing
+objects/runtime into an isolated output. No shared runtime/build output changes.
+Final frozen helper and checksum/packed-reader tests pass.
+
+A real 1080p/2x/16:9 foreground startup check uses the retained own save/cache
+fixture (aniso16, smooth colour, PS3_VERBOSE=0). F1 Debug displays all three actions.
+Right on Collect does not exit; Enter exits the old PID, then the normal collector
+starts a different game PID. Startup/movie frames visibly present at 60 FPS.
+Closing that game starts the styled verifier: all 121 captured pipelines / 91
+original programs reconstruct both stages, exact native keys and persisted data,
+pending zero; the result displays about 26 seconds. This narrow startup/movie
+check is not a race/content coverage or performance claim. F1 Verify subsequently
+revalidates the same 121 records, exit zero. F1 Prepare closes the game and opens
+the existing full-starter precompiler; cancellation during verified reuse returns
+normally with the prior prepared-cache selection unchanged. No full-starter
+preparation is claimed for this cancelled acceptance. All owned descendants exit.
+Window-only Debug, game presentation, styled result and precompiler views are
+inspected. Existing user collection sessions and every cache remain preserved.
+
+Private evidence: scratch/c204build (isolated native outputs), c204checks and
+c204final (focused logs), c204live (real three-action acceptance and retained
+previous/session logs), c204inspect (final frozen re-verification), and c204h3
+(final helper). A 225-file private candidate passes strict packaging and ZIP
+integrity checks, with no game/cache data; SHA256
+e1b435ab833cf10d74b11dc5af00b92469d00401119b2b7e2e0cb1f7a5ffe8ee.
+No main merge, release, tag or CI
+build; development push uses [skip ci]. Starter remains 4,450 observed records.
+
 ## Phase 203 - Visible post-play verification progress (2026-11-03)
 
 Collection and Resume now open a small repository-authored native Windows window

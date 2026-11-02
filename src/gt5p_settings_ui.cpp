@@ -86,6 +86,7 @@ struct Item {
     void (*set)(Gt5pSettings&, int);
     void (*apply)(int);                      /* live; nullptr: after a restart */
     int key = -1;                            /* a keyboard binding: its button (gt5p_keymap.h) */
+    int action = 0;                         /* launcher-owned tool; activated only with Enter/Cross/click */
 };
 
 const std::vector<Choice> kOnOff = { {1, L"On"}, {0, L"Off"} };
@@ -247,6 +248,18 @@ const std::vector<Item>& items()
           [](const Gt5pSettings& s) { return s.debug_export ? 1 : 0; },
           [](Gt5pSettings& s, int v) { s.debug_export = v != 0; },
           [](int v) { gt5p_debug_enable(v); } },
+        { L"DEBUG", L"Collect pipelines",
+          L"Restart into pipeline collection. Play normally, then close the game to verify your collection. "
+          L"Requires 720p/1080p, 16:9, anisotropy 16 and smooth colour. Diagnostic I/O can affect performance.",
+          nullptr, {}, [](const Gt5pSettings&) { return 0; }, [](Gt5pSettings&, int) {}, nullptr, -1, 1 },
+        { L"DEBUG", L"Verify last collection",
+          L"Close the game and verify or resume your latest saved collection. The progress window shows "
+          L"verified and pending records. Nothing is uploaded or added to a release automatically.",
+          nullptr, {}, [](const Gt5pSettings&) { return 0; }, [](Gt5pSettings&, int) {}, nullptr, -1, 2 },
+        { L"DEBUG", L"Prepare shaders",
+          L"Close the game and open shader preparation for your saved settings. Known pipelines are prepared; "
+          L"uncovered variants are still compiled during play. Cancel keeps completed work for resume.",
+          nullptr, {}, [](const Gt5pSettings&) { return 0; }, [](Gt5pSettings&, int) {}, nullptr, -1, 3 },
     };
     return v;
 }
@@ -404,12 +417,39 @@ void set_value(int id, int v);
 
 void reset_keys();
 
+void pipeline_tool(int action)
+{
+    if (!tourline_restart::tools_available()) {
+        s_status = getenv("RSX_PSO_PROVENANCE") ?
+            L"Collection is already active. Close the game to finish and verify it." :
+            L"Use the current Tourline launcher and preparation helper to start pipeline tools.";
+        return;
+    }
+    if (action == 1 && ((s_edit.resolution!=720 && s_edit.resolution!=1080) || s_edit.ultrawide ||
+            s_edit.anisotropy!=16 || !s_edit.smooth_colour || !gt5p_settings_enabled())) {
+        s_status=L"Collection needs 720p/1080p, 16:9, anisotropy 16 and smooth colour.";
+        return;
+    }
+    if (action == 2) {
+        const char* root=getenv("GT5P_ROOT");
+        const std::string pointer=std::string(root ? root : ".")+"/last-pipeline-collection.txt";
+        if (GetFileAttributesA(pointer.c_str())==INVALID_FILE_ATTRIBUTES) {
+            s_status=L"No saved collection yet. Use Collect pipelines first.";
+            return;
+        }
+    }
+    tourline_restart::request(action==1 ? tourline_restart::Action::Collect :
+        action==2 ? tourline_restart::Action::Verify : tourline_restart::Action::Prepare);
+    s_status=L"Could not start the pipeline tool. Close the game and use its collection or Resume command.";
+}
+
 void change(int id, int dir)
 {
     if (id == kRowClose) { set_open(false); return; }
     if (id == kRowRestart) { relaunch(); return; }
     if (id == kRowDefaults) { reset_keys(); return; }
     const Item& it = items()[id];
+    if (it.action) return;  // Left/Right must never close the game.
     if (it.key >= 0) return;
     const int n = (int)it.choices.size();
     set_value(id, it.choices[(choice_index(it) + dir + n) % n].value);
@@ -758,6 +798,13 @@ void paint(HDC dc)
         }
         const Item& it = items()[id];
         const bool over = gt5p_settings_overridden(it.env);
+        if (it.action) {
+            text_in(dc, fRow, kPx0 + 20, y, kFieldX - 24, y + kFieldH - 2,
+                grey(190), it.label, DT_RIGHT);
+            button(dc, kFieldX, y, L"Start", sel);
+            if (sel) cursor(dc, kFieldX + kBtnW / 2, y + 18);
+            continue;
+        }
         if (it.key >= 0) {
             /* A binding: the button's name, then its key in a box. */
             const int x0 = sl[i].x0, fx = x0 + 160;
@@ -1435,6 +1482,7 @@ void press()
     const std::vector<int> r = rows();
     if (s_sel < 0 || s_sel >= (int)r.size()) return;
     if (r[s_sel] == kRowHead) { switch_section(+1); return; }
+    if (r[s_sel] >= 0 && items()[r[s_sel]].action) { pipeline_tool(items()[r[s_sel]].action); return; }
     if (r[s_sel] >= 0 && items()[r[s_sel]].key >= 0) { begin_capture(r[s_sel]); return; }
     if (r[s_sel] >= 0) { s_drop = true; s_drop_sel = choice_index(items()[r[s_sel]]); return; }
     change(r[s_sel], +1);

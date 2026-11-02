@@ -395,12 +395,12 @@ static fs::path storage_picker() {
     if (choice == 100) return data;
     return pick(true, L"Choose an empty folder for Project Tourline Prologue saves, settings and cache");
 }
-static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game) {
+static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game, bool notices=true) {
     auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
     if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
         fail(L"The preparation helper is missing or does not match this release. Re-extract the full ZIP.");
     bool packed=prepare_assets.empty() && env(L"GT5P_PREPARE_VOLUME")!=L"0";
-    if (prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,packed?
+    if (notices && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,packed?
         L"Experimental preparation covers known menu/HSR/Daytona pipelines, not the whole game.\n\nPreparation reads your already selected game files in place. No separate GT.VOL extraction is needed. It may take several minutes and stores local shader/driver files. No consistent stutter reduction is established. You can cancel and resume, or launch normally without preparation.":
         L"Legacy preparation: choose your already unpacked GT.VOL asset folder. Preparation remains partial and optional.",L"Project Tourline Prologue - optional preparation",MB_OK|MB_ICONINFORMATION);
     auto assets=packed?fs::path{}:prepare_assets.empty()?pick(true,L"Choose your unpacked GT.VOL asset folder"):prepare_assets;
@@ -410,7 +410,7 @@ static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets,
     auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
     DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
     if (result && result!=2) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
-    if (!result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
+    if (notices && !result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
     return result;
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -543,11 +543,37 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         auto restart=env(L"GT5P_LAUNCHER_RESTART");
         if (!restart.empty() && restart!=L"0" && restart!=L"1") fail(L"GT5P_LAUNCHER_RESTART must be 0 or 1.");
         if (restart.empty()) setenv(L"GT5P_LAUNCHER_RESTART",L"1");
+        auto tools = install/L"preparation"/L"GT5P-Prepare.exe";
+        const bool pipeline_tools = env(L"GT5P_PIPELINE_TOOLS")!=L"0" &&
+            fs::is_regular_file(tools) && hash(tools)==release_value(L"prepare_sha256");
+        setenv(L"GT5P_PIPELINE_TOOLS", pipeline_tools ? L"1" : L"0");
         for (;;) {
             DWORD code = run(game, quote(data/L"input"/L"EMAIN.ELF"), data, L"play");
             // run() has waited for the old process and closed its private job
             // before another instance starts. Keep both storage locks throughout.
             if (code==tourline_restart::exit_code && tourline_restart::managed()) continue;
+            if (tourline_restart::pipeline_action(code) && tourline_restart::managed() && pipeline_tools &&
+                    env(L"RSX_PSO_PROVENANCE").empty()) {
+                if (hash(tools)!=release_value(L"prepare_sha256")) fail(L"The preparation helper changed. Re-extract the complete package.");
+                if (code==static_cast<DWORD>(tourline_restart::Action::Prepare)) {
+                    // Offline preparation already runs under these leases.
+                    prepare_cache(disc,{},false,false);
+                    break;
+                }
+                // The old game's job is retired. Release only our leases before
+                // the collector's normal launcher or verifier acquires them.
+                // Keep owning the helper's job until every child has exited.
+                CloseHandle(lock.h); lock.h=INVALID_HANDLE_VALUE;
+                if (home_lock.h!=INVALID_HANDLE_VALUE) { CloseHandle(home_lock.h); home_lock.h=INVALID_HANDLE_VALUE; }
+                setenv(L"GT5P_USER_DIR",data.wstring());
+                auto mode = code==static_cast<DWORD>(tourline_restart::Action::Collect) ?
+                    L"--collect-contribution" : L"--verify-contribution";
+                DWORD result=run(tools,std::wstring(mode)+L" --install "+quote(install)+L" --storage "+quote(data),
+                    install,L"pipeline-tools");
+                if (result!=0 && result!=2)
+                    fail(L"Pipeline collection or verification could not finish. Your recorded work is kept. See logs\\pipeline-tools.err, then try the collection or Resume command again.");
+                break;
+            }
             if (code) fail(L"The game exited with code " + std::to_wstring(code) + L". Logs are in:\n\n" + (data/L"logs").wstring());
             break;
         }
