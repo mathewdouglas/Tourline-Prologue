@@ -5,10 +5,12 @@ Parent-only sequential proof; original assets are read-only and no cache is remo
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pipeline_template as template
@@ -19,10 +21,16 @@ from shader_coverage import bounded_read
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    for name in ('assets', 'elf', 'engine', 'decoder', 'output'):
+    for name in ('elf', 'engine', 'decoder', 'output'):
         ap.add_argument('--'+name, type=Path, required=True)
+    source=ap.add_mutually_exclusive_group(required=True)
+    source.add_argument('--assets', type=Path)
+    source.add_argument('--volume', type=Path)
+    ap.add_argument('--fragment-chunk', type=int, default=8)
     ap.add_argument('--count', type=int, default=32)
     a = ap.parse_args()
+    if not 1 <= a.fragment_chunk < a.count:
+        ap.error('Select a positive fragment chunk smaller than the record count')
     idle()
     out = isolated(a.output)
     if out.exists():
@@ -50,17 +58,25 @@ def main():
     selected = out/'template.json'
     selected.write_text(json.dumps(dict(document, records=chosen)))
     arguments = (selected, None, a.elf.resolve(), a.engine.resolve(), a.decoder.resolve(), out, out/'preparation')
-    options = dict(assets=a.assets.resolve(), asset_map=bundle/'player-map.json')
+    options = dict(assets=a.assets.resolve() if a.assets else None, asset_map=bundle/'player-map.json',
+                   volume=a.volume.resolve() if a.volume else None,
+                   volume_map=bundle/'volume-map.json' if a.volume else None)
     cancelled = []
     def cancel(phase, counts):
-        if phase == 'translation-verifying':
+        if phase == 'translation-fragment' and 0 < counts.get('completed',0) < a.count:
             cancelled.append(True)
-            raise KeyboardInterrupt('Test cancellation after shaders/native work')
+            raise KeyboardInterrupt('Test cancellation after verified fragment chunk')
     try:
-        template.prepare(*arguments, translation='ultrawide-native', progress=cancel, **options)
+        with patch.dict(os.environ, GT5P_PREPARE_FRAGMENT_CHUNK=str(a.fragment_chunk)):
+            template.prepare(*arguments, translation='ultrawide-native', progress=cancel, **options)
         raise AssertionError('Cancellation did not occur')
     except KeyboardInterrupt:
         assert cancelled
+    state=json.loads((sidecar(out/'preparation','ultrawide-native')/'preparation-state.json').read_text())
+    assert state['phase']=='interrupted'
+    manifest_path=sidecar(out/'preparation','ultrawide-native')/'manifests'/(state['progress']['manifest_sha256']+'.json')
+    kept=json.loads(manifest_path.read_text())['fragments']
+    assert 0 < len(kept) < a.count
     cache = out/'preparation/shadercache'
     defaults = {r[k]+'.dxbc' for r in chosen for k in ('vp_source', 'fp_source')}
     before = {name:hashlib.sha256((cache/name).read_bytes()).hexdigest() for name in defaults}
@@ -71,7 +87,7 @@ def main():
         assert report['counts'] == extra['counts'] == {'prepared': a.count}
         assert extra['vertex_preparation']['launches'] == 0
         if mode == 'ultrawide-native':
-            assert extra['fragment_jobs_reused'] == a.count
+            assert extra['fragment_jobs_reused'] == len(kept)
         assert all((cache/f"pso_{row['key']}.bin").is_file() for row in extra['records'])
         assert all((cache/f"pso_{r['key']}.bin").is_file() for r in chosen)
         assert {name:hashlib.sha256((cache/name).read_bytes()).hexdigest() for name in defaults} == before
@@ -97,7 +113,8 @@ def main():
     template.prepare(*arguments, resume=True, **options)
     assert saved == {str(p.relative_to(sidecars)):hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in sidecars.rglob('*') if p.is_file()}
-    result = dict(records=a.count, modes=reports, cancelled_after_native=True,
+    result = dict(records=a.count, modes=reports, cancelled_after_fragment_chunk=True,
+        fragments_checkpointed_before_cancel=len(kept),
         default_shader_files_unchanged=True, default_rollback_leaves_sidecars=True,
         limitation='Observed-state translation proof on one GPU; warm driver/OS caches, no live rendering/stutter claim.')
     (out/'validation.json').write_text(json.dumps(result, indent=2)+'\n')

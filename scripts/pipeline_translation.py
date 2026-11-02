@@ -5,6 +5,7 @@ nor default shader identifiers are rewritten. Driver creation remains native.
 """
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -21,6 +22,13 @@ FOLDERS = {'native-scaled':'rs', 'ultrawide-native':'uw'}
 MAX_CODE = 4 * 1024**2
 MAX_POOL = 128 * 1024**2
 HEX = re.compile('[0-9a-f]{16}')
+
+
+def fragment_batch_size(environ):
+    value = environ.get('GT5P_PREPARE_FRAGMENT_CHUNK', '256')
+    if not isinstance(value, str) or not re.fullmatch('[0-9]{1,4}', value) or not 1 <= int(value) <= 4096:
+        raise ValueError('GT5P_PREPARE_FRAGMENT_CHUNK must be between 1 and 4096')
+    return int(value)
 
 
 def sidecar(output, mode):
@@ -72,6 +80,7 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
     """Prepare one extra translation mode; default preparation already succeeded."""
     if mode not in MODES or mode == 'default':
         raise ValueError('Select an explicit additional translation')
+    chunk_size = fragment_batch_size(os.environ)
     from pipeline_template import cached_shaders, envelope
     from native_pipeline_key import calibrate, root_signature_hash, derive_record_from_ids
     from shader_vertex_batch import compile_jobs
@@ -121,7 +130,15 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
                 pending = target.with_suffix('.tmp')
                 pending.write_bytes(payload)
                 pending.replace(target)
-            stage(phase, **counts)
+            # Commit verified work before polling cancellation. Otherwise a
+            # cancellation in Checkpoint.stage's progress hook loses this chunk.
+            hook = checkpoint.progress
+            checkpoint.progress = None
+            try:
+                stage(phase, **counts)
+            finally:
+                checkpoint.progress = hook
+            if hook:hook(phase, dict(manifest_sha256=digest, **counts))
 
         vertex_codes, fragment_codes = {}, {}
         for group, pool in (('vertices', vertex_codes), ('fragments', fragment_codes)):
@@ -187,16 +204,23 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             fragment_jobs.append(fragment_job(r, raw))
         fp_root = root/'f'
         fp_root.mkdir(exist_ok=True)
-        compiled, failures = compile_batch(fragment_jobs, fp_root, cache, engine, game_root, translation=mode)
+        fragment_total = {entry['source']: len(fragment_codes[i]) for i, entry in manifest['fragments'].items()}
+
+        def fragments_ready(compiled):
+            for identity, (source, code) in compiled.items():
+                fragment_total[source] = len(code)
+                if sum(fragment_total.values()) > MAX_POOL:
+                    raise ValueError('Derived fragment pool exceeds its memory budget')
+                fragment_codes[identity] = code
+                manifest['fragments'][identity] = dict(source=source, code=f'{fnv64(code):016x}', length=len(code))
+            publish('translation-fragment', completed=len(fragment_codes), total=len(allowed_f))
+
+        _, failures = compile_batch(fragment_jobs, fp_root, cache, engine, game_root, translation=mode,
+            batch_size=chunk_size, on_batch_ready=fragments_ready,
+            poll=lambda: progress('translation-fragment', dict(completed=len(fragment_codes), total=len(allowed_f)))
+                if progress else None)
         if failures:
             raise ValueError('Some translated fragment variants could not be prepared')
-        fragment_total = {entry['source']: len(fragment_codes[i]) for i, entry in manifest['fragments'].items()}
-        for identity, (source, code) in compiled.items():
-            fragment_total[source] = len(code)
-            if sum(fragment_total.values()) > MAX_POOL:
-                raise ValueError('Derived fragment pool exceeds its memory budget')
-            fragment_codes[identity] = code
-            manifest['fragments'][identity] = dict(source=source, code=f'{fnv64(code):016x}', length=len(code))
         if set(fragment_codes) != allowed_f:
             raise ValueError('Incomplete derived fragment results')
         publish('translation-native', requested=len(document['records']))

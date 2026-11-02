@@ -227,6 +227,11 @@ These files are not cryptographically authenticated against someone editing
 both a template and a purported proof. The command only writes a new merged
 template; it does not modify the shipped starter or publish a release.
 
+Phase 198 reviewed the second Phase 197 packaged HSR replay export: all 1,951
+records already occur in the expanded 3,102-record starter, with zero additional
+records or conflicts. No records are promoted from this replay. This is overlap
+evidence for that export, not whole-game coverage or an independent native proof.
+
 Before shipping, reissue the metadata bundle and complete player/volume lookup
 maps, regenerate the warmup plan for its new bundle digest, validate the full
 generation and player package, and test representative rendering. New numeric

@@ -355,9 +355,12 @@ def packs_enabled(choice, warmup_plan):
 
 
 def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False):
-    from pipeline_translation import MODES
+    from pipeline_translation import MODES, fragment_batch_size
     if translation not in MODES:
         raise ValueError('Unsupported preparation translation')
+    if translation != 'default':
+        import os
+        fragment_batch_size(os.environ)
     if type(shader_packs) is not bool or (shader_packs and warmup_plan is None):
         raise ValueError('Shader packs require an explicit observed phase plan')
     idle()

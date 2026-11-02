@@ -503,6 +503,89 @@ The experiment stays default-off, outside the shipped runtime patch. Main,
 published v0.2.2, tags, launcher/preparation defaults and CI are unchanged;
 development push uses `[skip ci]`.
 
+## Phase 198 - Review replay overlap and retain translated fragment progress (2026-11-02)
+
+The second packaged Phase 197 HSR replay contribution is reviewed against the
+expanded starter. All 1,951 records already occur in the 3,102-record baseline;
+there are zero additional records and zero conflicts. The contribution's
+canonical digest is `4530c155ff9c5224efc04f62cf43c789bd5178aea97862dbb2d215d1f3ad8bfe`.
+No records are promoted, so the template shards, program lookup maps and
+observed phase-plan bundle remain unchanged. This review is overlap evidence,
+not another native verification or whole-game coverage percentage.
+
+The actual gaps rank as follows for this thread: another identical HSR capture
+has no demonstrated marginal coverage; a new asset/shared-pass rule could scale
+but still needs its native applicability oracle; translated fragment checkpointing
+is a bounded, directly testable improvement now. `ConvoluteResampleX` at
+`00820488`, bound from `0081E048`, remains a lead. No profile is added without
+lookup, descriptor-edit and draw-packet evidence. Initialized LV/absent-resource
+rules remain explicit, and 349/1,497 conditional retained-link matches remain a
+different denominator from observed starter/runtime coverage. Archive-wide
+discovery and broader contribution settings likewise remain open.
+
+Additional native-scaled/ultrawide preparation now checkpoints each completed
+chunk of at most 256 distinct exact fragment requests, retaining duplicate-record
+joins and dither separation. Each chunk requires successful owned offline exit,
+the guest-entry guard, a complete result join, matching summary request count,
+valid source identifiers and bounded DXBC. A missing completion marker still
+rejects; its intermittent cause is not diagnosed here. Publication/checkpoint
+errors propagate instead of becoming compiler failures followed by more work.
+
+The content-addressed shader manifest and its checkpoint are saved before the
+progress hook polls cancellation. Resume revalidates manifest identity and every
+retained shader before skipping work; exact native keys and persisted driver
+blobs are still required before a player cache can be selected. The same ordering
+also retains the last accepted translated vertex at a publication cancellation.
+`GT5P_PREPARE_FRAGMENT_CHUNK=4096` restores the previous maximum batch size;
+values 1..4096 are supported, and an invalid value rejects before preparation
+starts for additional translations. Size changes on resume keep the same shader
+semantics/generation. Default-only batching remains at 4,096 requests.
+
+Sequential synthetic checks cover the 256/14 boundary, duplicate joins, result
+and completion-count rejection, cancellation, publication failures and invalid
+sizes before launch. Seven translation checks include corrupt/hard-linked shader
+rejection and early invalid-chunk rejection. A fresh 32-record original-packed-game
+native proof cancels after eight accepted fragment requests. Resume reuses all
+eight and every translated vertex; both ultrawide-native and native-scaled pass
+all 32 exact native keys and persistence. Default shader bytes and default-only
+rollback sidecars stay unchanged. This bounds repeated work after interruption;
+it is not a measured full-starter speed improvement. Smaller chunks add process
+startup overhead and an interrupted chunk can still repeat.
+
+A rebuilt frozen helper passes the same 32-record player path from original
+packed files under System32-only PATH. Real helper cancellation retains eight
+manifested fragment results while leaving the prior selected marker cache byte-identical;
+resume reuses all eight, creates/persists all 32 translated native pipelines,
+and switches selection only after success. A completed-cache rerun with the
+4,096-request rollback starts no fragment processes and reuses all 32 records.
+An invalid chunk size preserves selection and every translation-sidecar byte.
+This bounded frozen run takes 70.00 seconds including cancellation/resume and
+negative/reuse probes, with warm OS/driver caches; it is not a benchmark against
+the previous implementation. The build also passes all eight checksum and nine
+packed-reader checks.
+
+Initial harness attempts are retained as negative evidence. Reading an actively
+replaced checkpoint with ordinary Python opens can block Windows replacement;
+the harness now observes player status and reads the checkpoint after exit.
+An overly deep fixture path also exceeds the existing native reader path budget
+and rejects all 32 native requests safely. The harness preflights that budget
+and uses a shorter ignored output. Neither failure changes the old selection or
+justifies weakening native/marker validation. Production long-path support and
+intermittent missing completion-marker diagnosis remain separate work.
+
+Evidence in this isolated worktree: `scratch/expansion-198/review/`,
+`native/validation.json` and the rebuilt `helper/` under `scratch/expansion-198/`.
+The successful frozen evidence is `scratch/f198b/validation.json` and adjacent
+cancel/resume/cached/invalid-chunk logs. Earlier failed fixture outputs remain in
+`scratch/expansion-198/frozen*` and `scratch/f198/`.
+All validation/build/compiler operations own
+`Local\Tourline-Prologue-Isolated-Validation`, with process preflight and finally
+release. No shared runtime or other checkout is modified. Source/program/cache
+bytes stay ignored; every failed-run cache/evidence directory is preserved.
+No new settings/MSAA/asset-rule coverage, live rendering/stutter result, runtime
+draw-policy change or release follows. Push this feature branch with `[skip ci]`;
+main, the shared baseline branch and published v0.2.2 stay unchanged.
+
 ## Phase 197 - Real collection, packed lookup and verified starter expansion (2026-11-02)
 
 The frozen opt-in contribution command now has a real-player acceptance run.

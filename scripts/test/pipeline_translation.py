@@ -16,6 +16,13 @@ from shader_coverage import fp_identity
 
 
 class TranslationTests(unittest.TestCase):
+    def test_fragment_checkpoint_bounds_and_rollback(self):
+        self.assertEqual(translation.fragment_batch_size({}), 256)
+        self.assertEqual(translation.fragment_batch_size({'GT5P_PREPARE_FRAGMENT_CHUNK':'4096'}), 4096)
+        for value in ('0','4097','-1','1.0',' 256','',True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                translation.fragment_batch_size({'GT5P_PREPARE_FRAGMENT_CHUNK':value})
+
     def test_fragment_identity_normalizes_inline_constants(self):
         words = [1 | (0x17 << 24) | (7 << 17), 2, 0, 0]
         instruction = struct.pack('>4I', *[((w << 16) | (w >> 16)) & 0xffffffff for w in words])
@@ -47,6 +54,12 @@ class TranslationTests(unittest.TestCase):
     def test_invalid_mode_rejected_before_idle_or_output_changes(self):
         with patch('pipeline_template.idle') as idle, self.assertRaises(ValueError):
             pipeline_template.prepare(None, None, None, None, None, None, None, translation='invalid')
+        idle.assert_not_called()
+
+    def test_invalid_chunk_rejected_before_idle_or_output_changes(self):
+        with patch.dict(os.environ, GT5P_PREPARE_FRAGMENT_CHUNK='0'), patch('pipeline_template.idle') as idle:
+            with self.assertRaisesRegex(ValueError, 'GT5P_PREPARE_FRAGMENT_CHUNK'):
+                pipeline_template.prepare(None, None, None, None, None, None, None, translation='native-scaled')
         idle.assert_not_called()
 
     def test_derived_shader_identity_bounds_and_corruption(self):

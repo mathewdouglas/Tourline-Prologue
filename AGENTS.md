@@ -112,6 +112,19 @@ has the evidence, newest phase first (Phase 205 is the latest).
   checks pass. See docs/frame-hitch-diagnosis.md and progress. Runtime overlays
   remain explicit; no player defaults, async policy, release or CI change.
 
+- **Translated fragment checkpoints (Phase 198):** the second packaged replay's
+  1,951 records are all already in the 3,102-record starter, with zero additions
+  or conflicts. Starter/maps/plan stay unchanged. Additional scaled/ultrawide
+  preparation checkpoints verified 256-request fragment chunks before polling
+  cancellation; resume revalidates retained shaders. `GT5P_PREPARE_FRAGMENT_CHUNK=4096`
+  restores the old maximum batch size. A fresh 32-record packed-game proof retains
+  eight interrupted-session fragment results and passes both translations' exact
+  native keys/persistence plus default rollback. The frozen packed-game 32-record
+  player path also passes cancellation/resume, reuse and selection/source preservation.
+  No new asset/shared rule, whole-game coverage or stutter claim.
+  See progress for frozen evidence and limits; push this
+  isolated feature branch with `[skip ci]`. Runtime/main/release remain unchanged.
+
 - **Real community collection and expansion (Phase 197):** normal packaged
   launcher play exports 1,582 metadata-only HSR records; review finds 210 new
   unambiguous candidates. A bounded maintainer packed search verifies all 19 new

@@ -26,10 +26,13 @@ def _workspace(root, work_prefix):
     return child
 
 
-def compile_batch(jobs, root, cache, engine, game_root, translation='default', work_prefix=None):
+def compile_batch(jobs, root, cache, engine, game_root, translation='default', work_prefix=None,
+                  batch_size=4096, on_batch_ready=None, poll=None):
     from prepare_material_shaders import fragment_profile,save_code
     # Fixed mode only. Overlay is applied after offline_env, which clears inherited renderer settings.
     shader_translation.overlay(translation)
+    if type(batch_size) is not int or not 1 <= batch_size <= 4096:
+        raise ValueError('Fragment batch size must be between 1 and 4096')
     base = _workspace(root, work_prefix)
     started=time.perf_counter()
     groups=defaultdict(dict)
@@ -57,12 +60,14 @@ def compile_batch(jobs, root, cache, engine, game_root, translation='default', w
     code_bytes=0
     if work_prefix is not None:
         base.mkdir(exist_ok=True)
-    report=dict(mode='batch',translation=translation,requested_jobs=len(jobs),unique_requests=len(members),processes=0,batches=[])
+    report=dict(mode='batch',translation=translation,batch_size=batch_size,
+                requested_jobs=len(jobs),unique_requests=len(members),processes=0,batches=[])
     for dither,requests in sorted(groups.items()):
         items=sorted(requests.items())
-        for offset in range(0,len(items),4096):
-            chunk=items[offset:offset+4096]
-            work=base/f'fragment-batch-{dither}-{offset//4096}';work.mkdir(exist_ok=True)
+        for offset in range(0,len(items),batch_size):
+            if poll:poll()
+            chunk=items[offset:offset+batch_size]
+            work=base/f'fragment-batch-{dither}-{offset//batch_size}';work.mkdir(exist_ok=True)
             lines=[f'GT5P_FP_BATCH_V1 {len(chunk)}\n']
             for identity,(digest,raw,profile) in chunk:
                 path=work/(digest+'.fp')
@@ -91,6 +96,12 @@ def compile_batch(jobs, root, cache, engine, game_root, translation='default', w
                     rows[fields[0]]=fields[1:]
                 if set(rows)!=expected:
                     raise ValueError('Fragment batch result count mismatch')
+                summary=re.search(r'\[fp-batch\] finished: requests=(\d+) rejected=(\d+) compiled=(\d+) elapsed_ms=(\d+)',log)
+                if (not summary or int(summary[1]) != len(chunk) or
+                        not 0 <= int(summary[2]) <= len(chunk) or
+                        not 0 <= int(summary[3]) <= len(chunk)):
+                    raise ValueError('Fragment batch completion summary missing/inconsistent')
+                ready={}
                 for identity,(digest,raw,profile) in chunk:
                     try:
                         raw_hash,key,success=rows[identity]
@@ -102,11 +113,10 @@ def compile_batch(jobs, root, cache, engine, game_root, translation='default', w
                                 raise ValueError('Invalid/oversized fragment bytecode pool')
                             pool[key]=code;code_bytes+=len(code)
                         save_code(cache/(key+'.dxbc'),pool[key])
-                        for job_id in members[identity]:compiled[job_id]=(key,pool[key])
+                        for job_id in members[identity]:
+                            compiled[job_id]=(key,pool[key]);ready[job_id]=(key,pool[key])
                     except (ValueError,OSError) as exc:
                         for job_id in members[identity]:failures[job_id]=str(exc)
-                summary=re.search(r'\[fp-batch\] finished: requests=(\d+) rejected=(\d+) compiled=(\d+) elapsed_ms=(\d+)',log)
-                if not summary:raise ValueError('Fragment batch completion summary missing')
                 report['batches'].append(dict(requests=len(chunk),seconds=time.perf_counter()-begin,
                                              native_summary=list(map(int,summary.groups()))))
             except (ValueError,OSError,subprocess.SubprocessError) as exc:
@@ -114,6 +124,10 @@ def compile_batch(jobs, root, cache, engine, game_root, translation='default', w
                     for job_id in members[identity]:
                         compiled.pop(job_id,None);failures[job_id]=str(exc)
                 report['batches'].append(dict(requests=len(chunk),seconds=time.perf_counter()-begin,error=str(exc)))
+                continue
+            # Publication/cancellation failures belong to the caller. Do not turn
+            # them into per-request compiler failures or start another process.
+            if on_batch_ready and ready:on_batch_ready(ready)
     report.update(seconds=time.perf_counter()-started,prepared_jobs=len(compiled),failed_jobs=len(failures))
     (base/'fragment-preparation-report.json').write_text(json.dumps(report,indent=2)+'\n')
     return compiled,failures

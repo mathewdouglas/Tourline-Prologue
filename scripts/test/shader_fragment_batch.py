@@ -37,10 +37,10 @@ def fake(engine,game,env,log,timeout):
 
 with tempfile.TemporaryDirectory() as folder:
     root=Path(folder)
-    def run(name,callback=fake,items=jobs):
+    def run(name,callback=fake,items=jobs,**options):
         work=root/name;work.mkdir();cache=work/'shadercache';cache.mkdir()
         with patch('shader_fragment_batch.run_offline',side_effect=callback):
-            return compile_batch(items,work,cache,root/'engine',root)
+            return compile_batch(items,work,cache,root/'engine',root,**options)
     compiled,failures=run('good')
     assert not failures and set(compiled)=={j['id'] for j in jobs}
     assert compiled['first']==compiled['duplicate'] and compiled['first']!=compiled['other']
@@ -57,6 +57,47 @@ with tempfile.TemporaryDirectory() as folder:
     def missing_summary(*args,**kwargs):fake(*args,**kwargs);return ''
     compiled,failures=run('missing-summary',missing_summary)
     assert not compiled and len(failures)==4
+    published=[]
+    compiled,failures=run('missing-summary-publication',missing_summary,on_batch_ready=published.append)
+    assert not compiled and not published and len(failures)==4
+    def wrong_count(*args,**kwargs):
+        return fake(*args,**kwargs).replace('requests=2', 'requests=99').replace('requests=1', 'requests=99')
+    compiled,failures=run('wrong-summary-count',wrong_count,on_batch_ready=published.append)
+    assert not compiled and not published and len(failures)==4
+    published=[];polls=[]
+    compiled,failures=run('chunks',batch_size=1,on_batch_ready=lambda rows:published.append(dict(rows)),
+                          poll=lambda:polls.append(True))
+    assert not failures and len(published)==len(polls)==3
+    assert set().union(*(set(rows) for rows in published))=={j['id'] for j in jobs}
+    assert any(set(rows)=={'first','duplicate'} for rows in published)
+    many=[]
+    for index in range(270):
+        item=copy.deepcopy(job);item['id']=str(index);item['state']['cube']=index
+        many.append(item)
+    chunks=[]
+    compiled,failures=run('default-checkpoint-boundary',items=many,batch_size=256,
+                          on_batch_ready=lambda rows:chunks.append(len(rows)))
+    assert not failures and len(compiled)==270 and chunks==[256,14]
+    def cancel(rows):
+        published.append(dict(rows))
+        raise KeyboardInterrupt('Test cancel after verified chunk')
+    calls=[]
+    def counted(*args,**kwargs):calls.append(True);return fake(*args,**kwargs)
+    try:run('cancel-chunk',counted,batch_size=1,on_batch_ready=cancel)
+    except KeyboardInterrupt:pass
+    else:raise AssertionError('Cancellation swallowed')
+    assert len(calls)==1
+    def failed_publication(rows):raise ValueError('Checkpoint write failed')
+    calls.clear()
+    try:run('publication-error',counted,batch_size=1,on_batch_ready=failed_publication)
+    except ValueError as exc:assert str(exc)=='Checkpoint write failed'
+    else:raise AssertionError('Publication error swallowed')
+    assert len(calls)==1
+    for size in (0,4097,True,'2'):
+        with patch('shader_fragment_batch.run_offline',side_effect=AssertionError('Compiler started')):
+            try:run('invalid-size-'+str(size),batch_size=size)
+            except ValueError:pass
+            else:raise AssertionError('Invalid chunk size accepted')
     def timeout(*args,**kwargs):raise subprocess.TimeoutExpired('owned offline compiler',1)
     compiled,failures=run('timeout',timeout)
     assert not compiled and len(failures)==4
