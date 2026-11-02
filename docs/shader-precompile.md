@@ -45,6 +45,9 @@ The remaining work is:
    dealerships, menus, cameras and effects. Rank observed misses/shared programs
    so collection targets gaps rather than every car-track combination. The starter
    is a verified observed set, not a whole-game catalogue.
+   Phase 196 adds [metadata-only community contributions](pipeline-contributions.md):
+   users can collect complete candidate records, and maintainers can review and
+   locally verify additions. SHA-256 lists alone do not contain pipeline state.
 3. **Generate more from assets.** Recover material/shared-pass bindings and actual
    pass ownership/state so valid pipelines can be derived without observing every
    draw. Keep unknown bindings unresolved. This remains the main scaling path
@@ -74,6 +77,19 @@ settings, followed by the observed misses and costs it identifies. Stable featur
 should become defaults after appropriate validation, with rollback switches.
 Optional preparation remains a player choice. No zero-stutter or whole-game
 coverage promise follows from offline pipeline creation.
+
+### Community template contributions (Phase 196)
+
+The existing format-2 template already contains both program SHA-256 identities
+and complete numeric reconstruction inputs. Phase 196 adds an opt-in player
+collection/export command and a checked shareable envelope around those records.
+Only the exported JSON is shared; local original programs, HLSL, DXBC, driver
+blobs, captures, paths and logs are excluded. A renderer/game mismatch rejects.
+Maintainer review deduplicates and quarantines conflicting keys. New candidates
+must pass the ordinary original-asset shader/native preparation before the
+proof-gated merge command accepts them. No automatic submission installation or
+upload occurs. Full workflow, context limits and release requirements are in
+[pipeline contributions](pipeline-contributions.md).
 
 ### Repeating preparation after play (Phase 195)
 

@@ -30,6 +30,15 @@ Run tourline-prologue.exe --no-prepared to use the ordinary cache without deleti
 For the legacy unpacked-asset path, use tourline-prologue.exe --prepare-assets <folder>.
 Set GT5P_PREPARE_UI=0 to restore the Windows preparation dialog if needed.
 
+Optional pipeline template contribution:
+After ordinary setup and one normal launch, close the game and run
+Collect pipeline template.cmd. Use 720p/1080p, 16:9, anisotropy 16 and smooth
+colour; keep those settings while playing. Close normally to export the file.
+Send only share-this-template.json from the printed location. Never share the
+adjacent private-recorder folder, shadercache, game files or logs. Recording
+adds diagnostic I/O and requires at least 1 GiB free. Nothing is uploaded
+automatically. Contributions need maintainer verification before shipping.
+
 Settings, saves, shaders and logs are in your selected storage folder.
 The default is %LOCALAPPDATA%\GT5PRecomp.
   logs\play.out and logs\play.err contain startup diagnostics.

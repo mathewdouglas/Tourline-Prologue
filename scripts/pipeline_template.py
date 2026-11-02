@@ -214,7 +214,7 @@ def has_flow(code):
 
 
 def export(trace, cache, compat):
-    records, rejected, codes = {}, Counter(), set()
+    records, rejected, codes, conflicts = {}, Counter(), set(), set()
     for path in sorted(trace.glob('links_*.jsonl')):
         with path.open() as stream:
             for line in stream:
@@ -240,7 +240,11 @@ def export(trace, cache, compat):
                              fp=dict(sha256=f['identity'], size=f['size']), vs=c['vs'], ps=c['ps'],
                              vp_source=c['vp_cache'], fp_source=c['fp_cache'], vp_gpu=c['vp_gpu'],
                              state=c['state'], native=native_state(data))
+                    if key in conflicts:
+                        raise ValueError('Conflicting provenance for pipeline key')
                     if key in records and records[key] != r:
+                        records.pop(key)
+                        conflicts.add(key)
                         raise ValueError('Conflicting provenance for pipeline key')
                     records[key] = r
                     if len(records) > MAX_RECORDS:

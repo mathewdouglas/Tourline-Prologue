@@ -239,7 +239,14 @@ def main():
 
 
 if __name__=='__main__':
-    try:main()
+    try:
+        if '--export-contribution' in sys.argv[1:] or '--collect-contribution' in sys.argv[1:]:
+            from pipeline_contribution import player_main
+            if '--export-contribution' in sys.argv and '--collect-contribution' in sys.argv:
+                raise ValueError('Choose collection or export')
+            player_main([arg for arg in sys.argv[1:] if arg not in ('--export-contribution','--collect-contribution')],
+                        collect='--collect-contribution' in sys.argv)
+        else:main()
     except KeyboardInterrupt:
         print('Cancelled. Completed preparation is retained for resume.',flush=True);sys.exit(2)
     except Exception as exc:

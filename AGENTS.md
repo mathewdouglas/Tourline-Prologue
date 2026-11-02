@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 195)
+## Start here: state of play (2026-11-02, Phase 196)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 195 is the latest).
+has the evidence, newest phase first (Phase 196 is the latest).
 
 ### What works now
+
+- **Shareable pipeline contributions (Phase 196):** a checked metadata-only
+  JSON envelope carries existing version-2 vertex/fragment SHA-256 identifiers
+  and numeric state. Opt-in `Collect pipeline template.cmd` uses the existing
+  private recorder/normal launcher; only `share-this-template.json` is shared.
+  Default 720p/1080p 16:9 context only. Maintainer review deduplicates/quarantines
+  conflicts; acceptance requires local shader/native preparation proof. A frozen
+  launcher probe and an original-asset one-record export/rebuild/acceptance path
+  pass. This adds no new coverage or stutter claim; real-player collection remains
+  to be exercised before release. See docs/pipeline-contributions.md. Normal play,
+  shipped starter and published v0.2.2 are unchanged; push `[skip ci]`.
 
 - **Post-play preparation generations (Phase 195):** player generation identity
   includes the canonical warmup-plan hash. Unchanged completed preparations and

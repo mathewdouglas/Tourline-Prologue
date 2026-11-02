@@ -47,6 +47,7 @@ def main():
         put(package.ROOT / 'launcher/START-HERE.txt', b'Synthetic instructions\n')
         put(package.ROOT / 'launcher/Change storage.cmd', b'@echo off\n')
         put(package.ROOT / 'launcher/Prepare shaders.cmd', b'@echo off\n')
+        put(package.ROOT / 'launcher/Collect pipeline template.cmd', b'@echo off\n')
         helper=root/'helper'
         payloads={'GT5P-Prepare.exe':pe,'decoder.dll':pe,'volume_reader.dll':pe,'licenses/Python-LICENSE.txt':b'Synthetic license',
                   'licenses/PyInstaller-COPYING.txt':b'Synthetic license'}
@@ -112,6 +113,7 @@ def main():
             assert 'tourline-prologue.exe' in names and 'GT5P.exe' not in names
             assert 'Change storage.cmd' in names
             assert 'Prepare shaders.cmd' in names and 'preparation/GT5P-Prepare.exe' in names
+            assert 'Collect pipeline template.cmd' in names
             assert not any(n.startswith(('input/', 'gamedata/', 'shadercache/')) for n in names)
             assert not any(n.lower().endswith(('.elf', '.self', '.toml')) for n in names)
             assert all(b'sentinel' not in z.read(n) for n in names)

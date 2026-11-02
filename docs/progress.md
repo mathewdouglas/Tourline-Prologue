@@ -9,6 +9,74 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 196 - Metadata-only community pipeline contributions (2026-11-02)
+
+The referenced Helghast discussion predates/overlooks this fork's existing
+format-2 shareable templates. Both-stage SHA-256 identities, translation state,
+native descriptor/input layout, source/bytecode IDs and renderer/root-signature
+compatibility already exist. Hash lists alone cannot reproduce pipelines. The
+missing practical path was player collection, safe sharing, review and acceptance.
+
+`pipeline_contribution.py` adds version-1 `tourline-pipeline-contribution` JSON:
+only schema/version, canonical template SHA-256 and the validated format-2
+template. No path/annotation/source/binary fields are allowed. Unknown fields,
+duplicate JSON fields, checksum changes, nonfinite numbers, excessive nesting,
+incompatible contracts and oversized inputs reject. Bounds include 32 MiB total
+submission bytes, 16 submissions and the existing 4,096-record template union.
+This checksum is integrity metadata, not contributor authentication or proof.
+
+Review reuses the existing overlap analysis and conflict quarantine, producing
+only additional unambiguous candidate records plus a local review report.
+Baseline records remain intact. No key conflict is settled by upload order or
+majority. A local session's exporter now quarantines its first conflicting row
+as well as subsequent versions, rather than retaining the first one. Maintainer
+acceptance requires exact candidate-file identity, all successful native keys,
+driver inventory and full default-stage counts from their own preparation report.
+It writes a new merged template and never edits the shipped starter automatically.
+User-supplied reports are not trusted as local verification. New program lookup
+maps and a reissued phase plan/full package proof remain shipping prerequisites.
+
+The helper gains opt-in `--collect-contribution` / `--export-contribution`.
+`Collect pipeline template.cmd` is added to the package allowlist. Collection
+reads the same storage selection, checks supported default settings and the
+installed game/template contract before launch, then starts the ordinary launcher
+with the existing local recorder enabled only for that child. The launcher owns
+game/job/locks/restarts as before; async policy is unchanged and no other game is
+stopped. After normal exit and unchanged settings, the helper exports one
+`share-this-template.json`. No upload, cache selection or deletion occurs. Private
+recordings remain in the adjacent private-recorder folder and must not be shared.
+Collection requires 1 GiB free, an ASCII recorder path under 448 characters and
+uses a 4,096-link limit. Current collection rejects ultrawide/scaled translation,
+anisotropy/precision overrides and unsupported settings. Recorder I/O is diagnostic;
+unsupported/branching/missing recipe joins remain excluded. No session-wide
+percentage or readiness claim is derived from the export.
+
+Synthetic checks pass schema/privacy/size/depth/duplicate-field rejection,
+incompatible contracts, cross-submission and same-session conflicts, known/new
+record deduplication, exact local proof gating, preserved output/input files,
+storage lookup, opt-in child environment and unchanged async settings. Existing
+template/coverage/pack/package checks pass sequentially. A rebuilt frozen helper
+exports a single retained record through a constructed local recorder fixture,
+whose original VP/FP programs are resolved from the verified packed game. Review
+finds exactly the deliberately omitted baseline record; fresh preparation compiles
+both stages, reproduces its key, creates/persists one native pipeline, and the
+proof-gated accepted union matches every original starter record. This is a
+workflow/reconstruction check, not a new player capture or additional coverage.
+
+The frozen collection command also passes with a small native launcher probe:
+unsupported settings reject before launch; supported collection discovers the
+selected storage, propagates the private recorder, preserves async settings and
+exports the expected record while cache/settings bytes stay unchanged. No real
+game or GPU device is launched by that probe. Real-player collection and broader
+context acceptance remain to be exercised before release. The repository gets a
+manual metadata-contribution issue template; no issue/message is sent by tools.
+
+Evidence: `scratch/contributions-196/validation.json`, `community-one.json`,
+`review/`, `native-proof/`, `accepted-template.json`, `collector-native/` and the
+private constructed recorder fixture. Those original program bytes stay ignored.
+See docs/pipeline-contributions.md for player and maintainer commands. Shipped
+starter, main/tag/release and normal play are unchanged. Push with `[skip ci]`.
+
 ## Phase 195 - Preserve learned caches when repeating preparation (2026-11-02)
 
 Review of Grok's Phase 194 default/release integration reproduced two workflow

@@ -145,7 +145,8 @@ def main():
              'LICENSE.txt': regular(ROOT / 'LICENSE'),
              'START-HERE.txt': regular(ROOT / 'launcher/START-HERE.txt'),
              'Change storage.cmd': regular(ROOT / 'launcher/Change storage.cmd'),
-             'Prepare shaders.cmd': regular(ROOT / 'launcher/Prepare shaders.cmd')}
+             'Prepare shaders.cmd': regular(ROOT / 'launcher/Prepare shaders.cmd'),
+             'Collect pipeline template.cmd': regular(ROOT / 'launcher/Collect pipeline template.cmd')}
     files.update(preparation_files(args.preparer_dir))
     files.update(template_files())
     for name in RUNTIME:
