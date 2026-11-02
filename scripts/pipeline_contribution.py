@@ -15,6 +15,7 @@ import subprocess
 import uuid
 
 import pipeline_template as template
+from pipeline_catalogue_limits import SESSION_RECORDS
 from pipeline_runtime_coverage import parse_report
 from preparation_reuse import cache_root, regular_read
 
@@ -41,11 +42,12 @@ def _object(pairs):
     return result
 
 
-def read_json(path):
+def read_json(path, max_bytes=None):
+    if max_bytes is None:max_bytes=MAX_BYTES
     path=Path(path).absolute()
     cache_root(path.parent)
     try:
-        data=regular_read(path,MAX_BYTES)
+        data=regular_read(path,max_bytes)
         depth=0;quoted=escaped=False
         for byte in data:
             if quoted:
@@ -64,12 +66,18 @@ def read_json(path):
 
 
 def encode(document):
+    _session_bound(document)
     document=template.validate(copy.deepcopy(document))
-    if not document['records']:raise ValueError('No supported pipeline records to share')
+    if not document['records'] or len(document['records']) > SESSION_RECORDS:raise ValueError('No supported pipeline records to share')
     document['records'].sort(key=lambda r:r['key'])
     result=dict(schema=SCHEMA,version=VERSION,template_sha256=digest(document),template=document)
     if len(canonical(result))>MAX_BYTES:raise ValueError('Contribution exceeds its byte limit')
     return result
+
+
+def _session_bound(document):
+    if isinstance(document,dict) and isinstance(document.get('records'),list) and len(document['records']) > SESSION_RECORDS:
+        raise ValueError('Contribution session record limit exceeded')
 
 
 def decode(value):
@@ -77,19 +85,21 @@ def decode(value):
             or value['schema']!=SCHEMA or type(value['version']) is not int or value['version']!=VERSION
             or not isinstance(value['template_sha256'],str) or not re.fullmatch('[0-9a-f]{64}',value['template_sha256'])):
         raise ValueError('Unsupported contribution format/version')
+    _session_bound(value['template'])
     document=template.validate(copy.deepcopy(value['template']))
-    if not document['records'] or digest(document)!=value['template_sha256']:
+    if not document['records'] or len(document['records']) > SESSION_RECORDS or digest(document)!=value['template_sha256']:
         raise ValueError('Contribution checksum or record count rejected')
     return document
 
 
-def write_json(path, value):
+def write_json(path, value, max_bytes=None):
     """Exclusive metadata-only publication; preserve an existing output."""
+    if max_bytes is None:max_bytes=MAX_BYTES
     path=Path(path).absolute()
     if path.suffix.lower()!='.json':raise ValueError('Choose a .json output')
     cache_root(path.parent)
     data=canonical(value)+b'\n'
-    if len(data)>MAX_BYTES:raise ValueError('Metadata output exceeds its byte limit')
+    if len(data)>max_bytes:raise ValueError('Metadata output exceeds its byte limit')
     with path.open('xb') as stream:
         try:stream.write(data)
         except BaseException:
@@ -264,12 +274,12 @@ def main():
         output=require_output(args.output)
         output.mkdir()
         write_json(output/'review.json',report)
-        write_json(output/'candidates.json',candidates)
+        write_json(output/'candidates.json',candidates,template.MAX_FILE)
         print(json.dumps(dict(candidates=report['additional_records'],conflicts=len(report['quarantined_conflicts']))))
     else:
         candidates=template.read(args.candidates)
-        result=accept(template.read(args.baseline),candidates,args.candidates,read_json(args.proof))
-        write_json(args.output,result)
+        result=accept(template.read(args.baseline),candidates,args.candidates,read_json(args.proof,template.MAX_FILE))
+        write_json(args.output,result,template.MAX_FILE)
 
 
 if __name__=='__main__':main()

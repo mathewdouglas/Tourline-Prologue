@@ -19,11 +19,12 @@ from shader_reconstruct import NativeCompiler, vertex_programs, word_swap, offli
 from prepare_material_shaders import compile_fragments, save_code, source_key, request_envelope
 from train_pipeline_cache import isolated, idle, inventory, validate_recipe, save_report
 
+from pipeline_catalogue_limits import MAX_RECORDS, MAX_FILE, MAX_PARTS, MAX_INDEX, SHARD_RECORDS, SESSION_RECORDS
+from pipeline_native_batch import run_batches
+
 SCHEMA = 'gt5p-pipeline-template'
 VERSION = 2
 SETTINGS = {'RSX_ANISO': '16', 'RSX_PSO_KEY_RS': '1', 'FP_CONSTBUF': '1'}
-MAX_RECORDS = 4096
-MAX_FILE = 32 * 1024 * 1024
 STATE = {'blend', 'nrt', 'rtfmt', 'exp32', 'cmask', 'cull', 'stencil',
          'unnorm', 'cube', 'vmask', 'samplers', 'ghi', 'shd', 'unhi'}
 HEX = re.compile('[0-9a-f]{16}')
@@ -145,9 +146,9 @@ def merge(documents):
 
 def read(path):
     if path.is_dir():
-        index = json.loads(bounded_read(path / 'index.json', 65536))
+        index = json.loads(bounded_read(path / 'index.json', MAX_INDEX))
         if (set(index) != {'schema','version','parts'} or index['schema'] != SCHEMA + '-bundle' or
-                index['version'] != VERSION or not isinstance(index['parts'],list) or not 1 <= len(index['parts']) <= 32):
+                index['version'] != VERSION or not isinstance(index['parts'],list) or not 1 <= len(index['parts']) <= MAX_PARTS):
             raise ValueError('Incompatible template bundle')
         documents, seen, total = [], set(), 0
         for part in index['parts']:
@@ -166,7 +167,7 @@ def read(path):
 def template_digest(path):
     if path.is_dir():
         # read() separately verifies every referenced part checksum.
-        return sha(bounded_read(path / 'index.json',65536))
+        return sha(bounded_read(path / 'index.json',MAX_INDEX))
     return sha(bounded_read(path,MAX_FILE))
 
 
@@ -177,13 +178,15 @@ def bundle(document, output):
     parts = []
     payloads = []
     records = document['records']
-    for start in range(0,max(1,len(records)),128):
+    for start in range(0,max(1,len(records)),SHARD_RECORDS):
         name = f'part-{len(parts):04d}.json'
-        data = (json.dumps(dict(document,records=records[start:start+128]),separators=(',',':'))+'\n').encode()
+        data = (json.dumps(dict(document,records=records[start:start+SHARD_RECORDS]),separators=(',',':'))+'\n').encode()
         if len(data) > 1_000_000:
             raise ValueError('Metadata shard exceeds repository text limit')
         parts.append(dict(file=name,sha256=sha(data)))
         payloads.append((name,data))
+    if len(parts) > MAX_PARTS or sum(len(data) for _, data in payloads) > MAX_FILE:
+        raise ValueError('Template bundle size/part limit exceeded')
     output.mkdir(parents=True)
     for name,data in payloads:
         (output/name).write_bytes(data)
@@ -247,11 +250,11 @@ def export(trace, cache, compat):
                         conflicts.add(key)
                         raise ValueError('Conflicting provenance for pipeline key')
                     records[key] = r
-                    if len(records) > MAX_RECORDS:
+                    if len(records) > SESSION_RECORDS:
                         raise ValueError('Template record limit exceeded')
                 except (ValueError, OSError, KeyError) as exc:
                     rejected[str(exc).split(':')[0]] += 1
-    if len(records) > MAX_RECORDS:
+    if len(records) > SESSION_RECORDS:
         raise ValueError('Template exceeds record cap')
     return validate(dict(schema=SCHEMA, version=VERSION, compatibility=compat, records=list(records.values()))), dict(rejected)
 
@@ -648,12 +651,12 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
             requests.append(job['id'])
         except ValueError as exc:
             report['records'].append(dict(key=r['key'], status='incompatible', reason=str(exc)))
-    (root / 'jobs.txt').write_text(''.join(i + '\n' for i in requests))
     if requests:
         checkpoint.stage('native',requested=len(requests))
         env = offline_env(game_root, cache)
         env.update(RSX_PSO_PREPARE_BATCH=str(root), RSX_PSO_TEMPLATE_PREPARE='1', RSX_PSO_RECIPE_KEEP_DAYS='0')
-        run_offline(engine, game_root, env, output / 'native.log', timeout=900)
+        run_batches(requests, root, engine, game_root, env, output/'native.log', run_offline,
+                    lambda done, total: checkpoint.stage('native', completed=done, requested=total))
     for identity in requests:
         r = by_id[identity][0]
         result = json.loads((root / identity / 'pipeline/result.json').read_text())

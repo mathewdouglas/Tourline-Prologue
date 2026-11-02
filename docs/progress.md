@@ -9,6 +9,48 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 200 - Bounded catalogue growth after dealership collection (2026-11-03)
+
+The first user dealership session exported 1,484 metadata records, excluding three
+branching vertex contexts. Normal review initially hit the 4,096-record template
+cap. With this change the same review reports 1,348 additional candidates, 136
+known records, zero conflicts and a proposed union of 4,450. There are 90 new VP
+and 329 FP identities. Shader/native proof remains pending: the starter stays
+3,102 records, with no map, warmup-plan or compatibility identity change.
+
+Catalogue metadata now permits 65,536 records, 512 shards of 128 records, a
+128 KiB index and 128 MiB total payload. Existing bundle bytes/checksums/schema
+remain valid. Asset maps permit two locations per catalogue record, bounded to
+64 MiB. Preparation report readers scale separately from live diagnostic limits.
+Collection remains 4,096 records/session, with 32 MiB combined review input.
+
+Default and additional-translation native preparation now issue sequential
+manifests of at most 4,096 requests, retaining the native runtime limit. Each
+chunk requires successful completion counts; per-record exact keys and final
+cache persistence remain required. Translation counters aggregate across chunks.
+Cancellation/progress is checked between chunks; native.log remains the first
+log, with numbered later logs. No runtime/default/draw-policy change.
+
+All checks own Local\Tourline-Prologue-Isolated-Validation with process preflight
+and finally release. An 8,193-row metadata round trip spans 65 shards. A stubbed
+8,500-request native run partitions exactly as 4,096/4,096/308 with aggregate
+counts and separate logs; cancellation stops after one chunk and incomplete
+completion rejects. Template, contribution, coverage, runtime-report, translation,
+asset-map and synthetic player-package regressions pass. An initial contribution
+regression caught a captured default byte-bound argument; dynamically selecting
+the default restores the configurable guard. Real test-1 normal review passes.
+
+Private evidence: scratch/dealership-collection-20261103/review-test1 and the
+original share file, SHA256
+9c9a00f6b5acd7817178994a9250bbf33f4850ed17a3595ff74750cbcffc7939.
+Large native chunk execution is stub-verified, not a new 8,500-pipeline native or
+frozen-helper acceptance. Worker, shader-pool, checkpoint-tree, warmup/pack and
+residency budgets remain independent and may reject large preparations; no full
+65,536-row execution claim. Next locate the 419 new original programs, prove
+candidate shaders/native keys, reissue coherent maps/plan and validate rendering
+before acceptance. GT5 needs its own verified game/renderer contract. No release,
+main/tag merge, CI build, cache removal or whole-game coverage claim. Push [skip ci].
+
 ## Phase 199 - Frame-correlated allocation hitches and bounded texture retention (2026-11-02)
 
 This work uses the isolated `feature/lod-camera-stutter` worktree at shared base

@@ -1,5 +1,13 @@
 # Contributing pipeline templates
 
+The development merged catalogue permits 65,536 records / 128 MiB, independently
+of the existing 4,096-record collection-session and 32 MiB submission budgets.
+Collect additional sessions as needed; review and original-asset/native proof
+remain mandatory. The catalogue ceiling is not a count of verified shaders,
+full-game coverage, or a promise to prepare that many within current worker,
+memory and checkpoint budgets. Prologue and GT5 require separate compatibility
+contracts.
+
 Tourline already ships a version-2 template with vertex/fragment SHA-256
 identifiers and numeric translation/native pipeline state. A list of hashes
 alone cannot reproduce a pipeline: the same programs can be used with different

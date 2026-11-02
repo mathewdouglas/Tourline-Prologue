@@ -5,6 +5,22 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Catalogue growth (Phase 200) supports up to 65,536 metadata records, 512 shards
+of 128 records, and 128 MiB total payload. These are safety ceilings, not a
+coverage target or a measured full-catalogue preparation capacity. Native jobs
+are issued sequentially in at most 4,096-request processes in both default and
+additional translation paths. Each chunk must confirm completion; per-record
+native-key and persisted-cache checks still follow. Existing small-run log paths
+remain unchanged; later chunks use `native-0001.log`, etc.
+
+Other execution budgets remain: vertex workers, shader bytecode pools, checkpoint
+tree entries, packed search, warmup plans, runtime residency and pack sizes are
+bounded independently. A large catalogue may hit one of those explicit guards;
+it does not imply every entry is resident or warmed. Collection sessions retain
+their 4,096-record / 32 MiB limits. Further growth should follow measured resource
+use rather than raising every runtime limit together. GT5 requires a separately
+validated game/ELF/renderer contract; Prologue templates do not establish GT5 support.
+
 The core mechanism works: a portable template identifies programs and numeric
 pipeline state, and preparation reconstructs/verifies both shaders and native
 pipelines from the user's own assets. Remaining work is breadth, performance and

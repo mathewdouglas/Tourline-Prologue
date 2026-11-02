@@ -27,13 +27,15 @@ import re
 import subprocess
 import sys
 
+from pipeline_catalogue_limits import MAX_RECORDS
+
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = 'gt5p-pipeline-runtime-coverage'
 VERSION = 1
 MAX_LOG = 32 * 1024 * 1024
-MAX_REPORT = 32 * 1024 * 1024
+MAX_REPORT = 128 * 1024 * 1024
 MAX_LINE = 4096
-MAX_RECORDS = 4096
+MAX_PREPARED_KEYS = 2 * MAX_RECORDS
 MAX_KEYS = 16384
 MAX_PENDING = (1 << 63) - 1
 MAX_TEXT = 2000
@@ -278,7 +280,7 @@ def parse_report(document):
         raise Rejected('preparation report is missing default-stage driver inventory; coverage ratio withheld')
     blobs = inventory['valid_driver_blobs']
     rejected = inventory['rejected']
-    if not isinstance(blobs, list) or len(blobs) > MAX_KEYS or not isinstance(rejected, list) or rejected:
+    if not isinstance(blobs, list) or len(blobs) > MAX_PREPARED_KEYS or not isinstance(rejected, list) or rejected:
         raise Rejected('preparation driver inventory is rejected or over its bound; coverage ratio withheld')
     blob_ids = {_hex16(item, 'driver blob id') for item in blobs}
     prepared, seen = [], set()
@@ -309,7 +311,7 @@ def parse_report(document):
     if 'additional_translation' in document:
         translation = _translation(document['additional_translation'], set(prepared))
         translated = translation['keys']
-    if len(set(prepared) | translated) > MAX_KEYS:
+    if len(set(prepared) | translated) > MAX_PREPARED_KEYS:
         raise Rejected('successful preparation keys exceed their bound; coverage ratio withheld')
     return dict(default_keys=prepared, translation=translation, translated_keys=translated,
                 driver_blobs=len(blob_ids),

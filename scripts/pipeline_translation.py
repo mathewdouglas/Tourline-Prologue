@@ -11,6 +11,7 @@ import time
 
 from shader_coverage import bounded_read, fnv64
 from preparation_checkpoint import Checkpoint
+from pipeline_native_batch import run_batches
 from preparation_reuse import regular_read
 from prepare_material_shaders import save_code
 from train_pipeline_cache import inventory, save_report
@@ -220,17 +221,13 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
                 seen[row['key']] = identity
             derived.append(dict(template_key=record['key'], key=row['key'],
                                 vp_source=row['vp_source'], fp_source=row['fp_source']))
-        (native_root/'jobs.txt').write_text(''.join(i+'\n' for i in requests))
         native_counts = None
         if requests:
             env = offline_env(game_root, cache)
             env.update(RSX_PSO_PREPARE_BATCH=str(native_root), RSX_PSO_TEMPLATE_PREPARE='1',
                        RSX_PSO_RECIPE_KEEP_DAYS='0')
-            log = runner(engine, game_root, env, root/'native.log', timeout=900)
-            match = re.search(r'\[pso-material-batch\] valid=1 requests=(\d+) created=(\d+) driver_calls=(\d+) cached_blob_calls=(\d+)', log)
-            if not match or list(map(int, match.groups()[:2])) != [len(requests)]*2:
-                raise ValueError('Derived native batch completion was not confirmed')
-            native_counts = list(map(int, match.groups()))
+            native_counts = run_batches(requests, native_root, engine, game_root, env, root/'native.log', runner,
+                lambda done, total: stage('translation-native', completed=done, requested=total))
         for row in derived:
             result = json.loads(bounded_read(native_root/seen[row['key']]/'pipeline/result.json', 65536))
             if not result.get('created') or result.get('actual') != result.get('expected') or result['actual'] != row['key']:

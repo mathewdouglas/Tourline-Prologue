@@ -7,7 +7,7 @@ import struct
 import sys
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from pipeline_template import validate, envelope, native_state, has_flow, SCHEMA, VERSION, SETTINGS, merge, bundle, read, prepare, renderer_contract
+from pipeline_template import validate, envelope, native_state, has_flow, SCHEMA, VERSION, SETTINGS, merge, bundle, read, prepare, renderer_contract, MAX_RECORDS
 from prepare_material_shaders import request_envelope
 
 data = bytearray(request_envelope(b'DXBC', b'DXBC'))
@@ -46,7 +46,7 @@ reject(lambda x:x['records'][0]['native']['words'].__setitem__(140,33))
 reject(lambda x:x['records'][0]['native']['words'].__setitem__(24,1))
 reject(lambda x:x['records'][0]['native']['inputs'][0].__setitem__(0,-1))
 reject(lambda x:x['records'].append(dict(copy.deepcopy(r),ps='f'*16)))
-reject(lambda x:x.update(records=[r]*4097))
+reject(lambda x:x.update(records=[r]*(MAX_RECORDS+1)))
 end=struct.pack('<4I',0,0,0,1)
 assert not has_flow(end)
 assert has_flow(struct.pack('<4I',0,8<<27,0,1))
@@ -99,7 +99,7 @@ starter=ROOT/'assets/pipeline-templates/gt5p-disc-v2'
 if starter.exists():
     metadata=read(starter)
     assert metadata['compatibility']['renderer_sha256']==renderer_contract()
-    assert len(metadata['records'])<=4096
+    assert len(metadata['records'])<=MAX_RECORDS
     print('Bundled starter metadata matches the current renderer contract')
     if (starter/'asset-map.json').exists():
         from pipeline_asset_map import read as read_map

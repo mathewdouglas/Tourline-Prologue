@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 199)
+## Start here: state of play (2026-11-03, Phase 200)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 199 is the latest).
+has the evidence, newest phase first (Phase 200 is the latest).
 
 ### What works now
+
+- **Catalogue growth (Phase 200):** metadata allows 65,536 records / 512 shards /
+  128 MiB independently of 4,096-record collection sessions and native process
+  manifests. Sequential native chunks preserve runtime bounds. An 8,193-row
+  round trip and 8,500-job stub partition/cancel/reject proof pass, with focused
+  regressions. Dealership test-1 review finds 1,348 new candidates, zero conflicts,
+  proposed union 4,450. Original-asset shader/native acceptance remains pending;
+  starter stays 3,102. Other execution guards remain independent; full ceiling
+  execution and GT5 support are not claimed. See Phase 200.
 
 - **Bounded texture retention experiment (Phase 199):** separate default-off
   `RSX_TEX_LRU=1` overlay retains recently used textures within the existing

@@ -14,10 +14,13 @@ import time
 from shader_coverage import MAX_FP, bounded_read, fp_identity, fnv64
 from shader_reconstruct import word_swap
 
+from pipeline_catalogue_limits import MAX_RECORDS as MAX_PIPELINES
+
 SCHEMA = 'gt5p-program-locations'
 MAX_FILES = 8192
 MAX_CONTAINER = 1024**3
-MAX_RECORDS = 8192
+MAX_RECORDS = 2 * MAX_PIPELINES
+MAX_MAP_BYTES = 64 * 1024**2
 
 
 def digest(data):
@@ -58,7 +61,7 @@ def validate(document):
 
 
 def read(path):
-    return validate(json.loads(bounded_read(path,4*1024**2)))
+    return validate(json.loads(bounded_read(path,MAX_MAP_BYTES)))
 
 
 def merge(documents):
