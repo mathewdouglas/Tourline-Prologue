@@ -19,47 +19,722 @@ the older v0.2 package retains its earlier unpacked-asset selection.
 Broader coverage, settings/GPU validation
 and a consistent live stutter benefit remain separate requirements.
 
-1. **Broaden representative coverage.** Merge templates from other tracks,
-   dealerships, menus, cars and cameras. Report each session's additional and
-   shared programs/state so further collection targets useful gaps rather than
-   every car-track combination. Phase 170 adds reporting and the first session
-   expansion; broader unvisited content remains open.
-2. **Generate more directly from assets.** Extend material/shared-pass rules to
-   derive valid pipelines without observing every draw. Recover bindings and
-   actual pass state instead of multiplying every shader by every possible state.
-   This is the main scaling path toward GT5.
-3. **Support missing contexts/settings.** Recover branching vertex context and
-   relevant renderer-setting/root-signature combinations. Reject incompatible
-   entries safely and leave unsupported cases on the existing demand path.
-4. **Make preparation efficient and resumable.** Reduce repeated compiler-process
-   startup, reuse verified results, support cancellation/resume, and bound CPU,
-   memory and storage. Phase 172 makes exact batching the developer default and
-   adds verified template resume; launcher cancellation still needs refinement.
-   Phase 176 adds verified reuse across template/engine generations, so extending
-   a catalogue need not recompile unchanged shaders. Cancellation/resume is also
-   available through the optional Phase 173 player entry.
-5. **Demonstrate consistent stutter reduction.** Fewer runtime shader compiles have
-   not yet produced a consistent frame-time win. Separate driver creation, cache
-   reads, scheduling and unrelated game work; load prepared resources at useful
-   times without expensive blanket startup scanning.
-6. **Integrate the launcher.** Detect game/version and supported settings, show
-   progress, support cancellation/resume, and handle cache compatibility. Ship
-   metadata only; shader contents and GPU-specific binaries remain local.
-   Phase 173 implements an optional standalone player path with manual unpacked
-   asset selection. Phase 178 removes that additional extraction for the supported
-   original disc volume. Phase 181 adds a preparation window matching PC Settings,
-   with real per-step status and the existing owned cancellation/resume path;
-   wider settings support and broader acceptance remain open.
-7. **Validate the complete player path.** Exercise fresh caches, multiple GPUs,
-   settings changes and representative routes. Measure loading time, memory,
-   actual preparation hits and hitches; inspect rendering before enabling any
-   default. No zero-stutter or complete-coverage promise follows from creation.
+Current development builds already provide direct packed-game reads, both-stage
+reconstruction and native-key verification, bounded default batching, cancellation/
+resume, verified incremental reuse, first-run Prepare/Skip, progress UI and settings
+restart. Phase 188 makes supported settings selection automatic inside optional
+preparation. The published v0.2.1 release predates these latest development changes.
 
-The immediate order is broader coverage reporting/session merging, then fixing
-the measured performance bottleneck. GT5 additionally needs its asset formats
-and rendering contexts verified; GT5P's template does not supply GT5 coverage.
+The remaining work is:
+
+1. **Prove live use and reduce stutters.** Check that the selected translation's
+   prepared files are found at runtime and that useful pipelines become resident
+   before their first draw. Separate shader compiles from driver pipeline creation,
+   file reads and unrelated game work. Measure preparation hits, demand builds,
+   frame-time hitches, loading time and memory on repeatable routes, and inspect
+   screenshots. Existing trials have not established a consistent stutter benefit;
+   blanket startup scanning must not become a default on assumption alone.
+   Phase 192 measures 99.7% prepared-key coverage on one HSR route; native
+   first-use readiness, early rendering transients and consistent stutter
+   reduction remain open.
+   Phase 193 feeds observed phase membership to the existing worker: one
+   same-cache HSR pair reduces demand jobs from 2,336 to 169, with a smaller
+   early p99 improvement and no later p99 improvement. Keep it experimental;
+   repeat acceptance and the reported mirror reflection/LOD hitch remain open.
+2. **Broaden representative coverage.** Add useful missing tracks, cars,
+   dealerships, menus, cameras and effects. Rank observed misses/shared programs
+   so collection targets gaps rather than every car-track combination. The starter
+   is a verified observed set, not a whole-game catalogue.
+3. **Generate more from assets.** Recover material/shared-pass bindings and actual
+   pass ownership/state so valid pipelines can be derived without observing every
+   draw. Keep unknown bindings unresolved. This remains the main scaling path
+   toward GT5; GT5 also needs its own asset formats and rendering contexts verified.
+   Phases 189-191 add built-in fallbacks, explicit initialized LV depth resources
+   and separately selectable environment absence. The environment publication
+   gate/gamma write is measured; its live nonnull-owner assignment and complete
+   pass ownership remain unresolved. These rules do not enlarge the shipped starter.
+4. **Complete settings and context support.** Cover remaining MSAA, anisotropy,
+   precision, root-signature, branching-vertex and pass/attachment combinations.
+   Automatic selection currently handles supported translation modes only; custom
+   overrides and non-ASCII storage paths conservatively fall back. Rebuilding
+   known keys does not prove every combination used by a setting is covered.
+5. **Reduce remaining preparation costs.** Avoid repeated asset lookup and
+   per-pipeline shader staging, retain more fragment progress across cancellation,
+   extend verified reuse where measured costs justify it, and diagnose intermittent
+   missing offline-completion markers while keeping rejection strict. Preserve byte limits,
+   process/queue ownership, cancellation and safe compatibility rejection.
+6. **Finish acceptance and release integration.** Validate representative routes
+   and settings changes across additional GPUs/drivers, complete packaged-player
+   checks and document actual limits. The launcher/preparer mechanics are already
+   implemented; merging/releasing the latest development work is a separate step.
+   Ship metadata only, keeping game-derived programs/source/binaries local.
+
+The next practical priority is runtime hit/residency measurement for the supported
+settings, followed by the observed misses and costs it identifies. Stable features
+should become defaults after appropriate validation, with rollback switches.
+Optional preparation remains a player choice. No zero-stutter or whole-game
+coverage promise follows from offline pipeline creation.
+
+### Local bytecode packs before first use (Phase 194)
+
+Native pipeline warming does not remove the need to obtain shader bytecode
+before forming a draw's native key. The runtime already keeps source-keyed
+menu/race bytecode packs, but previously learned them during play. Phase 193's
+first indexed route starts with both packs empty. Its sampled `dxbc` timing
+includes cached-bytecode lookup, allocation and possible compilation; it is
+not a shader-compilation counter or an isolated disk-read measurement.
+
+The player helper now builds those packs for translation `default` only
+(720p/1080p 16:9, including the first-run preset). It uses the bundled plan
+`config/pipeline-warmup/gt5p-disc-v2.json`, which the preparer packages beside
+the other config data. `native-scaled` and `ultrawide-native` do not take a
+phase plan. The preparation directory token mixes `shader-packs-v1` when packs
+are on, so an older unpacked generation stays on disk and can be imported.
+Developer `pipeline_template.py prepare --warmup-plan` builds packs unless
+`--no-shader-packs` is set. `--shader-packs` without a plan still rejects.
+The library `prepare(..., shader_packs=False)` default is unchanged.
+
+After successful native preparation the builder selects both vertex and fragment
+source identifiers for that plan's default-template targets. Every local DXBC
+file must match the template's bytecode hash and length. Conflicting mappings,
+missing, corrupt, redirected or hard-linked files reject. Source identifiers
+are not interchangeable with bytecode hashes. No shader bytes or packs are
+distributed.
+
+The builder uses the existing `GT5PSPK1` format and existing loading hooks,
+without another worker or a change to async draws, queue ownership or shutdown.
+Per-scope payload is capped at the runtime's default 64 MiB and 12,288 entries;
+the union is at most 128 MiB, plus one bounded file-read buffer/metadata. Work is
+sequential and polled for cancellation and a 60-second time budget. Inputs are
+verified before either pack publishes. Unique temporary files are cleaned on
+failure; completed packs remain. Existing learned packs are preserved/rejected;
+resume accepts byte-identical generated packs and can finish partial publication.
+The format version is pinned in the preparation checkpoint. The current runtime
+reader does not authenticate pack payloads itself: the builder verifies bytes
+before writing, as for the other local cache data. Do not replace those files
+with untrusted packs or treat the format as a transport/security boundary.
+
+Both stages are included: the current plan generates 145 menu and 1,873 race
+entries (1,978 distinct source keys), about 2.1/25.3 MiB of bytecode. The native
+test compiles the actual runtime reader and checks every lookup against expected
+bytecode identities, missing-key fallback, caller reference ownership across
+scope changes, and `RSX_SHADER_PACK=0` rollback. It creates no GPU device/game.
+
+```powershell
+# A fresh developer command with a plan now writes packs.
+# Append --no-shader-packs to keep membership without packs.
+# Or create packs alone in a separate locked ignored output, reading an idle cache:
+python scripts/preparation_shader_pack.py `
+  --template assets/pipeline-templates/gt5p-disc-v2 `
+  --plan config/pipeline-warmup/gt5p-disc-v2.json `
+  --report <successful-generation/report.json> `
+  --cache <successful-generation/shadercache> --output scratch/local-pack-proof
+python scripts/test/shader_stutter.py `
+  --fixture <private-fixture> --engine <isolated-engine> `
+  --prepared <generation-without-packs/shadercache> `
+  --coverage-report <generation-without-packs/report.json> `
+  --warmup-plan config/pipeline-warmup/gt5p-disc-v2.json `
+  --shader-pack-template assets/pipeline-templates/gt5p-disc-v2 `
+  --startup-policy paired-packs --trials 2 --output scratch/bytecode-pack-pair
+```
+
+Both paired conditions use the same indexed native warming and ordinary async
+policy. Only the second condition starts with generated bytecode packs; both
+keep runtime packs enabled and can learn normally. Four trials use unseeded/
+seeded/seeded/unseeded order. The source must have no existing packs; the harness
+never deletes learned packs. All copied caches, logs and screenshots remain.
+One visible ordered High Speed Ring pair, unpacked first, showed fewer long
+frames with packs (race window 37.7 to 49.4 FPS, p99 121.7 to 44.1 ms). Shader
+compiles did not fall, and the packed run also had warmer OS and driver caches.
+That is not an ABBA result, a mirror-LOD isolation, or a claim that hitches are
+gone. Pass `--no-shader-packs` on a fresh developer generation to skip pack
+publication. Set `RSX_SHADER_PACK=0` to disable runtime pack use, preserving
+all cache files. This is default-template membership only; extra translations
+and unobserved programs are not inferred. The reported mirror reflection/LOD
+hitch remains an unconfirmed cause, including possible model, texture or upload
+work. A pack lookup proof is not a hitch fix.
+
+### Observed phase plans for native warmup (Phase 193, developer experiment)
+
+Prepared files alone do not make a live D3D12 pipeline object available. The
+existing worker can replay known menu/race recipes, but the portable starter
+previously supplied no phase membership. Do not turn that absence into a blanket
+scan or guess pass ownership from a shader name.
+
+`config/pipeline-warmup/gt5p-disc-v2.json` contains observed numeric membership
+intersected with successful default-stage preparation: 124 menu keys and 1,979
+race keys, 2,070 distinct keys with 33 shared. The source is the local runtime's
+historical notifier indices, including prepass requests across prior play.
+These are warmup targets, not a new live-coverage percentage or a first-use claim.
+Unknown/unprepared keys were excluded. No game bytes, shaders or driver blobs
+are included, and the existing template records are unchanged.
+
+Developer preparation accepts `--warmup-plan <plan.json>` after the usual
+`pipeline_template.py prepare` arguments. The plan pins the exact template
+digest, supports default translation only, and becomes part of the checkpoint
+contract. Only complete successful native preparation can publish its two
+membership files. Resume accepts identical files and can finish partial metadata
+publication; different learned membership is preserved and rejected. A changed
+plan requires a new generation. Phase 194 is the player default for translation
+`default`; this phase did not itself change the active cache pointer.
+
+The existing worker owns loading-time native creation, demand priority,
+deduplication, count/source budgets and shutdown. Its independent recipe,
+bytecode and root-signature/native-key checks still apply. No new worker,
+draw wait or synchronous draw policy is introduced. Normal async demand remains
+the fallback for missing/incompatible entries. Resident-table references do not
+prove GPU residency. The existing resident cap and loading-gate budget still apply.
+
+```powershell
+python scripts/pipeline_warmup_plan.py export-local `
+  --cache <genuine-runtime-learned-cache> --report <successful-preparation-report> `
+  --output scratch/observed-phase-plan
+python scripts/pipeline_warmup_plan.py merge `
+  --plan <plan-a.json> --plan <plan-b.json> --output scratch/merged-phase-plan
+# Append to the normal prepare command, using a fresh output:
+# --warmup-plan config/pipeline-warmup/gt5p-disc-v2.json
+python scripts/test/shader_stutter.py `
+  --fixture <private-fixture> --engine <isolated-engine> `
+  --prepared <generation/shadercache> --coverage-report <generation/report.json> `
+  --warmup-plan config/pipeline-warmup/gt5p-disc-v2.json `
+  --startup-policy paired-indexed --trials 2 --output scratch/phase-warmup-pair
+```
+
+The paired mode compares the same prepared files with demand-only versus indexed
+warming; four trials use demand/indexed/indexed/demand order. Copies, saves,
+indices and logs are private. Only the indexed condition stages the plan and
+enables existing race warming. `export` can also use a completed, unseeded
+`--startup-policy indexed` benchmark session; seeded sessions cannot manufacture
+new observation evidence. Local-index export does not imply a completed route.
+Inputs and plan sizes/counts are bounded, versions/templates must agree, and
+merging cannot silently convert translation modes or add unresolved keys.
+
+Developer rollback for a fresh generation is to omit `--warmup-plan`, which also
+omits packs, or to pass `--no-shader-packs` and keep membership only. For an
+existing phase-enabled generation, `RSX_SHADER_WARMUP=0 RSX_RACE_PREWARM=0`
+disables its startup/loading replay while retaining ordinary async demand and
+all cache files. Do not delete shadercache. The released player selects this
+bundled plan, and builds its menu/race bytecode packs, for the default
+translation only. `RSX_SHADER_PACK=0` disables runtime pack use. Broader
+translation mapping remains separate from that default.
+
+Two initial live collection routes missed menu navigation at approximately
+4 FPS with the window in the background. Windows refused the harness's foreground
+request, and the earlier measured engine reproduced the issue. Those failures
+provide no stutter comparison. A subsequent foreground-controlled HSR pair
+completes: demand jobs fall 2,336 to 169, early p99 192.2 to 162.1 ms, later p99
+20.8 to 21.8 ms, and sampled private memory rises about 114 MiB. Grid arrival is
+66.77/65.73 s. Indexed startup holds 2,070 native objects before the race gate;
+this is not GPU residency. Most driver creation moves earlier rather than
+disappearing. Runtime shader compiles are 6/12, and complete draw sets differ.
+Inspected indexed images render normally; the early demand shot is overexposed.
+One pair does not justify a player default or a general stutter claim. The user
+reports the mirror reflection/LOD hitch in both modes; its cause remains open.
+See Phase 193 for evidence, limitations and the next diagnosis.
+
+### Measuring requested native keys (Phase 192)
+
+The optional development patch `patches/ps3recomp-pipeline-use-coverage.patch`
+applies after the normal compatibility overlay in an isolated runtime. It is
+not part of the release/default patch. Check before applying: the local
+`ps3recomp-gt5p-provenance` tree already contains it. Build an isolated engine
+against that runtime. Exactly `RSX_PSO_COVERAGE=1` enables collection; unset,
+`0` or other values disable it. Draw/queue policy is unchanged.
+
+The diagnostic records complete native keys for executing guest VP/FP draws.
+Prepass/prewarm/offline work and no-guest-FP fallback draws are excluded.
+Shader-pending submissions are a separate repeated-draw count. Do not add them
+to unique keys. Overflow beyond 16,384 keys or inconsistent/incomplete evidence
+withholds coverage. First-key/snapshot IO can affect frame timing.
+First overflow emits an invalid snapshot immediately. Shutdown is not instrumented;
+a consistent snapshot proves neither orderly shutdown nor completion of a route.
+
+```powershell
+python scripts/pipeline_runtime_coverage.py `
+  --log <completed-route-stderr> --report <successful-preparation-report.json> `
+  --output scratch/coverage-result
+python scripts/test/shader_stutter.py `
+  --fixture <private-game-fixture> --engine <isolated-diagnostic-engine> `
+  --prepared <generation/shadercache> --coverage-report <generation/report.json> `
+  --output scratch/coverage-pair --trials 2 --startup-policy demand
+```
+
+`--condition prepared` selects a single diagnostic route instead of a pair.
+The benchmark requires the report beside its prepared cache, records hashes
+and conditions, captures frames/screenshots, and cleans only disposable game
+copies. Every shadercache remains. Tests are sequential; another game prevents
+launch. Owned graceful close retains existing timeout cleanup.
+
+Coverage is an intersection with successful native preparation rows, not mere
+template membership. The standalone analyzer cannot prove the game selected
+that cache; capture the launch configuration too. Bad schemas, failed native
+keys/inventories, incompatible or inconsistent snapshots reject. Translation rows need
+their own successful batch evidence. Driver calls can differ from created-key
+counts because of memory hits and rejected-blob retries. Residency, actual driver acceptance of a
+cached hint and avoided hitches remain separate measurements.
+
+The final HSR 1080p/2x trial matches **1,036/1,039 keys (99.7%)**, with 17 runtime
+shader compiles. Three observed keys are outside the prepared set. This is one
+save/car/camera/route/settings combination, not whole-game coverage, and it does
+not replace the independent 349/1,497 asset-reconstruction metric. The earlier
+empty-cache trial compiles 1,731 shaders, but early/later frame times are mixed
+and black/overexposure transients remain. Native driver creation still happens
+during play. Prioritize targeted loading-time readiness and actual phase ownership,
+then broader representative tests. No zero-stutter claim follows.
+See Phase 192 in [progress](progress.md) for timing, memory, evidence and limitations.
+
+### Separate environment absence (Phase 191)
+
+Developer `--environment-resource-path absent` selects only the environment
+callback's null-resource branch. It can combine with initialized LV shadows;
+it leaves unselected shadow/mirror bindings unresolved. The older
+`--dynamic-resource-path absent` still means all supported dynamic resources
+are absent, so combining that broader choice with separate resource choices rejects.
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/mixed-resource-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --shadow-resource-path initialized-depth-lv `
+  --environment-resource-path absent --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/mixed-resource-proof
+```
+
+The verified disc ELF is required. Resume pins environment rule version 1.
+Omit the environment option and use a separate output to roll back; changing an
+existing generation rejects without changing its cache. The explicit condition
+is environment slot 0 null at binding time, unchanged built-in fallback and no
+later publisher. This is not inferred automatically from a fresh constructor,
+missing capture or missing shader metadata. Local/global conflicts and unknown
+signatures remain unresolved. Existing shadow alias/compare prerequisites apply.
+
+The real constructor/gate clears a stale environment binding with a null owner.
+The controlled active continuation writes gamma field 7 for a nonzero byte, but
+its actual live owner assignment is still untraced. No active environment recipe
+or player default is introduced. The eight-context constructor produces 60,798
+conditional candidates; this does not justify preparing them all at player startup.
+A fresh authored-diversity sample passes 32 mixed-resource requests / 29 distinct
+native keys, with both shaders and persisted driver verification. Four additional
+retained HSR keys reproduce exactly. The profile audit is 349/1,497 retained links,
+not a whole-game percentage or live stutter result. The starter stays unchanged.
+See Phase 191 [progress](progress.md) and [reconstruction](shader-reconstruction.md).
+
+### Asset-derived dynamic fallback context (Phase 189)
+
+Developer `prepare_material_shaders.py --dynamic-resource-path absent` extends
+the existing capture-free material constructor. It requires the verified disc
+ELF in the private game root and assumes all supported dynamic environment,
+shadow, shadow-colour and mirror resource pointers are null at binding time.
+This chooses the original callbacks' fallback branch explicitly. It never treats
+an unresolved binding, absent capture, or supplied active descriptor as evidence
+of a null resource. Dither/PCF active/fallback remains a separate explicit choice.
+
+The original initialized fallbacks supply known non-depth shape, read gamma,
+normalized coordinates and sampling. Environment/mirror use a cube; shadows use
+2D. Material state, GPU-fetch inputs, compact fragment control and the explicit
+object/target context still supply the other fields. Local cube/depth uploads,
+unknown global signatures, duplicate units and local/global overlaps retain
+their existing rejection. Active environment/shadow/mirror options cannot be
+combined with the contradictory absent context. No new renderer switch, live
+worker, queue, draw policy or player-cache selection is introduced.
+
+For a bounded developer proof, using original assets/catalogue read-only and a
+private game root containing the user's verified `input/EMAIN.ELF`:
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/dynamic-absent-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --dynamic-resource-path absent --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/dynamic-absent-proof
+```
+
+`--enumerate-only` constructs metadata without running compilers. Existing
+`--context-set supported|rgba16` can expand explicit face/target/dither choices;
+it does not select live ownership. Jobs record the fallback signatures/units
+that justified the rule. Resume requires the same engine, decoder and context,
+including the versioned dynamic rule. Omit `--dynamic-resource-path` to restore
+the prior constructor, using a separate output; trying to change this context
+inside an existing resumed generation rejects without modifying that cache.
+
+The original-asset scan finds 7,698 distinct candidate profiles for the explicit
+CCW/RGBA16-MSAA2/active-dither/absent-resource context. These are constructor
+candidates, not all natively prepared or observed live. Two empty-cache samples
+of 32 requests pass both-stage compilation, native creation, independent key
+recomputation and persisted driver-envelope checks. The diverse sample spans all
+four callback signatures and ten authored signature/unit combinations; its 32
+requests produce 25 distinct native pipelines. A separate repeat uses driver
+blobs for all 32 requests. Cold/warm callback tests cover every sampler unit.
+No live rendering/stutter test or whole-game coverage claim follows.
+
+Phase 190 below recovers a conditional initialized depth/LV chain. Remaining
+active-material blockers include actual environment gamma/ownership and proving
+the shadow context's prerequisites for live draws. A new shared
+`ConvoluteResampleX` wrapper is only a lead:
+its inherited draw state needs a native oracle before adding another full profile.
+The existing ColorCorrect/Convolution rules remain unchanged. See Phase 189 in
+[progress](progress.md) and [reconstruction](shader-reconstruction.md).
+
+### Initialized LV shadow resources (Phase 190)
+
+Developer `--shadow-resource-path initialized-depth-lv` constructs shadow profiles
+from a fresh original framebuffer descriptor, depth-format enum `0x40`, successful
+local setup and the enabled LV pass. The original constructors initialize gamma,
+normalized coordinates and comparison function 6; the LV pass forces linear
+sampling/border wrap and publishes the depth descriptor. Its shadow-colour copy
+is converted to non-depth format. Both bindings are reconstructed; the old
+sampler-only `shadow-lv` proof still leaves resource facts unresolved.
+
+```powershell
+python scripts/prepare_material_shaders.py `
+  --catalog <local-catalogue> --engine <isolated-offline-gt5p.exe> `
+  --decoder <production-decoder.dll> --game-root <private-game-root> `
+  --output scratch/shadow-lv-proof --object-pass-path ccw `
+  --native-target-path rgba16-msaa2 --global-sampler-path active `
+  --shadow-resource-path initialized-depth-lv --limit 32
+python scripts/test/material_preparation_keys.py --output scratch/shadow-lv-proof
+```
+
+This context requires the default local shadow-alias path to be enabled and its
+allocation to succeed. It assumes no later descriptor overrides or other alias
+redirects. Production chooses the comparison from the first depth-format binding,
+including unsampled units. Conflicting or unresolved earlier declared bindings
+are rejected; any unlisted/stale earlier depth binding must have the same
+comparison or be absent. That residual state is an explicit prerequisite, not a
+fact recovered from a captured draw. Active environment/mirror bindings stay
+unresolved and can still exclude a material. Local depth uploads remain outside
+the ordinary material rule. Ordinary profiles cannot silently drop shadow state.
+
+The same verified disc ELF gate applies. Resume identity records shadow rule 1.
+Omit the option and use separate output to roll back; changing the resumed
+context rejects without modifying its cache. It cannot be combined with the
+contradictory all-dynamic-resources-absent context. No renderer/draw-policy change
+or player default is introduced.
+
+`audit_material_variants.py` accepts the same option. It freezes the asset-derived
+candidate manifest before opening the retained oracle. Matching a profile is
+distinct from reproducing shader bytecode and the full native pipeline key.
+See Phase 190 in [progress](progress.md) for the native proofs, measured retained
+matches and remaining live-ownership/stutter limits. The shipped starter remains
+the existing observed-state set; these are independent construction rules.
+
+### Exact vertex batching (Phases 183-184)
+
+Developer template preparation defaults to `--vertex-mode batch`;
+`--vertex-mode serial` restores serial compilation. Development frozen helpers
+default to batching when `GT5P_PREPARE_VERTEX_BATCH` is unset or `1`; `0`
+restores serial compilation. Other values fail safely. Phase 184 changes only
+the algorithm inside optional preparation, not whether preparation runs.
+These switches are a feature-branch change and are
+not implemented by the already published v0.2.1 helper.
+
+`shader_vertex_batch.py` deduplicates exact program/GPU-input variants and
+checks reused shaders before starting workers. Each of at most two persistent
+hidden processes owns its decoder's mutable globals and compiles sequentially
+through the production decoder/system D3D compiler. It does not start gt5p.exe.
+The source and frozen entries dispatch the internal worker sentinel before
+ordinary preparation argument parsing. Workers receive only a bounded program,
+translation mode and expected identifiers over pipes; they receive no cache path.
+The parent verifies program identity, source key and bytecode hash before saving
+any result. Incorrect identity, extra output and unknown protocol frames retire
+that worker; no automatic worker replacement is attempted. Valid compiler
+failures remain failures, and exhausted workers leave demand fallback available.
+
+Limits are two in-flight jobs, 32 KiB per program, 256 KiB per generated source,
+4 MiB per bytecode and the existing 128 MiB aggregate vertex-bytecode budget.
+Private Windows jobs enforce 512 MiB committed memory per worker / 1 GiB for the
+worker job. Job-reported peak commit excludes the parent and subsequent
+fragment/native phases. Each job has an absolute 180-second deadline; startup
+has 60 seconds per worker. Cancellation is checked while waiting at 100 ms
+intervals, followed by bounded owned-process shutdown. A private non-inherited
+kill-on-close job is mandatory, including inside the launcher's existing job;
+job attachment failure refuses batching rather than relying on an arbitrary
+parent job. Termination uses only handles created by this module.
+
+No valid reused variant is queued, and a fully cached run starts zero compiler
+workers. The existing checkpoint/generation contract is unchanged because
+outputs must match serial preparation. Completed accepted files survive
+cancellation; resume revalidates them. Memory-budget exhaustion can reject a
+different variant from serial record order because batch completion order
+differs. Unsupported branching contexts remain excluded on export. Template
+schema, renderer settings/root signature, native creation, fragment batching
+and asynchronous live draws are unchanged.
+
+Reports add `vertex_preparation` and
+`requests/vertex-preparation-report.json` for batch work, including workers,
+launches, variants, wall time, limits and job peak commit where available.
+Serial reports identify the serial mode with zero worker launches. The serial
+`failed_variants` field counts incompatible records; batch failures count unique
+compile variants. Do not compare those failure fields as a coverage percentage.
+
+Sequential checks are `scripts/test/shader_vertex_batch.py`, then
+`scripts/test/shader_vertex_batch_native.py` with original `--assets`, `--elf`,
+`--engine`, `--decoder` and fresh ignored `--output`. Its default 32-record
+sample compares exact shaders, creates native pipelines in separate empty
+application caches, tests worker cancellation/owner death and resumes with zero
+workers. `--count 351 --vertex-only` compares all current starter vertex variants
+without claiming another whole-pipeline proof. Rebuild the frozen helper with
+`build_preparer.py`, then run `scripts/test/player_vertex_batch_native.py` with
+`--zip`, `--helper-dir`, the sampled `--template`, original `--elf`/`--assets`
+and a fresh `--output`. The ownership test
+`scripts/test/shader_vertex_batch_ownership_native.py` additionally kills a
+nested owner while an outer job survives. Run every executable check one at a
+time. Preparation timing is distinct from gameplay frame-time/stutter evidence;
+see Phase 183 progress for measured results and limitations.
+
+### Next preparation speed opportunities
+
+Keep fresh-cache and incremental-update measurements separate. The Phase 183
+all-vertex comparison isolates compilation, while the Phase 180 player evidence
+is an incremental expansion with most shaders reused. Neither establishes a
+gameplay stutter improvement.
+
+The next useful targets are:
+
+- **Repeated cache I/O and verification.** Phase 180's 30.50 s cache-setup timer
+  includes its 27.55 s copying verified hints; these are overlapping measurements.
+  The transient shader handoff described below avoids an immediate reread of
+  accepted copies. Broader inventory and duplicate staging work remain useful;
+  retain ownership, file-change and compatibility checks.
+- **Duplicate native-request shader files.** Current request staging writes two
+  DXBC files per pipeline, even when many records share code. A shared immutable
+  content-addressed staging store could reduce small-file writes/reads and
+  storage. It needs a compatible bounded native reader and exact-key validation;
+  do not hard-link mutable user caches or distribute the shader contents.
+- **Remaining compilation and driver work.** Fragment requests already use
+  deduplicated batches. Measure fresh-cache fragment and native stages after
+  default vertex batching before changing concurrency. Driver pipeline creation
+  is separate from shader compilation and must still run on the user's hardware.
+  More workers or overlapping stages need measured CPU/memory budgets, existing
+  queue ownership and cancellation guarantees.
+
+In that same Phase 180 incremental run, packed lookup is 9.27 s, fragment work
+16.31 s, and the native batch reports 18.55 s for 2,892 driver calls (2,335 with
+cached blobs). Native checksums already reduce hashing to 1.36 s. These are
+stage observations, not additive predictions of a new total or fresh-run
+bottleneck. Prefer avoiding repeated I/O over removing integrity/native checks.
+Evidence: `scratch/c180-player/validation.json` and its generation's `native.log`.
+
+### Transient verified shader handoff
+
+Incremental preparation can pass the bytes it just verified and copied directly
+to the same locked preparation pass, avoiding a second file read/hash. Existing
+destination files are still read and verified. The handoff checks template source
+and bytecode identity, file identity, size, timestamps, regular-file/reparse/link
+shape and the shared 128 MiB shader budget. Changed files fall back to a full
+verified read. It is a transient object, not a trusted persistent manifest, and
+is not protection against another process deliberately forging file metadata.
+No driver-blob verification or native pipeline creation is removed.
+
+`GT5P_PREPARE_REUSE_HANDOFF=0` restores destination rereads; unset/1 enables the
+handoff. Other values fail before output generation changes. This development
+change does not alter the published v0.2.1 helper. Source cache generations remain
+read-only and accepted complete files survive cancellation for verified resume.
+
+The report's `cache_reuse.shader_handoff` identifies the selected path. As of this
+change, `resume.cache_verification_seconds` measures only the final shader loader;
+older reports include seed/reuse time in that field. `cache_reuse.seconds` remains
+the copy/seed stage. Do not compare old/new timer values as the same operation.
+
+Twenty-five synthetic checks cover source preservation, bounds, cancellation,
+corruption, pre-existing files and same-size mutation/replacement. Separate empty
+application-cache 32-pipeline reuse proofs pass both modes with identical shaders,
+zero shader compiler launches and all native driver calls using verified hints.
+An I/O-only whole-starter pair verifies 2,663 shader files: the handoff avoids
+their immediate destination rereads. Copy stages have different warm-cache/budget
+outcomes, so total wall times are not a controlled speedup measurement. Evidence:
+`scratch/settings-preparation-185/{handoff-native32/validation.json,handoff-io/validation.json}`.
+
+### Resolution, ultrawide and first-use visibility (Phase 184)
+
+Pixel width/height and viewport/scissor are not fields in the native graphics
+pipeline descriptor/key. A pixel-size change alone generally reuses shader code;
+MSAA count, target/depth formats and other changed pass state can require new
+pipelines. Guest display modes can also select different passes. Do not infer
+complete settings coverage from preparation completing the starter template.
+
+Ultrawide is a concrete translation exception: `rsx_vp_decompiler.c` conditionally
+emits an edge-adjustment epilogue when `RSX_ULTRAWIDE` is enabled. Native scaling
+also conditionally rewrites WPOS in qualifying fragment programs. The game maps
+display settings to these environment switches before translation. Per-draw
+constants supply actual sizes/aspect. The Phase 184 default-only helper does not
+generate those additional variants; the explicit development modes below add
+them. Repeating default-only preparation does not close that gap.
+
+Offline preparation leaves verified shader/driver files on disk. A later game
+process still creates live GPU pipelines, possibly on the background worker.
+Missing/unready asynchronous draws can appear late even with a prepared cache.
+The newest player log inspected in Phase 184 is a 1080p/16:9 run with MSAA 4,
+not the reported ultrawide-1440p occurrence; it cannot identify that occurrence's
+cause. Asset/scene loading remains another possibility. No async policy change
+or ultrawide rendering/stutter fix is claimed.
+
+### Additional local translation modes
+
+Development `pipeline_template.py prepare --translation ultrawide-native` first
+verifies the ordinary template preparation, then adds locally derived vertex,
+fragment and native pipeline variants. `--translation native-scaled` adds the
+scaled fragment path with unchanged default vertex programs. `default` remains
+the default and rollback, and does not read/write translation sidecars.
+
+The development player helper accepts the same fixed mode through
+`GT5P_PREPARE_TRANSLATION=ultrawide-native` or `native-scaled`. Phase 188
+defaults an unset value to `auto`; explicit `default` restores default-only
+preparation. Invalid values fail before cache selection.
+The already-published v0.2.1 helper does not implement these modes.
+
+| Mode | Vertex translator | Fragment translator |
+| --- | --- | --- |
+| `default` | Ultrawide off | Native scaling off |
+| `native-scaled` | Ultrawide off | Scaled WPOS gate on via render height 1440 |
+| `ultrawide-native` | Ultrawide epilogue on | Scaled WPOS gate on via native ultrawide |
+
+The scaling gate represents generated shader text, not a new shader for each
+pixel dimension. The current game enables it for native 1440p/4K and native
+ultrawide. Some fragments do not use WPOS and retain their default code. Only
+explicit modes are generated; anamorphic ultrawide remains outside this helper.
+
+#### Automatic selection from launcher settings (development, Phase 187)
+
+From Phase 188, running **Prepare shaders.cmd** or accepting the first-run
+preparation choice uses `auto` when `GT5P_PREPARE_TRANSLATION` is unset. Explicit
+`=auto` is equivalent. Automatic selection reads the launcher's storage file
+`gt5p_settings.toml`; it does not inspect desktop dimensions. Canonical saved
+21:9 selects `ultrawide-native`. Canonical 16:9 at native 1440p/4K selects
+`native-scaled`; 720p/1080p selects `default`. Missing settings use the launcher's
+720p/16:9 first-run preset. The selected extra mode still follows default
+preparation. Explicit `GT5P_PREPARE_TRANSLATION=default` restores default-only
+behavior; explicit mode names continue to bypass settings lookup. Published
+v0.2.1 is unchanged.
+
+The selector reads at most 64 KiB, accepts one regular unlinked file, and writes
+neither settings nor game data. Reports include `player_settings` with the
+requested/resolved mode, reason, settings digest and scope. A second snapshot
+check before publishing `prepared-cache.txt` rejects settings changed during
+preparation, preserving the old selection and completed cache for another run.
+
+Automatic selection is deliberately conservative. Unsupported values, unsafe or
+unreadable files, non-ASCII storage paths, anisotropy other than 16, disabled
+smooth colour and custom resolution/translation/root-signature overrides fall
+back to default preparation with a reported reason. The override list is
+`GT5P_NO_SETTINGS`, `GT5P_RESOLUTION`, `GT5P_ULTRAWIDE`, `GT5P_RENDER_NATIVE`,
+`RSX_ULTRAWIDE`, `RSX_RENDER_HEIGHT`, `RSX_FP_OPT`, `RSX_PSO_KEY_RS`, `RSX_ANISO`
+and `RSX_HIGH_PRECISION`. Explicit modes remain available for developer proofs.
+This selects translation text only: MSAA, attachment formats, pass state and
+all other numeric fields retain observed template values. It does not claim
+that the selected settings have complete pipeline coverage.
+
+Nine synthetic selection/snapshot checks and 24 canonical cases linked against
+the actual C++ settings parser pass sequentially, including a UTF-8 BOM and
+non-ASCII comment contents. A probe exposed the existing parser's narrow
+environment-path handling on one non-ASCII storage path; auto selection excludes
+such paths instead of claiming parity. Frozen 32-record paths separately select
+ultrawide/native-scaled from the saved file and pass cancellation/resume,
+zero-worker reuse, explicit serial rollback and invalid-mode preservation.
+The native-scaled run also changes settings during preparation and confirms
+rejection before replacing the cache selection. Tests:
+`scripts/test/preparation_settings.py`, `preparation_settings_native.py`
+(compile `preparation_settings_probe.cpp` with production `gt5p_settings.cpp`
+and `gt5p_keymap.cpp`), and `player_vertex_batch_native.py --translation auto`
+with `--auto-aspect 16:9|21:9`. No live-draw or frame-time improvement follows.
+
+The complete frozen automatic native-scaled run also passes all 2,892 default
+and 2,892 derived records from original packed files in a fresh application cache.
+Its derived set has 2,810 additional native keys and 82 shared with default. It
+starts no extra vertex workers. The fragment stage has 2,312 unique requests,
+2,260 actual new compiles, and all 2,892 native driver calls succeed (82 use
+default-stage cached blobs). One run takes 654.22 seconds including default
+preparation; OS/driver caches remain warm. This establishes known-state disk
+preparation, not faster gameplay, complete settings coverage or GPU residency.
+Evidence: `scratch/settings-auto-187/full-scaled/validation.json`. Reproduce with
+`scripts/test/player_settings_full_native.py` and a fresh ignored output.
+
+Each vertex worker receives a sanitized UTF-16 environment for one mode,
+including surrogate pairs. Mutable decoder globals never change mode in-process.
+Derive requests carry original program identity/GPU-input mode; the parent
+recomputes returned source and DXBC ids. Two workers remain the maximum, with the
+existing private kill-on-close jobs, byte/memory limits, deadlines and owned
+shutdown. `--vertex-mode serial` uses one owned worker for additional translations
+to avoid the decoder latch. Default serial preparation retains its existing path.
+Fragments use the production exact-request batch with a fixed mode overlay after
+case-insensitive environment sanitization. Original fragment instruction
+identities normalize inline constants, while batch payload checksums cover the
+actual asset bytes. No changed shader is saved under an old default source id.
+
+Before writing derived shaders, `native_pipeline_key.py` serializes the current
+five-parameter/16-sampler root signature through system D3D12 and calibrates every
+default record against its verified shader bytes and expected native key. Its
+anisotropy remains the pinned 16. Derivation changes only shader ids, the native
+key and descriptor bytecode-length words 4/5 and 8/9. Input layout, target/depth
+formats, MSAA count and all other recorded state stay unchanged. Fresh native
+creation then independently checks every derived key and persisted driver blob.
+This does not enumerate new MSAA/pass combinations or recover unknown bindings.
+
+The parent preparation lock covers both modes' writes to the shared cache.
+Separate versioned checkpoints at `tr/uw` and `tr/rs` pin the parent contract,
+translation mode and calibrated root signature. Content-addressed local manifests
+retain accepted shader ids across cancellation. Resume verifies manifest digests,
+shader bytes/lengths, root calibration and native pipelines. Each shader-stage
+pool is bounded to 128 MiB; manifests are capped at 4 MiB and native batches stay
+within the template record bound. Compact staging paths stay within the existing
+native request path-length budget. Default files and the shipped template bundle
+are preserved. The player changes its selected cache only after every requested
+stage succeeds. New programs, source and DXBC remain local.
+
+Reports include `additional_translation`, its mode/record and unique-key counts,
+shader work/reuse, driver calls/cache-hint calls and time. Primary `counts` still
+describes default records; `default_preparation_seconds` isolates that stage,
+while `preparation_seconds` includes the requested translation. Disk coverage is
+distinct from resident pipelines: the existing background policy and resident
+limit remain, so live first-use visibility is still a separate validation task.
+
+Sequential tests: `shader_translation.py`, `shader_vertex_batch.py`,
+`shader_fragment_batch.py`, `native_pipeline_key.py`, `pipeline_translation.py`
+and `pipeline_translation_native.py` under `scripts/test/`. The native test uses
+original `--assets`/`--elf`, current `--engine`/`--decoder` and a fresh ignored
+`--output`. It verifies both modes, unchanged descriptor fields/default bytes,
+native keys/persistence, cancellation/resume and default rollback. The frozen
+`player_vertex_batch_native.py` accepts `--translation` for the same player path.
+No live stutter reduction or complete settings/whole-game coverage follows.
+
+Phase 185's complete frozen-helper proof reads the original packed game in place
+and starts with an empty application cache. All 2,892 default records and all
+2,892 distinct ultrawide-derived pipelines pass exact native keys and persisted
+driver-blob verification. The extra pass compiles 351 vertex variants with two
+workers. Its fragment batch has 2,312 unique requests and 2,260 actual new shader
+compiles; request counts are not compile counts. Its 2,892 native driver calls
+use no supplied application-cache blobs. OS/driver caches remain warm. Total
+default-plus-ultrawide preparation takes 905.66 seconds on this machine; this is
+one preparation run, not a speed or gameplay-stutter comparison. Worker-job peak
+commit is 119,017,472 bytes; this excludes the parent and native pipeline process.
+Evidence: `scratch/settings-preparation-185/full/ultrawide-validation.json`.
+
+Both additional modes separately pass frozen 32-record cancellation/resume,
+zero-worker reuse, serial rollback and invalid-mode cache-pointer preservation.
+At Phase 185, full native-scaled preparation was unmeasured; Phase 187's complete
+automatic proof is recorded above. Nested owner-death and
+default-root calibration of all 2,892 records also pass. Fragment manifests are
+published after a completed batch, so cancellation can repeat fragment work;
+vertex progress is incremental. Resume's conservative vertex accounting can
+count shared bytes more than once against its budget. Neither limitation permits
+accepting unverified code. A static integration review finds no actionable
+correctness, ownership, integrity or bounds defect.
 
 ### Preparation window (Phase 181)
+
+Development launchers now offer preparation after successful first-run file
+setup, before the first game process starts. **Skip and play**, Escape or closing
+the offer starts normal play. **Prepare now** uses the existing helper/UI/cache
+contract. Cancelling waits for the helper's owned cancellation, then continues
+into the game; completed files and any earlier selection are preserved. A failed
+optional step reports its error and allows play. Later configured launches do
+not repeat the offer; **Prepare shaders.cmd** remains the explicit prepare/resume
+entry. `GT5P_PREPARE_OFFER=0` disables the new offer. This is development behavior
+after v0.2.1, not a change to the published ZIP or asynchronous draw policy.
 
 The optional launcher `--prepare` uses the in-game PC Settings visual language:
 grey panels, dotted rows, black values and a focused pill Cancel button. It is

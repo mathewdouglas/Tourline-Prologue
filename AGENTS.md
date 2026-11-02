@@ -36,13 +36,159 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-01, Phase 182)
+## Start here: state of play (2026-11-02, Phase 194)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 182 is the latest).
+has the evidence, newest phase first (Phase 194 is the latest).
 
 ### What works now
+
+- **Local bytecode packs (Phase 194):** default-translation player preparation
+  builds the existing menu/race `GT5PSPK1` packs from
+  `config/pipeline-warmup/gt5p-disc-v2.json` after native preparation. Developer
+  `--warmup-plan` does the same; `--no-shader-packs` rolls preparation back.
+  The library `prepare()` default stays off. `native-scaled` and
+  `ultrawide-native` do not take the plan. The preparation token mixes
+  `shader-packs-v1` when packs are on, leaving an older unpacked generation
+  in place. Runtime packs stay on; `RSX_SHADER_PACK=0` disables their use
+  without deleting caches. One ordered High Speed Ring pair, unpacked first,
+  had fewer long frames with packs. Shader compiles did not fall. This is not
+  an ABBA result or a claim that the mirror hitch is gone.
+
+- **Observed phase warmup plans (Phase 193):** developer `--warmup-plan`
+  publishes verified menu/race membership after native preparation, using the
+  existing priority/ownership/loading worker. The versioned metadata contains
+  124 menu and 1,979 race targets (2,070 distinct), filtered from real historical
+  notifier indices against successful starter keys. Unknown keys are excluded;
+  no new shaders/state or phase ownership is guessed. Default translation only;
+  the plan is pinned by resume and remains explicit. Full isolated preparation
+  passes all 2,892 starter records and publishes both lists; synthetic checkpoint,
+  rejection, merge, partial publication and rollback checks pass, alongside the
+  native WARP queue/gate/ownership regressions. One foreground HSR same-cache
+  pair reduces demand jobs 2,336->169; early p99 192.2->162.1 ms, later p99
+  20.8->21.8 ms, private memory about +114 MiB. This moves driver work earlier,
+  not all stutter away. Mirror reflection/LOD hitch diagnosis and repeated
+  acceptance remain open. Phase 194 later made the bundled plan and its packs
+  the default-translation player path. Push development only with `[skip ci]`.
+
+- **Runtime coverage measurement (Phase 192):** development diagnostic
+  `RSX_PSO_COVERAGE=1` records bounded distinct complete guest pipeline keys;
+  the source patch is separate and default-off. New reporting joins only
+  successful native preparation rows, rejecting inconsistent/truncated snapshots.
+  All 2,892 starter pipelines revalidate with the diagnostic engine. A completed
+  1080p/2x High Speed Ring prepared route matches 1,036/1,039 observed keys
+  (99.7%), with 17 runtime shader compiles; this is one route/settings/save,
+  not whole-game coverage or GPU residency. Three missing keys remain.
+  The earlier empty-cache run compiles 1,731 shaders; early/late frame-time
+  results are mixed and rendering transients remain. No consistent stutter win.
+  Current user-selected checkout is GT5P, local branch
+  `feature/shader-runtime-coverage`; push development only with `[skip ci]`.
+  That phase left player defaults, starter, main, tag and release unchanged.
+
+- **Separate environment absence (Phase 191):** explicit developer
+  `--environment-resource-path absent` composes the null environment fallback
+  with initialized LV shadows. The real constructor/publication gate and controlled
+  gamma continuation pass 768 native cases. A fresh 32-request mixed-resource
+  proof creates 29 distinct pipelines and reuses all driver calls. Four additional
+  retained HSR keys reproduce exactly, giving 349/1,497 conditional profile
+  matches; the shipped starter is unchanged. Active gamma writes are measured,
+  but the live nonzero-owner assignment remains untraced, so no active environment
+  profile is added. Resume/rollback/build rejection and focused regressions pass
+  sequentially. No live stutter or player-default change; push `[skip ci]`.
+
+- **Initialized LV depth resources (Phase 190):** explicit developer
+  `--shadow-resource-path initialized-depth-lv` derives depth shape, gamma,
+  coordinates and comparison from fresh framebuffer initialization plus the LV
+  pass, including the non-depth shadow-colour copy. Native descriptor and
+  production alias/compare/trim checks pass. All 214 newly matched retained HSR
+  keys reproduce both shaders and fresh native pipelines exactly, persist and
+  reuse every driver blob; two separate 32-request samples also pass. Material
+  profile matches cover 345/1,497 retained links under explicit contexts, not
+  whole-game/player coverage. Earlier conflicting/unknown declared depth bindings
+  reject; no differently configured unlisted earlier depth binding and successful
+  default local aliases remain prerequisites. Active environment/live ownership
+  and stutter benefit remain open. Starter/player/release unchanged; `[skip ci]`.
+
+- **Asset-derived dynamic fallbacks (Phase 189):** developer material preparation
+  accepts explicit `--dynamic-resource-path absent`. Real null-resource callbacks
+  supply non-depth cube environment/mirror and 2D shadow fallbacks, including
+  sampler, gamma and normalized-coordinate facts. Unknown/overlapping bindings
+  stay unresolved; active resource state is not inferred. The disc ELF gates this
+  rule and resume pins it. Cold/warm callback checks and two fresh 32-request
+  shader/native samples pass, including all four authored callback signatures;
+  independent native keys, persistence, driver reuse and rejection preservation
+  verify. Asset enumeration finds 7,698 conditional candidates for one explicit
+  context, not 7,698 validated/live pipelines. Starter/player/release unchanged;
+  active shadow compare/environment gamma and actual pass ownership remain open.
+
+- **Validated preparation defaults (Phase 188):** at the user's request, an unset
+  `GT5P_PREPARE_TRANSLATION` now selects `auto` in the development player helper.
+  Explicit `=default` restores default-only preparation. Existing batching, packed
+  reads, verified reuse, setup offer/UI and managed restart are already defaults;
+  preparation remains a player choice. The shader document now separates completed
+  mechanics from remaining live-use/stutter, content/asset-rule, settings/context,
+  efficiency/robustness and multi-GPU/release work. Published v0.2.1 is unchanged.
+  Ten synthetic and both unset-default frozen 32-record paths pass, including
+  explicit translation rollback without changing sidecars. An initial missing
+  offline log marker was rejected safely; its cause remains an open robustness
+  issue and the guard stays strict. Feature pushes use `[skip ci]`.
+
+- **Automatic translation selection (Phase 187):** development helper opt-in
+  `GT5P_PREPARE_TRANSLATION=auto` selects existing ultrawide/native-scaled modes
+  from canonical saved launcher resolution/aspect settings. Unset/default restores
+  default-only preparation; explicit modes remain available. Bounded read-only
+  snapshots, conservative unsupported-setting/override fallback and a pre-publication
+  settings-change check preserve existing cache selection. Nine synthetic and
+  24 production C++ parser cases pass; both frozen 32-record automatic paths pass
+  cancellation/resume, cached reuse and rollback. Native-scaled also rejects a
+  settings change during preparation. A full packed-game fresh-cache automatic
+  native-scaled run passes all 2,892 default and 2,892 scaled records, adding
+  2,810 distinct native keys (82 overlap); no additional vertex workers start.
+  Numeric template/MSAA/pass state stays
+  observed; no live stutter or complete settings coverage claim. Release unchanged.
+
+- **First-run offer and settings restart (Phase 186):** development launchers
+  offer optional preparation after successful setup, before play. Skip/close,
+  helper cancellation and reported failure continue to the game; the CMD entry
+  remains available. `GT5P_PREPARE_OFFER=0` disables the offer. Settings Restart
+  now requests launcher-owned replacement after the old process/job exits,
+  preserving storage locks and fresh settings. `GT5P_LAUNCHER_RESTART=0` restores
+  legacy behavior. Sequential synthetic setup/cancel/failure/ownership tests and
+  three actual resolution/aspect settings restarts pass in a private install.
+  Both new launcher and engine are required. No release/build was triggered;
+  feature pushes `[skip ci]`, main/tag/published v0.2.1 remain unchanged.
+
+- **Additional translations and verified reuse (Phase 185):** explicit development
+  `GT5P_PREPARE_TRANSLATION=ultrawide-native|native-scaled` adds local variants
+  after default preparation; unset/default rolls back. A fresh packed-game frozen
+  proof passes all 2,892 default and 2,892 distinct ultrawide native pipelines,
+  including both shader stages and calibrated root-signature/native keys.
+  Native-scaled has a 32-record proof only. Frozen cancellation/resume, zero-worker
+  reuse, serial rollback and nested owner-death pass sequentially. Verified cache
+  handoff avoids rereading newly copied shaders; `GT5P_PREPARE_REUSE_HANDOFF=0`
+  restores rereads. No whole-game/MSAA enumeration, automatic settings selection,
+  live stutter or draw-policy claim. Feature pushes `[skip ci]`; release unchanged.
+
+- **Default vertex batching (Phase 184):** developer preparation and development
+  helpers now default to the bounded two-worker path. `--vertex-mode serial` /
+  `GT5P_PREPARE_VERTEX_BATCH=0` restores serial compilation. Sequential default
+  source/frozen 32-pipeline proofs pass cancellation/resume, exact keys and
+  zero-worker reuse; preparation itself remains optional. Investigation confirms
+  an uncovered ultrawide vertex epilogue: pixel dimensions alone generally reuse
+  shaders, but current default preparation does not generate ultrawide variants.
+  Repeated cache I/O and settings-aware preparation are documented next targets.
+  No live draw-policy/stutter claim; feature pushes `[skip ci]`, release unchanged.
+
+- **Opt-in vertex batching (Phase 183):** two hidden persistent compiler workers
+  reproduce all 351 starter vertex variants exactly. One local vertex-only pair
+  measures 241.36 s serial / 142.40 s batch; worker-job peak commit is 115.45 MiB.
+  Separate empty-cache 32-pipeline proofs, frozen cancellation/resume, zero-worker
+  cache reuse, serial rollback and nested owner-death checks pass sequentially.
+  Private kill-on-close jobs, memory caps and timeouts bound workers. Developer
+  `--vertex-mode batch` / player `GT5P_PREPARE_VERTEX_BATCH=1` opt in; serial stays
+  default. No new coverage, live stutter or whole-starter native batch claim.
+  Feature pushes only with `[skip ci]`; main and published v0.2.1 stay unchanged.
 
 - **v0.2.1 released (Phase 182):** preparation window and legacy fallback use
   the requested title `Tourline Prologue`. The user authorized main/tag/release;
@@ -1203,6 +1349,9 @@ silently. A dropped jump table and `bisl $r0,$r0` were found by asking
 
 ### The user's standing rules
 
+- Make appropriately validated player features defaults, keeping rollback switches.
+  Conditional reconstruction proofs and unproven live-performance experiments
+  remain developer options until suitable behavior is established.
 - Commit **and push** to `origin` at the end of every turn.
 - No game data, keys, decrypted executables, generated source or decompiled
   code in tracked files. Never `--no-verify`, never `git add -f`.

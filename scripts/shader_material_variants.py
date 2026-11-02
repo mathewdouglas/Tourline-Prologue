@@ -35,12 +35,13 @@ def expand_job(job, context):
     return dict(job, **metadata, id=key, context=context, contexts=[context])
 
 
-def enumerate_variants(catalog, name, limit=0):
+def enumerate_variants(catalog, name, limit=0, dynamic_path=None, shadow_resource_path=None, environment_resource_path=None):
     # Imported lazily to keep single-context preparation and its tests usable.
     from prepare_material_shaders import enumerate_jobs
     choices, seen, inventory = contexts(name), {}, {}
     for global_path in ('active', 'fallback'):
-        seeds, counts = enumerate_jobs(catalog, 'ccw', 'rgba16-msaa2', global_path, 0)
+        seeds, counts = enumerate_jobs(catalog, 'ccw', 'rgba16-msaa2', global_path, 0, dynamic_path=dynamic_path,
+                                      shadow_resource_path=shadow_resource_path, environment_resource_path=environment_resource_path)
         inventory[global_path] = counts
         for seed in seeds:
             for context in choices:

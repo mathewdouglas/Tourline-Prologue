@@ -1,4 +1,10 @@
 """Standalone optional player preparation. Original assets and all outputs stay local."""
+import sys
+import shader_vertex_batch
+# Frozen or source workers must dispatch before preparation parsing, UI, or a second prepare.
+if __name__ == '__main__' and shader_vertex_batch.worker_requested(sys.argv):
+    sys.exit(shader_vertex_batch.worker_main(sys.argv))
+
 import argparse
 import csv
 import ctypes
@@ -8,7 +14,6 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import time
 
 import pipeline_template as template
@@ -17,6 +22,23 @@ from preparation_checkpoint import preflight_tree
 from shader_coverage import ROOT
 from pipeline_asset_map import read as read_map
 from preparation_reuse import cache_root, regular_read
+from preparation_settings import select as select_settings, verify as verify_settings
+
+
+def shader_pack_plan(translation):
+    """Observed plan for the default translation only. Other modes stay plan-free."""
+    if translation != 'default':
+        return None
+    plan = ROOT/'config/pipeline-warmup/gt5p-disc-v2.json'
+    if plan.is_symlink() or plan.is_junction() or not plan.is_file():
+        raise ValueError('Default shader-pack plan is missing or redirected')
+    return plan
+
+
+def preparation_token(metadata, engine_hash, decoder_hash, packs):
+    """Mix a pack marker in so an older unpacked generation is not resumed."""
+    marker = 'shader-packs-v1' if packs else ''
+    return hashlib.sha256((metadata+engine_hash+decoder_hash+marker).encode()).hexdigest()[:24]
 
 
 def safe_storage(storage):
@@ -42,6 +64,8 @@ def previous_cache(storage, output):
 
 
 def main():
+    if shader_vertex_batch.worker_requested(sys.argv):
+        sys.exit(shader_vertex_batch.worker_main(sys.argv))
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('install','storage'):ap.add_argument('--'+name,type=Path,required=True)
     source=ap.add_mutually_exclusive_group(required=True)
@@ -51,6 +75,8 @@ def main():
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
     a=ap.parse_args()
     storage=safe_storage(a.storage)
+    selection=select_settings(storage)
+    translation=selection['mode']
     install=a.install.resolve()
     def idle_for_player():
         # Verify the optional visible launcher owner. Exclude only our actual
@@ -91,8 +117,10 @@ def main():
         volume=game/'USRDIR/GT.VOL';volume_map=bundle/'volume-map.json'
         metadata_items.append(read_volume(volume_map))
     metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
-    token=hashlib.sha256((metadata+hashlib.sha256(engine.read_bytes()).hexdigest()+
-                          hashlib.sha256(decoder.read_bytes()).hexdigest()).encode()).hexdigest()[:24]
+    plan=shader_pack_plan(translation)
+    packs=plan is not None
+    token=preparation_token(metadata,hashlib.sha256(engine.read_bytes()).hexdigest(),
+                            hashlib.sha256(decoder.read_bytes()).hexdigest(),packs)
     parent=storage/'preparation'
     if parent.exists():preflight_tree(parent)
     parent.mkdir(exist_ok=True)
@@ -131,9 +159,14 @@ def main():
     shader_fragment_batch.run_offline=run_owned
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
-        output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map)
+        output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
+        vertex_mode=shader_vertex_batch.player_mode(),translation=translation,
+        warmup_plan=plan,shader_packs=packs)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
+    verify_settings(selection,storage)
+    report['player_settings']=selection
+    template.save_report(out/'report.json',report)
     # Switch only after successful shader/native/persistence validation. Existing
     # caches remain intact; game demand can add missing/settings-specific entries.
     pointer=storage/'prepared-cache.txt';pending=pointer.with_suffix('.tmp')

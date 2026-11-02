@@ -46,7 +46,7 @@ def discard_game_copy(game):
     scratch = (ROOT/'scratch').resolve()
     trial = game.parent
     if (game.name != 'game' or game.resolve() != game or not game.is_relative_to(scratch) or
-            not re.fullmatch(r'\d+-(control|prepared)',trial.name) or
+            not re.fullmatch(r'\d+-(?:control|prepared(?:-(?:demand|indexed|unpacked|packed))?)',trial.name) or
             not (trial/'logs').is_dir() or not (trial/'runner.log').is_file()):
         raise ValueError('Refusing cleanup outside an owned private benchmark trial')
     nodes, stack, total = [], [game], 0

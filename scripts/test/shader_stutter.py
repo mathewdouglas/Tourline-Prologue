@@ -66,6 +66,10 @@ def analyze_run(logs, tag, seed_keys=()):
                 observed_dxbc_ms=sum(float(m[2]) for m in misses),
                 observed_pipeline_ms=sum(float(m[4]) for m in misses),
                 compiled_so_far=max((int(m[3]) for m in misses),default=0),
+                shader_pack_loads=[dict(scope=p, shaders=int(n), mib=float(size), read_ms=int(ms))
+                    for p,n,size,ms in re.findall(r'\[shader-pack\] (menu|race) set: (\d+) shaders, ([\d.]+) MiB, read in (\d+) ms',err)],
+                shader_pack_scope_ends=[dict(scope=p, hits=int(h), new_shaders=int(n))
+                    for p,h,n in re.findall(r'\[shader-pack\] (menu|race) set ended: (\d+) pack hits, (\d+) new shaders',err)],
                 grid_seconds=(grid-window['launch_ms'])/1000,
                 milestones=dict((n,int(t)) for n,t in re.findall(r'\[milestone\] (\w+) at (\d+) ms',out)),
                 warmup_summaries=warm,
@@ -81,11 +85,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for name in ('fixture','engine','prepared','output'):
         ap.add_argument('--'+name,type=Path,required=True)
+    ap.add_argument('--coverage-report',type=Path,
+                    help='Optional successful preparation report paired with --prepared; enables bounded draw-key diagnostics')
+    ap.add_argument('--condition',choices=('control','prepared'),
+                    help='Single-condition diagnostic route; does not establish a paired performance result')
+    ap.add_argument('--warmup-plan',type=Path,
+                    help='Observed phase membership for a private indexed trial; never scans all recipes')
+    ap.add_argument('--shader-pack-template',type=Path,
+                    help='Exact template for paired-packs; build local packs only in the seeded private trials')
     ap.add_argument('--trials',type=int,choices=(2,4),default=4)
     ap.add_argument('--keep-game-copies',action='store_true',
                     help='Retain disposable game/save copies for debugging (about 4 GiB per trial)')
-    ap.add_argument('--startup-policy',choices=('scan','demand'),default='scan',
-                    help='Scan prepared recipes at startup, or suppress copied membership indices and use files on demand')
+    ap.add_argument('--startup-policy',choices=('scan','demand','indexed','paired-indexed','paired-packs'),default='scan',
+                    help='Scan all recipes, use demand only, replay phase indices, or compare indexed against demand with the same prepared files')
     args = ap.parse_args()
     fixture,engine,prepared,output = (getattr(args,k).resolve() for k in ('fixture','engine','prepared','output'))
     if output.exists() or subprocess.run(['git','check-ignore','-q',str(output/'report.json')],cwd=ROOT).returncode:
@@ -99,6 +111,38 @@ def main():
         ap.error('The copied fixture must be in ignored storage in this checkout')
     if not (prepared/'warmup-v1').is_dir():
         ap.error('--prepared must name the generated shadercache directory')
+    coverage_report = args.coverage_report.resolve() if args.coverage_report else None
+    preparation_document = None
+    if coverage_report:
+        from pipeline_runtime_coverage import parse_report, MAX_REPORT
+        if (coverage_report.parent != prepared.parent or not coverage_report.is_file()
+                or coverage_report.stat().st_size > MAX_REPORT):
+            ap.error('--coverage-report must be the bounded report.json beside the prepared cache')
+        preparation_document = json.loads(coverage_report.read_text(encoding='utf-8-sig'))
+        parse_report(preparation_document)
+    plan = None
+    if args.warmup_plan:
+        if not preparation_document or args.startup_policy not in ('indexed','paired-indexed','paired-packs'):
+            ap.error('--warmup-plan requires a preparation report and indexed policy')
+        from pipeline_warmup_plan import read, validate_preparation
+        plan = read(args.warmup_plan)
+        validate_preparation(plan, preparation_document)
+    if args.startup_policy == 'paired-indexed' and (plan is None or args.condition):
+        ap.error('paired-indexed requires --warmup-plan and both prepared-cache conditions')
+    pack_document = None
+    if args.startup_policy == 'paired-packs':
+        if plan is None or args.condition or not args.shader_pack_template:
+            ap.error('paired-packs requires --warmup-plan, --shader-pack-template and both conditions')
+        if any((prepared/(p+'-shaders-v1.pack')).exists() for p in ('menu','race')):
+            ap.error('paired-packs requires a source cache without learned packs; existing packs are preserved')
+        from pipeline_template import read as read_template, template_digest
+        from preparation_shader_pack import dependencies
+        if template_digest(args.shader_pack_template) != plan['template_sha256']:
+            ap.error('Shader pack template differs from the observed phase plan')
+        pack_document = read_template(args.shader_pack_template)
+        dependencies(plan,pack_document,preparation_document)
+    elif args.shader_pack_template:
+        ap.error('--shader-pack-template is only used by paired-packs')
     output.mkdir(parents=True)
     seed_keys = {p.stem[4:] for p in (prepared/'warmup-v1').glob('pso_*.recipe')}
     report = dict(engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
@@ -106,16 +150,28 @@ def main():
                   conditions='1080p/2x MSAA/VSync; async shaders/PSOs; PS3_VERBOSE=0',
                   startup_policy=args.startup_policy,
                   limitations=['Cold application caches, warm uncontrolled OS/driver caches.',
-                               'ABBA order reduces order bias; two runs per condition are not statistical proof.',
+                               'Four trials use ABBA order; two trials are one per condition. Neither is statistical proof.',
                                'Early grid/rolling-start and loading transitions are separate from later racing.',
                                'Scripted navigation is repeatable, but race progress/draw workloads can differ.',
                                'Original offline subset preparation time is outside these live trial timings.'])
-    order = ('control','prepared','prepared','control')[:args.trials]
-    for number,condition in enumerate(order,1):
+    order = (args.condition,) if args.condition else ('control','prepared','prepared','control')[:args.trials]
+    if args.condition:report['limitations'].append('Single-condition diagnostic run; no paired performance conclusion.')
+    if args.startup_policy == 'paired-indexed':
+        report['limitations'].append('Fresh processes/private copies of the same prepared disk files; only phase replay differs.')
+    visits = [('prepared', p) for p in ('demand','indexed','indexed','demand')[:args.trials]] if args.startup_policy == 'paired-indexed' else [(c,args.startup_policy) for c in order]
+    if args.startup_policy == 'paired-packs':
+        visits = [('prepared',p) for p in ('unpacked','packed','packed','unpacked')[:args.trials]]
+        report['shader_pack_template_sha256'] = plan['template_sha256']
+        report['limitations'].append('Both conditions use identical indexed native warmup; only initial bytecode packs differ. Packs remain enabled and can learn in both trials.')
+    for number,(condition,policy) in enumerate(visits,1):
         if b'gt5p.exe' in subprocess.run(['tasklist','/FI','IMAGENAME eq gt5p.exe','/NH'],capture_output=True).stdout.lower():
             raise SystemExit('Another gt5p.exe is running; nothing was stopped')
         require_space(output,fixture,prepared if condition=='prepared' else None)
         tag = f'{number}-{condition}'
+        if args.startup_policy in ('paired-indexed','paired-packs'):tag += '-'+policy
+        pack_seeded = policy == 'packed'
+        if policy in ('packed','unpacked'):
+            policy = 'indexed'
         trial = output/tag;game = trial/'game';logs=trial/'logs';game.mkdir(parents=True);logs.mkdir()
         print('Creating isolated trial',tag,flush=True)
         shutil.copytree(fixture/'gamedata',game/'gamedata')
@@ -131,26 +187,39 @@ def main():
         cache = trial/'shadercache'
         if condition == 'prepared':
             shutil.copytree(prepared,cache)
-            if args.startup_policy == 'demand':
+            if policy == 'demand':
                 # Change only this new private trial's copied indices. The seed
                 # cache and all recipe/bytecode/driver files remain untouched.
                 for name in ('menu-v1.txt','race-v1.txt'):
                     (cache/'warmup-v1'/name).write_text('')
         else:
             cache.mkdir()
+        plan_result = None
+        if plan is not None and condition == 'prepared' and policy == 'indexed':
+            from pipeline_warmup_plan import stage
+            plan_result = stage(plan, preparation_document, cache/'warmup-v1',resume=True)
+        pack_result = None
+        if pack_seeded:
+            from preparation_shader_pack import stage as stage_packs
+            pack_result = stage_packs(plan,pack_document,preparation_document,cache)
         env = {k:v for k,v in os.environ.items() if not k.startswith(
             ('GT5P_','RSX_','PS3_','PAD_','FP_','VP_','SPU_','PPU_','D3D12_','CULL_'))}
         env.update(PS3_VERBOSE='0',GT5P_GAME_DIR='input/pkg/',
                    PS3_VFS_ROOT=str(game),PS3_GAMEDATA_ROOT=str(game/'gamedata'),
                    RSX_SHADER_CACHE=str(cache),RSX_SHADER_WARMUP='1',
-                   RSX_SHADER_WARMUP_SCAN='1' if args.startup_policy == 'scan' else '0',
+                   RSX_SHADER_WARMUP_SCAN='1' if policy == 'scan' else '0',
                    RSX_SHADER_WARMUP_BACKGROUND='1',RSX_PSO_ASYNC='1',RSX_SHADER_ASYNC='1',
-                   RSX_RACE_PREWARM='0',RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
+                   RSX_RACE_PREWARM='1' if policy == 'indexed' else '0',
+                   RSX_PSO_PROVENANCE='0',PAD_HOLD_MERGE='0',RSX_PRESENT_SYNC='1')
+        if args.startup_policy == 'paired-packs':
+            env.update(RSX_SHADER_PACK='1', RSX_SHADER_PACK_MB='64')
         env['RSX_PIPELINE_METRICS'] = '1'
+        if coverage_report:env['RSX_PSO_COVERAGE'] = '1'
         cmd = ['powershell','-NoProfile','-ExecutionPolicy','Bypass','-File',str(ROOT/'scripts/test/race.ps1'),
                '-Track','HighSpeedRing','-Tag',tag,'-FrameTest','-Seconds','90','-SampleDelay','0',
                '-RaceShots','20','-Engine',str(engine),'-GameRoot',str(game),'-OutputDirectory',str(logs),
                'GT5P_RESOLUTION=1080p']
+        if coverage_report:cmd.append('-GracefulClose')
         print('Running',tag,flush=True)
         with (trial/'runner.log').open('wb') as stream:
             proc = subprocess.Popen(cmd,cwd=ROOT,env=env,stdout=stream,stderr=subprocess.STDOUT)
@@ -161,7 +230,16 @@ def main():
                 if proc.poll() is None:
                     subprocess.run(['taskkill','/PID',str(proc.pid),'/T','/F'],capture_output=True)
                     proc.wait(timeout=15)
-        result = dict(tag=tag,condition=condition,**analyze_run(logs,tag,seed_keys))
+        result = dict(tag=tag,condition=condition,warmup_policy=policy,warmup_plan=plan_result,
+                      **analyze_run(logs,tag,seed_keys))
+        if args.startup_policy == 'paired-packs':
+            result['shader_pack_preparation'] = pack_result
+        if coverage_report:
+            from pipeline_runtime_coverage import evaluate_files
+            result['reference_pipeline_coverage'] = evaluate_files(logs/f'{tag}.err', coverage_report, trial/'coverage')
+            result['coverage_condition'] = dict(prepared_cache_selected=condition=='prepared',
+                reference_report_sha256=hashlib.sha256(coverage_report.read_bytes()).hexdigest(),
+                note='Set intersection with the supplied successful preparation report; control runs select an empty cache. This is not a resident-hit or avoided-hitch count.')
         report['trials'].append(result)
         (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         if not args.keep_game_copies:
@@ -169,7 +247,7 @@ def main():
             result['game_copy_retention'] = 'Disposable game copy removed; logs/screenshots/shadercache retained'
             (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         print(json.dumps(result['periods']),flush=True)
-    print('Completed paired benchmark:',output/'report.json',flush=True)
+    print('Completed benchmark:',output/'report.json',flush=True)
 
 
 if __name__ == '__main__':

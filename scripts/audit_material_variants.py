@@ -56,7 +56,12 @@ def main():
     for name in ('catalog', 'audit', 'trace', 'output'):
         ap.add_argument('--' + name, type=Path, required=True)
     ap.add_argument('--context-set', choices=('supported', 'rgba16'), default='supported')
+    ap.add_argument('--shadow-resource-path', choices=('initialized-depth-lv',),
+                    help='Explicit initialized LV depth context; captured fields remain validation only')
+    ap.add_argument('--environment-resource-path', choices=('absent',))
     args = ap.parse_args()
+    if not args.trace.is_dir() or not args.audit.is_file() or not (args.catalog / 'index.json').is_file():
+        ap.error('Catalogue index, retained audit and trace directory must exist before enumeration')
     output = args.output.resolve()
     if output.exists() or subprocess.run(['git', 'check-ignore', '-q', str(output / 'report.json')], cwd=ROOT).returncode:
         ap.error('Choose new ignored output storage')
@@ -64,13 +69,19 @@ def main():
         path = path.resolve()
         if output == path or output in path.parents or path in output.parents:
             ap.error('Output must be separate from inputs')
-    jobs, inventory = enumerate_variants(args.catalog, args.context_set)
+    jobs, inventory = enumerate_variants(args.catalog, args.context_set, shadow_resource_path=args.shadow_resource_path,
+                                         environment_resource_path=args.environment_resource_path)
     output.mkdir(parents=True)
     # Freeze every independent candidate before the oracle is read.
     (output / 'manifest.json').write_text(json.dumps([
         {k: v for k, v in j.items() if k not in ('vertex', 'fragment')} for j in jobs], indent=2) + '\n')
     result = compare(jobs, json.loads(args.audit.read_text())['records'], args.trace)
     result['inventory'] = inventory
+    if args.shadow_resource_path:
+        result['shadow_resource_path'] = args.shadow_resource_path
+        result['shadow_rule_version'] = 1
+    if args.environment_resource_path:
+        result.update(environment_resource_path=args.environment_resource_path, environment_rule_version=1)
     (output / 'report.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(dict(links=result['verified_links'], union_links=result['union_links'],
                           candidates=len(jobs), contexts={k:len(v) for k,v in result['context_matches'].items()},

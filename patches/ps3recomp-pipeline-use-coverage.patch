@@ -1,0 +1,223 @@
+diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -5123,6 +5123,119 @@
+     *t = n;
+     return ms;
+ }
++/* RSX_PSO_COVERAGE=1 (default off): one line per distinct complete native
++ * pipeline key a live draw requests. The key is guest_pso_hash(), which is
++ * guest_pso_hash_ex with the root signature, and it honors RSX_PSO_KEY_RS.
++ * It is not a shader id, the renderer's VP/FP cache key, GPU residency, or
++ * the pipeline-metrics counters (shader compiles, driver calls, demand jobs,
++ * warm hits). Those stay on their own line.
++ *
++ * Only the guest-FP request in the executing VP draw counts. The prepass that
++ * pre-builds PSOs, startup and race warmup, offline library and reconstruct
++ * preparation, and capture snapshots do not. A draw with no guest FP uses the
++ * fallback pipeline and is omitted. A decompile or device failure before a
++ * descriptor exists is omitted too: no key is invented.
++ *
++ * While the vertex shader or pixel-shader bytecode is not ready, that guest-FP
++ * submission is counted in pending_shader_draws and no key is emitted. The
++ * count is submissions, not distinct keys, and the same draw repeats each
++ * frame until bytecode exists. A draw with no guest FP is not counted: it
++ * never has this native key. A later frame that forms the descriptor emits
++ * that key once. Driver-pipeline E_PENDING still
++ * has a complete key, so it is recorded and is not a pending-shader draw.
++ * outcome=warm_hit|demand is not printed. A resident-table hit is also taken
++ * by preparation and by the prepass, and it is not GPU residency.
++ *
++ * The set holds 16384 keys. A new key past that sets truncated=1 and is
++ * neither stored nor emitted; unique is then only the stored count, not the
++ * true total. Summary totals are cumulative. They are emitted on the same
++ * five-second stats cadence, after each new key, and on first overflow.
++ * These are log snapshots, not proof of orderly shutdown or route completion.
++ * Shutdown and its wait policy are deliberately untouched. */
++#define PSO_COVERAGE_CAP 16384u
++#define PSO_COVERAGE_SLOTS 32768u
++static SRWLOCK s_pso_use_lock = SRWLOCK_INIT;
++static u64 s_pso_use_key[PSO_COVERAGE_SLOTS];
++static unsigned char s_pso_use_occ[PSO_COVERAGE_SLOTS];
++static u32 s_pso_use_unique, s_pso_use_recorded;
++static int s_pso_use_truncated, s_pso_use_draw;
++static volatile LONG64 s_pso_use_pending;
++static int pso_coverage_on(void)
++{
++    static volatile LONG on = -1;
++    LONG value = InterlockedCompareExchange(&on, -1, -1);
++    if (value < 0) {
++        const char* e = getenv("RSX_PSO_COVERAGE");
++        value = e && !strcmp(e, "1");
++        InterlockedCompareExchange(&on, value, -1);
++    }
++    return value;
++}
++static void pso_coverage_count_pending(void)
++{
++    if (pso_coverage_on()) InterlockedIncrement64(&s_pso_use_pending);
++}
++static void pso_coverage_snapshot_locked(void)
++{
++    fprintf(stderr,
++        "[pipeline-use-summary] format=1 unique=%u recorded=%u truncated=%d pending_shader_draws=%llu\n",
++        s_pso_use_unique, s_pso_use_recorded, s_pso_use_truncated ? 1 : 0,
++        (unsigned long long)InterlockedCompareExchange64(&s_pso_use_pending, 0, 0));
++}
++static void pso_coverage_truncate_locked(void)
++{
++    if (!s_pso_use_truncated) {
++        s_pso_use_truncated = 1;
++        /* Emit before returning: window close may be followed by an owned
++         * process kill, with no later periodic or shutdown callback. */
++        pso_coverage_snapshot_locked();
++    }
++}
++static void pso_coverage_note(u64 key)
++{
++    u32 slot;
++    if (!s_pso_use_draw || !pso_coverage_on()) return;
++    AcquireSRWLockExclusive(&s_pso_use_lock);
++    slot = (u32)key & (PSO_COVERAGE_SLOTS - 1u);
++    for (u32 n = 0; n < PSO_COVERAGE_SLOTS; n++, slot = (slot + 1u) & (PSO_COVERAGE_SLOTS - 1u)) {
++        if (s_pso_use_occ[slot]) {
++            if (s_pso_use_key[slot] == key) goto done;
++            continue;
++        }
++        if (s_pso_use_unique >= PSO_COVERAGE_CAP) { pso_coverage_truncate_locked(); goto done; }
++        s_pso_use_occ[slot] = 1;
++        s_pso_use_key[slot] = key;
++        if (fprintf(stderr, "[pipeline-use] key=%016llx\n", (unsigned long long)key) > 0) {
++            s_pso_use_unique++;
++            s_pso_use_recorded++;
++            /* Keep each newly recorded key in a complete bounded snapshot,
++             * even when the process exits before the next periodic report. */
++            pso_coverage_snapshot_locked();
++            goto done;
++        }
++        s_pso_use_occ[slot] = 0;
++        s_pso_use_key[slot] = 0;
++        pso_coverage_truncate_locked();
++        goto done;
++    }
++    pso_coverage_truncate_locked();
++done:
++    ReleaseSRWLockExclusive(&s_pso_use_lock);
++}
++static void pso_coverage_summary(int force)
++{
++    static ULONGLONG last;
++    ULONGLONG now;
++    if (!pso_coverage_on()) return;
++    now = GetTickCount64();
++    if (!force) {
++        if (last && now - last < 5000) return;
++        last = now;
++    }
++    AcquireSRWLockExclusive(&s_pso_use_lock);
++    pso_coverage_snapshot_locked();
++    ReleaseSRWLockExclusive(&s_pso_use_lock);
++}
+ static void pso_metrics_report(void)
+ {
+     static int on=-1; static ULONGLONG last;
+@@ -5326,7 +5439,10 @@
+           for (u32 h = fp_key_hash(&key) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1)) {
+               const int e = s_fpi[h];
+               if (!e) break;
+-              if (!s_library_fp && fp_key_eq(&s_d3d.vp_fp[e - 1], &key)) { pso_race_learn(s_d3d.vp_fp[e-1].native_hash); return s_d3d.vp_fp[e - 1].pso; }
++              if (!s_library_fp && fp_key_eq(&s_d3d.vp_fp[e - 1], &key)) {
++                  pso_race_learn(s_d3d.vp_fp[e-1].native_hash);
++                  if (s_pso_use_draw) pso_coverage_note(s_d3d.vp_fp[e-1].native_hash);
++                  return s_d3d.vp_fp[e - 1].pso; }
+           }
+       } else
+     for (int i = 0; i < s_d3d.vp_fp_n; i++)
+@@ -5342,7 +5458,10 @@
+             s_d3d.vp_fp[i].vmask == s_pso_vmask &&
+             s_d3d.vp_fp[i].samp_key == samp_key && s_d3d.vp_fp[i].ghi == s_pso_ghi &&
+             s_d3d.vp_fp[i].shd == s_pso_shd && s_d3d.vp_fp[i].unhi == s_pso_unhi)
+-            if (!s_library_fp) { pso_race_learn(s_d3d.vp_fp[i].native_hash); return s_d3d.vp_fp[i].pso; } }
++            if (!s_library_fp) {
++                pso_race_learn(s_d3d.vp_fp[i].native_hash);
++                if (s_pso_use_draw) pso_coverage_note(s_d3d.vp_fp[i].native_hash);
++                return s_d3d.vp_fp[i].pso; } }
+     /* Keys whose pixel shader the pool is compiling: answer "pending" without
+      * building the HLSL again. Both the pre-pass and the draw ask every frame,
+      * and rebuilding it for every waiting draw took 4 of every 5 s while a
+@@ -5353,7 +5472,15 @@
+     for (u32 h = fp_pend_h, n = 0; n < 32; n++, h = (h + 1) & (FP_PEND_N - 1)) {
+         if (!s_fp_pend[h].used) break;
+         if (fp_key_eq(&s_fp_pend[h].key, &key)) {
+-            if (!s_library_fp && (shc_pending(s_fp_pend[h].shc) || (s_fp_pend[h].pso && pso_queue_pending(s_fp_pend[h].pso)))) { s_fp_pending = 1; return NULL; }
++            if (!s_library_fp && (shc_pending(s_fp_pend[h].shc) || (s_fp_pend[h].pso && pso_queue_pending(s_fp_pend[h].pso)))) {
++                /* Shader bytecode still waiting has no descriptor. A queued
++                 * driver pipeline already stored guest_pso_hash in pso. */
++                if (s_pso_use_draw) {
++                    if (s_fp_pend[h].pso && !shc_pending(s_fp_pend[h].shc))
++                        pso_coverage_note(s_fp_pend[h].pso);
++                    else pso_coverage_count_pending();
++                }
++                s_fp_pending = 1; return NULL; }
+             break;
+         }
+     }
+@@ -6261,6 +6388,7 @@
+                 break;
+             }
+         s_fp_pending = 1;
++        if (s_pso_use_draw) pso_coverage_count_pending();
+         return NULL;
+     }
+     /* A compile that holds the frame up long enough to matter: the frame is
+@@ -6424,6 +6552,7 @@
+     ID3D12PipelineState* pso = NULL;
+     if (pso_timing_on()) pt_ms_since(&s_pt_t0);
+     u64 native_hash = guest_pso_hash(&pd);
++    if (s_pso_use_draw) pso_coverage_note(native_hash);
+     pso_race_learn(native_hash);
+     hr = pso_async_on() ? pso_queue_get(native_hash, &pd, &pso) : create_guest_pso_job(&pd, &pso);
+     if (pso_provenance_on())
+@@ -11775,7 +11904,13 @@
+                 if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
+                 const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
+                 /* Its vertex shader is still compiling in the background. */
+-                if (dr->vs_idx == VS_PENDING) { if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); } FR->shader_pending = 1; continue; }
++                if (pso_coverage_on()) s_pso_use_draw = 1;
++                if (dr->vs_idx == VS_PENDING) {
++                    if (s_pso_use_draw && dr->fp_addr) pso_coverage_count_pending();
++                    s_pso_use_draw = 0;
++                    if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); }
++                    FR->shader_pending = 1; continue;
++                }
+                 /* Per-draw pipeline: prefer the guest's own compiled FP; fall
+                  * back to the hardcoded atlas/colour PS pair. */
+                 u32 _un_dim[16][2];
+@@ -11796,6 +11931,7 @@
+                                                 /* bit 27: no depth buffer is bound */
+                                                 dr->stencil | (cur_has_dsv ? 0u : (1u << 27)),
+                                                 _un_mask, _un_dim, dr->samp_key) : NULL;
++                s_pso_use_draw = 0;
+                 /* Its shader is still compiling in the background: leave the
+                  * draw out until it is ready. */
+                 if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] d=%u dpso=%p fp_pending=%d vtx_mask=0x%X cur_rt=%d has_dsv=%d n=%u%c",
+@@ -12595,6 +12731,7 @@
+
+     s_d3d.frame_count++;
+     pso_metrics_report();
++    pso_coverage_summary(0);
+
+     /* RPCS3-style titlebar stats, refreshed once a second: presented FPS,
+      * draw count of the last frame, and the backbuffer size. */
+@@ -15297,7 +15434,10 @@
+         if (gfc && dr->vs_idx < 0) {
+             /* No GPU-fetch shader for this program: the draw cannot be made
+              * from raw bytes, and its vertices were not converted. */
+-            if (dr->vs_idx == VS_PENDING) FR->shader_pending = 1;
++            if (dr->vs_idx == VS_PENDING) {
++                if (dr->fp_addr) pso_coverage_count_pending();
++                FR->shader_pending = 1;
++            }
+             static int _n = 0; if (dr->vs_idx != VS_PENDING && _n++ < 8)
+                 fprintf(stderr, "[VTXGPU] no fetch shader for this vertex program; draw dropped%c", 10);
+             FR->gf_slot_gen[FR->draw_count] = 0;

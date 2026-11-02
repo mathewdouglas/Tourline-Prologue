@@ -23,6 +23,8 @@
 # keep -Track: HighSpeedRing is slot 0 and Daytona is slot 1, with the existing
 # press times. FujiSpeedwayF is verified slot 2. Slots 3..9 are experimental and unnamed. Passing -Track together
 # with an experimental slot is rejected.
+# -GracefulClose asks only the owned game window to close before the existing
+# owned-process timeout cleanup, allowing diagnostic shutdown summaries.
 # -Engine/-GameRoot/-OutputDirectory support isolated audit runs. Another game
 # makes launch fail; cleanup stops only this script's own process.
 # -Cpu also reports per-thread CPU over the sampling window, named from the log
@@ -37,6 +39,7 @@ param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track =
       [ValidateRange(0,3600)][int]$SampleDelay = 25,
       [string]$Engine = "", [string]$GameRoot = "", [string]$OutputDirectory = "",
       [switch]$PlayerLauncher,
+      [switch]$GracefulClose,
       [switch]$NoPrepared,
       [string]$ExtraHold = "",
       [Parameter(ValueFromRemainingArguments = $true)] $Vars)
@@ -305,6 +308,15 @@ try {
     if ($ordered.Count) { "$trackLabel`: median $($ordered[[int]($ordered.Count/2)]) fps over $Seconds s" }
     "Cache warming finished for the materials seen in this run; logs and shot: $dir/$Tag.*"
 } finally {
+    if ($GracefulClose -and $p) {
+        try {
+            $p.Refresh()
+            if (-not $p.HasExited) {
+                $p.CloseMainWindow() | Out-Null
+                $p.WaitForExit(10000) | Out-Null
+            }
+        } catch { Write-Warning "Graceful close failed; continuing owned-process cleanup." }
+    }
     if ($launcherOwner) {
         $launcherOwner.Refresh()
         if (-not $launcherOwner.HasExited) { $launcherOwner.Kill(); $launcherOwner.WaitForExit(10000) | Out-Null }

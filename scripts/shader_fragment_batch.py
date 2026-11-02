@@ -2,16 +2,35 @@
 from collections import defaultdict
 import hashlib
 import json
+from pathlib import Path
 import re
 import subprocess
 import time
 
+import shader_translation
 from shader_coverage import bounded_read,fnv64
 from shader_reconstruct import offline_env,run_offline
 
 
-def compile_batch(jobs,root,cache,engine,game_root):
+def _workspace(root, work_prefix):
+    """Caller root, or one safe child directory. Never a path that can escape it."""
+    root = Path(root)
+    if work_prefix is None:
+        return root
+    if (not isinstance(work_prefix, str) or '..' in work_prefix or work_prefix.endswith('.') or
+            not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', work_prefix)):
+        raise ValueError('Invalid fragment workspace component')
+    child = root / work_prefix
+    if child.parent != root:
+        raise ValueError('Invalid fragment workspace component')
+    return child
+
+
+def compile_batch(jobs, root, cache, engine, game_root, translation='default', work_prefix=None):
     from prepare_material_shaders import fragment_profile,save_code
+    # Fixed mode only. Overlay is applied after offline_env, which clears inherited renderer settings.
+    shader_translation.overlay(translation)
+    base = _workspace(root, work_prefix)
     started=time.perf_counter()
     groups=defaultdict(dict)
     members=defaultdict(list)
@@ -36,12 +55,14 @@ def compile_batch(jobs,root,cache,engine,game_root):
         if digest not in hashes:hashes[digest]=fnv64(raw)
     compiled,failures,pool={},{},{}
     code_bytes=0
-    report=dict(mode='batch',requested_jobs=len(jobs),unique_requests=len(members),processes=0,batches=[])
+    if work_prefix is not None:
+        base.mkdir(exist_ok=True)
+    report=dict(mode='batch',translation=translation,requested_jobs=len(jobs),unique_requests=len(members),processes=0,batches=[])
     for dither,requests in sorted(groups.items()):
         items=sorted(requests.items())
         for offset in range(0,len(items),4096):
             chunk=items[offset:offset+4096]
-            work=root/f'fragment-batch-{dither}-{offset//4096}';work.mkdir(exist_ok=True)
+            work=base/f'fragment-batch-{dither}-{offset//4096}';work.mkdir(exist_ok=True)
             lines=[f'GT5P_FP_BATCH_V1 {len(chunk)}\n']
             for identity,(digest,raw,profile) in chunk:
                 path=work/(digest+'.fp')
@@ -52,6 +73,7 @@ def compile_batch(jobs,root,cache,engine,game_root):
             (work/'jobs.txt').write_text(''.join(lines),encoding='ascii')
             env=offline_env(game_root,cache)
             env.update(RSX_SHADER_LIBRARY_BATCH=str(work),RSX_FINAL_DITHER=str(dither))
+            shader_translation.apply(env, translation)
             begin=time.perf_counter();report['processes']+=1
             print(f'Compiling exact fragment batch: {len(chunk)} requests, dither={dither}',flush=True)
             try:
@@ -93,5 +115,5 @@ def compile_batch(jobs,root,cache,engine,game_root):
                         compiled.pop(job_id,None);failures[job_id]=str(exc)
                 report['batches'].append(dict(requests=len(chunk),seconds=time.perf_counter()-begin,error=str(exc)))
     report.update(seconds=time.perf_counter()-started,prepared_jobs=len(compiled),failed_jobs=len(failures))
-    (root/'fragment-preparation-report.json').write_text(json.dumps(report,indent=2)+'\n')
+    (base/'fragment-preparation-report.json').write_text(json.dumps(report,indent=2)+'\n')
     return compiled,failures
