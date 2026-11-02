@@ -3,7 +3,7 @@
        alt="Tourline Prologue. The PT Prologue logo over a night circuit. Unofficial PC port of Gran Turismo 5 Prologue, built on your PC from your own game.">
 </p>
 
-# Tourline Prologue
+# Project Tourline Prologue
 
 **Gran Turismo 5 Prologue: unofficial PC port (static recompilation)**
 
