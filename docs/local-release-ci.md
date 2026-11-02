@@ -1,6 +1,6 @@
 # Building a player ZIP on this PC after pushes to main
 
-Current port version: **v0.2.1**, from `VERSION`. Artifact/ZIP names include that
+Current port version: **v0.2.3**, from `VERSION`. Artifact/ZIP names include that
 version and the triggering commit, while the game-data version stays 03.00.
 
 v0.2 builds the optional standalone preparation helper with pinned PyInstaller
