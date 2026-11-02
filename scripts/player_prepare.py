@@ -35,10 +35,72 @@ def shader_pack_plan(translation):
     return plan
 
 
-def preparation_token(metadata, engine_hash, decoder_hash, packs):
-    """Mix a pack marker in so an older unpacked generation is not resumed."""
-    marker = 'shader-packs-v1' if packs else ''
+def preparation_token(metadata, engine_hash, decoder_hash, packs, plan=None):
+    """Pin the plan as well as pack format; preserve the older no-pack identity."""
+    marker = ''
+    if packs:
+        from pipeline_warmup_plan import validate
+        validate(plan)
+        plan_hash=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        marker='shader-packs-v1:'+plan_hash
     return hashlib.sha256((metadata+engine_hash+decoder_hash+marker).encode()).hexdigest()[:24]
+
+
+MAX_GENERATIONS=64
+
+
+def generation_path(parent, token, number=0):
+    identity=token+'\nlearned-cache-v1\n'+str(number)
+    name=token if number==0 else hashlib.sha256(identity.encode()).hexdigest()[:24]
+    return parent/name
+
+
+def learned_metadata_changed(output, plan, progress=None):
+    """Read only: the renderer may reorder/extend seeded packs and indices."""
+    from pipeline_warmup_plan import MAX_INDEX
+    from pipeline_runtime_coverage import MAX_REPORT
+    from preparation_shader_pack import _file_digest, MAX_BYTES, MAX_ENTRIES
+    cache=cache_root(output/'shadercache')
+    report=json.loads(regular_read(output/'report.json',MAX_REPORT))
+    # The native producer checkpoints its own completion before the subsequent
+    # pack/index stage. Owner death in that interval must resume that stage,
+    # rather than treating an unpublished generation as a learned play cache.
+    if report.get('shader_packs') is None or report.get('warmup_plan') is None:
+        return False
+    for phase, keys in plan['phases'].items():
+        if progress:progress('checking-learned-cache',{})
+        path=cache/'warmup-v1'/(phase+'-v1.txt')
+        expected=''.join(key+'\n' for key in keys).encode('ascii')
+        try:actual=regular_read(path,MAX_INDEX)
+        except FileNotFoundError:return True
+        if actual!=expected:return True
+        row=report.get('shader_packs',{}).get('phases',{}).get(phase,{})
+        size, digest=row.get('file_bytes'),row.get('sha256')
+        if (type(size) is not int or not 12<=size<=MAX_BYTES+MAX_ENTRIES*12+12
+                or not isinstance(digest,str) or not re.fullmatch('[0-9a-f]{64}',digest)):
+            raise ValueError('Completed preparation is missing valid shader-pack evidence; cache preserved')
+        try:actual=_file_digest(cache/(phase+'-shaders-v1.pack'),MAX_BYTES+MAX_ENTRIES*12+12,
+            (lambda:progress('checking-learned-cache',{})) if progress else None)
+        except FileNotFoundError:return True
+        if actual!=(size,digest):return True
+    return False
+
+
+def preparation_output(parent, token, plan=None, progress=None):
+    """Resume interrupted/unchanged work, fork after completed cache learning.
+
+    Never write to the selected learned cache to make it resemble a seed. The
+    existing verified reuse path imports only shaders/driver hints into a fork.
+    Deterministic bounded slots let an interrupted fork resume on the next run.
+    """
+    for number in range(MAX_GENERATIONS if plan is not None else 1):
+        output=generation_path(parent,token,number)
+        if not output.exists():return output
+        state=json.loads(regular_read(output/'preparation-state.json',65536))
+        if not isinstance(state,dict):raise ValueError('Malformed preparation state; cache preserved')
+        if plan is None or state.get('phase')!='complete' or not learned_metadata_changed(output,plan,progress):
+            return output
+    raise ValueError('Preparation generation limit reached; existing caches preserved')
 
 
 def safe_storage(storage):
@@ -119,13 +181,13 @@ def main():
     metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
     plan=shader_pack_plan(translation)
     packs=plan is not None
+    from pipeline_warmup_plan import read as read_plan
+    plan_document=read_plan(plan) if packs else None
     token=preparation_token(metadata,hashlib.sha256(engine.read_bytes()).hexdigest(),
-                            hashlib.sha256(decoder.read_bytes()).hexdigest(),packs)
+                            hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document)
     parent=storage/'preparation'
     if parent.exists():preflight_tree(parent)
     parent.mkdir(exist_ok=True)
-    out=parent/token
-    reuse=None if a.no_reuse or os.environ.get('GT5P_PREPARE_REUSE')=='0' else previous_cache(storage,out)
     cancel=storage/'prepare.cancel';status=storage/'prepare-status.txt'
     last_status=['',0.0]
     def progress(phase,counts):
@@ -136,6 +198,8 @@ def main():
         if phase==last_status[0] and now-last_status[1]<.1:return
         status.write_text(text,encoding='utf-8')
         last_status[:]=[phase,now]
+    out=preparation_output(parent,token,plan_document,progress)
+    reuse=None if a.no_reuse or os.environ.get('GT5P_PREPARE_REUSE')=='0' else previous_cache(storage,out)
     def run_owned(exe,game_root,env,log,timeout=180):
         idle_for_player()
         begin=time.monotonic()

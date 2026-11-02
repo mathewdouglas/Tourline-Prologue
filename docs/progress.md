@@ -9,6 +9,70 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 195 - Preserve learned caches when repeating preparation (2026-11-02)
+
+Review of Grok's Phase 194 default/release integration reproduced two workflow
+bugs. Ordinary runtime learning changes the pack byte order/content and notifier
+indices; the strict seed publisher then rejects a repeated player preparation.
+The generation token also contained only a constant pack marker, so a plan-only
+update selected the same output and failed its changed checkpoint contract.
+The strict publisher itself remains useful for controlled developer outputs;
+the player needed generation selection before invoking it.
+
+The helper now includes the canonical validated plan hash in its generation
+identity. Whitespace-only JSON edits retain the identity; changed plan content
+gets a new family, even with unchanged engine, decoder and template. No-pack
+identity stays compatible. Existing v0.2.2 packed generations are preserved and
+can supply verified hints through the existing incremental-reuse path.
+
+Before resuming a completed player output, the helper compares its phase lists
+to the plan and pack identities to the successful publication report. Changed
+learned metadata selects another deterministic generation. The existing reuse
+path imports only verified template shaders/driver hints from the selected cache;
+it never imports packs or notifier membership. Unchanged complete outputs resume
+without allocating another cache. Interrupted forks resume their own output.
+Native-stage completion before pack/index publication remains resumable, including
+the narrow owner-death interval before the subsequent stage checkpoint.
+
+Selection checks are bounded (64 slots per identity, bounded local state/report/
+membership and streaming pack reads). Pack hashing polls cancellation, including
+the existing publisher's resume checks. Invalid/redirected/hard-linked inputs
+still reject. Generation exhaustion preserves every cache. Different learned
+files are never overwritten. Cancellation/failure keeps the selected pointer;
+only full successful preparation can switch it. Additional generations consume
+local storage; unknown learned shaders/pipelines remain in the earlier cache,
+and the new generation handles uncovered draws through ordinary demand work.
+No automatic cache cleanup, runtime/queue/draw change or new stutter claim.
+
+Synthetic regression exercises actual `player_prepare.main`, checkpoint,
+reuse and publication code with only native production mocked. It changes a
+valid pack's entry order and appends a genuine prepared membership key, then
+cancels a fork, resumes it and checks every byte of the learned generation and
+the pointer. An unchanged rerun stays in the same generation. A plan-only change
+gets a new family and reuses verified work. Pack-only changes, cancellation
+during selection, generation cap and intermediate native completion are covered.
+Existing pack, plan, template, translation, settings and verified-reuse checks
+pass sequentially. Direct library resume remains intentionally strict; developers
+use a fresh output and `--reuse-cache` after runtime learning.
+
+Validation uses a private rebuilt frozen helper, the published v0.2.2 engine,
+copied original ELF, read-only packed game and private cache copies. See
+`scratch/preparation-fixes-195/` for frozen helper and full native evidence,
+and the new `--learned-cache-repeat` mode of `player_prepare_reuse_native.py`.
+The clean-PATH native run passes all 2,892 pipelines using verified reuse, then
+reorders its private menu pack and adds a genuine prepared notifier key. The
+next run selects another generation; cancellation preserves the learned cache
+and pointer, and resume prepares/verifies all 2,892 pipelines with no new vertex
+or fragment compiler processes. Every byte of the learned generation, including
+its checkpoint/report/requests, is hashed before and after and stays unchanged.
+Both new packs publish only in the fork, and selection switches after success.
+Evidence: `frozen/validation.json`, `frozen/learned-validation.json` and their logs.
+The final helper rebuild also passes archive cancellation, incompatible-volume
+rejection and simulated intermediate native-completion resume without creating
+another generation or starting shader/native work (`archive-final/`).
+Published v0.2.2 assets, main/tag and all original caches remain unchanged.
+Feature pushes use `[skip ci]` and do not trigger another build.
+
 ## Phase 194 - Prepare local shader packs before first draw (2026-11-02)
 
 The user confirms the rear-view reflection/LOD hitch in both Phase 193 modes

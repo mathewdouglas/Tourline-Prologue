@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-02, Phase 194)
+## Start here: state of play (2026-11-02, Phase 195)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 194 is the latest).
+has the evidence, newest phase first (Phase 195 is the latest).
 
 ### What works now
+
+- **Post-play preparation generations (Phase 195):** player generation identity
+  includes the canonical warmup-plan hash. Unchanged completed preparations and
+  interrupted work resume; a completed cache whose packs or membership changed
+  during play gets a separate deterministic generation with verified shader/driver
+  reuse. Learned files, the old selection and caches stay intact through cancel
+  and failure; selection changes only after full success. Generation search is
+  bounded to 64 slots per identity, without cache deletion. Library staging stays
+  strict. Published v0.2.2, main and runtime behavior are unchanged; feature pushes
+  use `[skip ci]`. See progress for focused and frozen validation evidence.
 
 - **Local bytecode packs (Phase 194):** default-translation player preparation
   builds the existing menu/race `GT5PSPK1` packs from

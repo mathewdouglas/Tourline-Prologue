@@ -44,7 +44,7 @@ def dependencies(plan, document, report):
     return phases, expected
 
 
-def _file_digest(path, limit):
+def _file_digest(path, limit, poll=None):
     info = path.lstat()
     if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
             getattr(info, 'st_file_attributes', 0) & 0x400 or info.st_size > limit):
@@ -52,6 +52,7 @@ def _file_digest(path, limit):
     checksum, size = hashlib.sha256(), 0
     with path.open('rb') as stream:
         while True:
+            if poll:poll()
             data = stream.read(128 * 1024)
             if not data:
                 break
@@ -106,7 +107,7 @@ def stage(plan, document, report, cache, resume=False, progress=None, destinatio
             size += len(chunk)
         identity = (size, checksum.hexdigest())
         if path.exists() or path.is_symlink():
-            if not resume or _file_digest(path, MAX_BYTES+MAX_ENTRIES*12+12) != identity:
+            if not resume or _file_digest(path, MAX_BYTES+MAX_ENTRIES*12+12, lambda:poll('checking '+phase)) != identity:
                 raise ValueError('Refusing to replace an existing learned shader pack')
             written = False
         else:

@@ -16,6 +16,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('install','elf','game','output'):
         ap.add_argument('--'+name,type=Path,required=True)
+    ap.add_argument('--intermediate-completion',action='store_true',help='Simulate owner death after native completion but before pack/index publication')
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():ap.error('Use a fresh ignored test output')
     storage=out/'Storage';(storage/'input').mkdir(parents=True)
@@ -58,6 +59,19 @@ def main():
                               timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)
     assert result.returncode==1 and 'Game volume size mismatch' in (out/'rejected.log').read_text()
     assert json.loads(states[0].read_text())['phase']=='failed'
+    if a.intermediate_completion:
+        # No native producer ran. Reproduce its transient complete checkpoint
+        # using only this private fixture, then reject the wrong game again.
+        state=json.loads(states[0].read_text());state['phase']='complete'
+        states[0].write_text(json.dumps(state))
+        (states[0].parent/'report.json').write_text('{}')
+        before=set((storage/'preparation').iterdir())
+        with (out/'intermediate.log').open('wb') as log:
+            result=subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,
+                                  timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)
+        assert result.returncode==1 and 'Game volume size mismatch' in (out/'intermediate.log').read_text()
+        assert set((storage/'preparation').iterdir())==before
+        assert pointer.read_text()==previous and marker.read_text()=='Existing cache must survive'
     assert pointer.read_text()==previous and marker.read_text()=='Existing cache must survive'
     assert not list((storage/'preparation').rglob('*.dxbc'))
     assert not list((storage/'preparation').rglob('native.log'))

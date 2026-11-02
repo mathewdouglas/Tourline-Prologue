@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -22,6 +23,62 @@ def hashes(root):
     return {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir() if p.is_file()}
 
 
+def learned_repeat(command, env, storage, out, document):
+    """Modify only this test's selected cache, then cancel/resume its fork."""
+    pointer=storage/'prepared-cache.txt';previous=pointer.read_text()
+    cache=storage/previous
+    pack=cache/'menu-shaders-v1.pack';raw=pack.read_bytes()
+    assert raw[:8]==b'GT5PSPK1'
+    count,=struct.unpack_from('<I',raw,8);offset=12;entries=[]
+    for _ in range(count):
+        _,size=struct.unpack_from('<QI',raw,offset)
+        entries.append(raw[offset:offset+12+size]);offset+=12+size
+    assert offset==len(raw) and len(entries)>1
+    pack.write_bytes(raw[:12]+b''.join(reversed(entries)))
+    index=cache/'warmup-v1/menu-v1.txt'
+    known=set(index.read_text().splitlines())
+    extra=next(r['key'] for r in document['records'] if r['key'] not in known)
+    with index.open('ab') as stream:stream.write((extra+'\n').encode())
+    def snapshot():
+        return {str(p.relative_to(cache.parent)):hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in cache.parent.rglob('*') if p.is_file()}
+    before=snapshot()
+    generations=set(p for p in cache.parent.parent.iterdir() if p.is_dir())
+    with (out/'learned-cancel.log').open('wb') as log:
+        child=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
+        try:
+            deadline=time.monotonic()+90
+            while child.poll() is None:
+                fresh=set(p for p in cache.parent.parent.iterdir() if p.is_dir())-generations
+                if fresh and any((next(iter(fresh))/'shadercache').glob('*.dxbc')):
+                    (storage/'prepare.cancel').write_text('cancel');break
+                if time.monotonic()>deadline:raise AssertionError('Learned cache did not start a fresh generation')
+                time.sleep(.05)
+            assert child.wait(timeout=30)==2,(out/'learned-cancel.log').read_text(errors='replace')
+        finally:
+            if child.poll() is None:child.terminate();child.wait(timeout=15)
+    assert len(fresh)==1
+    fork=next(iter(fresh))
+    assert json.loads((fork/'preparation-state.json').read_text())['phase']=='interrupted'
+    assert pointer.read_text()==previous and snapshot()==before
+    (storage/'prepare.cancel').unlink()  # Request marker only.
+    with (out/'learned-resume.log').open('wb') as log:
+        subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=900,check=True,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    report=json.loads((fork/'report.json').read_text())
+    assert report['counts']=={'prepared':len(document['records'])}
+    assert report['shader_packs']['packs_written']==2
+    assert report['resume']['vertex_programs_compiled']==0
+    assert report['fragment_preparation']['processes']==0
+    assert pointer.read_text()==(fork/'shadercache').relative_to(storage).as_posix()
+    assert snapshot()==before
+    assert json.loads((fork/'preparation-state.json').read_text())['attempt']==2
+    result=dict(learned_cache_unchanged=True,cancelled_fork_resumed=True,selection_switched_after_success=True,
+                counts=report['counts'],shader_packs=report['shader_packs'],resume=report['resume'])
+    (out/'learned-validation.json').write_text(json.dumps(result,indent=2)+'\n')
+    print('Post-play learned cache preserved; frozen fork cancellation/resume and every native pipeline passed')
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     for name in ('helper-dir','zip','previous-cache','elf','output'):
@@ -31,6 +88,7 @@ def main():
     source_args.add_argument('--game',type=Path)
     ap.add_argument('--expect-hash-backend',choices=('native','python'))
     ap.add_argument('--expanding',action='store_true',help='Allow an older subset cache and require missing shaders/pipelines to be prepared')
+    ap.add_argument('--learned-cache-repeat',action='store_true',help='Repeat preparation after valid local pack/index learning; verify preserved source and fork cancellation/resume')
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():ap.error('Use a fresh ignored test output')
     install=out/'Install';storage=out/'Storage'
@@ -115,6 +173,7 @@ def main():
         preparation_seconds=report['preparation_seconds'],lookup=report['lookup'],
         native_counts=list(map(int,match.groups()))),indent=2)+'\n')
     print('Frozen generation reuse, cancellation/resume, safe selection and every native pipeline passed')
+    if a.learned_cache_repeat:learned_repeat(command,env,storage,out,document)
 
 
 if __name__=='__main__':main()

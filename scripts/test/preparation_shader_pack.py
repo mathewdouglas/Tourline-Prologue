@@ -61,11 +61,110 @@ def check_defaults():
     assert player_prepare.shader_pack_plan('native-scaled') is None
     assert player_prepare.shader_pack_plan('ultrawide-native') is None
     unpacked = player_prepare.preparation_token('meta', 'ee', 'dd', False)
-    packed = player_prepare.preparation_token('meta', 'ee', 'dd', True)
+    bundled_document=warmup.read(bundled)
+    packed = player_prepare.preparation_token('meta', 'ee', 'dd', True, bundled_document)
     assert unpacked != packed and len(unpacked) == 24
     assert unpacked == hashlib.sha256(b'metaeedd').hexdigest()[:24]
+    reject(lambda:player_prepare.preparation_token('meta','ee','dd',True))
+    changed=copy.deepcopy(bundled_document)
+    changed['phases']['menu'].reverse()
+    assert player_prepare.preparation_token('meta','ee','dd',True,changed)!=packed
+    assert player_prepare.preparation_token('meta','ee','dd',True,json.loads(json.dumps(bundled_document,indent=4)))==packed
     with patch.object(player_prepare, 'ROOT', Path('missing-root')):
         reject(lambda: player_prepare.shader_pack_plan('default'))
+
+
+def check_player_generations(folder, document, report, plan, blobs):
+    """Actual helper main + checkpoint/staging, with only native work mocked."""
+    import player_prepare as player
+    import pipeline_template as template
+    import pipeline_asset_map
+    from types import SimpleNamespace
+    storage=folder/'player-storage';storage.mkdir()
+    install=folder/'install'
+    (install/'runtime').mkdir(parents=True)
+    (install/'preparation').mkdir()
+    (install/'runtime/gt5p.exe').write_bytes(b'synthetic engine identity')
+    (install/'preparation/decoder.dll').write_bytes(b'synthetic decoder identity')
+    plan_path=folder/'player-plan.json';plan_path.write_text(json.dumps(plan))
+    calls=[];interrupt=[False]
+    def producer(*args):
+        calls.append(dict(output=args[7],reuse=args[15]))
+        if interrupt[0]:
+            interrupt[0]=False
+            raise KeyboardInterrupt('synthetic native-stage cancellation')
+        cache=args[7]/'shadercache'
+        (cache/'warmup-v1').mkdir(parents=True,exist_ok=True)
+        for key,data in blobs.items():(cache/(key+'.dxbc')).write_bytes(data)
+        for row in report['records']:
+            (cache/'warmup-v1'/('pso_'+row['key']+'.recipe')).write_bytes(b'fixture: existence only')
+        return copy.deepcopy(report)
+    argv=['player_prepare.py','--install',str(install),'--storage',str(storage),'--assets',str(folder)]
+    with patch.object(sys,'argv',argv), patch.object(player,'shader_pack_plan',return_value=plan_path), \
+            patch.object(player,'select_settings',return_value={'mode':'default'}), \
+            patch.object(player,'verify_settings'), patch.object(player,'read_map',return_value={}), \
+            patch.object(pipeline_asset_map,'read',return_value={}), \
+            patch.object(player.subprocess,'run',return_value=SimpleNamespace(stdout='')), \
+            patch.object(template,'read',return_value=document), \
+            patch.object(template,'compatibility',return_value={}), \
+            patch.object(template,'template_digest',return_value=report['template_sha256']), \
+            patch.object(template,'prepare_document',side_effect=producer), \
+            patch.dict(os.environ,{'GT5P_PREPARE_REUSE':'1','GT5P_PREPARE_REUSE_HANDOFF':'1'}):
+        old_idle=template.idle;old_runner=template.run_offline
+        import shader_fragment_batch
+        old_fragment_runner=shader_fragment_batch.run_offline
+        try:
+            player.main()
+            pointer=storage/'prepared-cache.txt'
+            first=pointer.read_text();original=storage/first
+            # A runtime save can reorder identical valid entries and add a
+            # genuine learned notifier key. Keep every byte it wrote intact.
+            path=original/'menu-shaders-v1.pack'
+            entries=decode(path.read_bytes())
+            path.write_bytes(pack.MAGIC+struct.pack('<I',len(entries))+b''.join(
+                struct.pack('<QI',int(k,16),len(data))+data for k,data in reversed(list(entries.items()))))
+            index=original/'warmup-v1/menu-v1.txt'
+            index.write_bytes(index.read_bytes()+b'0000000000000002\n')
+            snapshot={p:p.read_bytes() for p in original.parent.rglob('*') if p.is_file()}
+            # Fork cancellation preserves the selected learned cache/pointer.
+            interrupt[0]=True
+            reject(player.main,KeyboardInterrupt)
+            fork=calls[-1]['output']
+            assert fork!=original.parent and pointer.read_text()==first
+            assert json.loads((fork/'preparation-state.json').read_text())['phase']=='interrupted'
+            assert all(p.read_bytes()==data for p,data in snapshot.items())
+            player.main()
+            assert calls[-1]['output']==fork and calls[-1]['reuse'] is not None
+            assert pointer.read_text()==(fork/'shadercache').relative_to(storage).as_posix()
+            assert all(p.read_bytes()==data for p,data in snapshot.items())
+            player.main()  # Unchanged cache resumes; no unnecessary generation.
+            assert calls[-1]['output']==fork
+            assert json.loads((fork/'preparation-state.json').read_text())['attempt']==3
+            # A plan-only change chooses a new family and reuses verified work.
+            changed=copy.deepcopy(plan);changed['phases']['race'].reverse()
+            plan_path.write_text(json.dumps(changed))
+            player.main()
+            assert calls[-1]['output']!=fork and calls[-1]['reuse'] is not None
+        finally:
+            template.idle=old_idle;template.run_offline=old_runner
+            shader_fragment_batch.run_offline=old_fragment_runner
+    # A pack-only change also forks; cancellation remains polled while hashing.
+    parent=folder/'player-storage/preparation'
+    token=original.parent.name
+    index.write_bytes(b'0000000000000001\n')
+    assert player.preparation_output(parent,token,plan)==fork
+    def cancel(phase,counts):raise KeyboardInterrupt('generation selection cancelled')
+    reject(lambda:player.preparation_output(parent,token,plan,cancel),KeyboardInterrupt)
+    with patch.object(player,'MAX_GENERATIONS',1):
+        reject(lambda:player.preparation_output(parent,token,plan))
+    # Native completion is an intermediate checkpoint: a hard owner death
+    # before pack/index publication must resume, even with no phase files yet.
+    partial_parent=folder/'native-completed-before-publication'
+    partial=partial_parent/('e'*24)
+    (partial/'shadercache').mkdir(parents=True)
+    (partial/'preparation-state.json').write_text(json.dumps({'phase':'complete'}))
+    (partial/'report.json').write_text(json.dumps(report))
+    assert player.preparation_output(partial_parent,'e'*24,plan)==partial
 
 
 def main():
@@ -95,6 +194,7 @@ def main():
         phases=dict(menu=['0000000000000001'], race=[r['key'] for r in rows]),
         evidence=[dict(source_kind='local-notifier-indices', source_sha256='a'*64,
         report_sha256='b'*64, menu_index_sha256='c'*64, race_index_sha256='d'*64)])
+    check_player_generations(folder,document,report,plan,blobs)
     target = folder/'target'
     target.mkdir()
     before = {p:p.read_bytes() for p in source.iterdir()}
