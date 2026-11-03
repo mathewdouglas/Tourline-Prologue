@@ -1,0 +1,233 @@
+# Shader-first enumeration
+
+`scripts/shader_enumerate.py` compiles fragment and vertex programs found in
+the game assets across a small set of global contexts learned from the
+observed starter. The goal is a DXBC cache that does not depend on someone
+playing every car. Native pipeline objects stay with the runtime background
+worker and the observed templates.
+
+The tool is developer-only. Nothing in it is wired into player preparation.
+`GT5P_ENUM_STOP=<file>` stops a compile between chunks when that file exists.
+Outputs are game-derived and stay in gitignored storage. This note records
+the method and the measurements; it does not ship a cache.
+
+The profile tuple is exactly `prepare_material_shaders.fragment_profile`:
+exposure, the packed cube word, stencil, unnormalized units, sampler nibbles,
+the gamma/volume word, the shadow word, high-unit texel flags, the used-unit
+mask, and the final dither flag. A profile splits into a program-local vector
+and a global context. The local vector is the state of the units a material
+binds itself (shape, gamma, volume, texel addressing, sampler nibble). The
+global context is a handful of scalars plus the state of the global samplers
+the program actually samples.
+
+Bits 16–19 of `state.cube` are the MSAA sample-count nibble (0, 2, or 4 in
+this starter: 1×, 2×, 4×). The environment cube is texture unit 14, cube bit
+30, and it does not vary within a program here. Sample count is a global
+setting axis. Passing `--msaa 2,4` replicates every observed multisampled
+context at those counts and keeps every 1× context as it was learned. An
+empty `--msaa` keeps the learned counts only.
+
+Material tables supply the local vector when the material parses and its
+used-unit mask matches the program. Programs with no usable material borrow
+up to four donor local vectors observed on the same local-unit mask
+(`--fallback-locals 4`). Global sampler identifiers follow the material when
+it has them, and otherwise the observed convention (dither 103, shadow 87,
+environment cube 71, and the rarer 96, 104, and 115). Shadow flags are
+dropped when no sampled unit is a shadow map, matching the production trim.
+The catalogue stores many raw payloads per program because inline constants
+differ. The identity hash collapses those, and the compile uses the first
+payload of each identity in sorted order.
+
+## Sample count and the production key
+
+The offline compiler writes the same 16-hex HLSL source key the runtime
+stores as `RSX_SHADER_CACHE/%016llx.dxbc`. Across the finished catalogue
+compile, every identical program body (same identity, same unit state, same
+scalars apart from the sample nibble) was compared:
+
+| pair | both compiled | same key | different key |
+| --- | ---: | ---: | ---: |
+| 1× vs 2× | 12,031 | 0 | 12,031 |
+| 2× vs 4× | 12,031 | 12,031 | 0 |
+
+No identity produced two different keys for one body at the same sample
+count. The 1× shader differs by the per-sample interpolant qualifier. 2× and
+4× compile to one DXBC. Enumerating both sample counts repeats that work.
+One nonzero sample count is enough for shaders. Native pipeline state still
+depends on the sample count, and that stays on the observed-template path.
+
+Of 3,034 distinct observed (identity, profile) pairs that exist in the
+catalogue, 2,976 compiled to the template's recorded `fp_source`, none
+compiled to a different key, and 58 had no successful compile in the memo.
+
+## Held-out recall
+
+The starter provenance is the template history, labeled by record key:
+
+| label | commit | records |
+| --- | --- | ---: |
+| earlier | `273f1df` | 3,102 |
+| phase 201 dealership | `24e501f` | 1,348 |
+| phase 206 collection | `9254369` | 1,219 |
+
+The current bundle has 5,669 records and 1,404 fragment programs. 1,189 of
+those programs (4,683 records) occur in the asset catalogue. The other 215
+programs (986 records) have no asset payload and stay on the observed path.
+
+Recall asks whether contexts learned from a training split, crossed with each
+program's local vectors, reproduce the held-out profiles and their production
+keys. The candidate generator sees only the training split. The key of a
+candidate is read from the finished catalogue compile (one payload of every
+identity, contexts learned from the whole starter). A hit is an exact source
+key. A candidate the catalogue compile did not produce is unresolved and
+counts as a miss. The seed for the random split is `0x47543550`.
+
+Test programs are disjoint from the training programs in the random split.
+Content splits overlap where one program appears in more than one phase, so
+"new" counts only programs absent from the training labels.
+
+| split | MSAA axis | programs (new) | profile recall | key recall | candidates / program | wasted keys / program | unresolved | fully covered |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| random 50% | learned | 594 (594) | 1,455/1,499 (97.1%) | 1,407/1,449 (97.1%) | 6.76 | 2.86 | 73 | 576/594 |
+| random 50% | 2× and 4× | 594 (594) | 1,456/1,499 (97.1%) | 1,407/1,449 (97.1%) | 7.86 | 2.86 | 86 | 576/594 |
+| phase 206 vs earlier+201 | learned | 353 (266) | 308/678 (45.4%) | 674/678 (99.4%) | 4.79 | 2.85 | 0 | 350/353 |
+| phase 206 vs earlier+201 | 2× and 4× | 353 (266) | 674/678 (99.4%) | 674/678 (99.4%) | 7.03 | 2.85 | 0 | 350/353 |
+| phase 201 vs earlier | learned | 348 (329) | 715/718 (99.6%) | 715/718 (99.6%) | 4.89 | 2.80 | 0 | 346/348 |
+| phase 201 vs earlier | 2× and 4× | 348 (329) | 715/718 (99.6%) | 715/718 (99.6%) | 7.15 | 2.80 | 0 | 346/348 |
+| phase 201 vs the rest | learned | 348 (284) | 715/718 (99.6%) | 715/718 (99.6%) | 6.11 | 2.81 | 0 | 346/348 |
+| phase 201 vs the rest | 2× and 4× | 348 (284) | 715/718 (99.6%) | 715/718 (99.6%) | 7.16 | 2.81 | 0 | 346/348 |
+
+Phase 206 introduced every 4× record in the starter. With learned sample
+counts, 366 of its profile misses are `scalar:msaa=4`. Those profiles still
+match a production key, because the generated 2× candidate compiles to the
+recorded 4× key. Expanding the axis removes that profile gap and does not
+change the wasted-key count: the extra 4× candidates are duplicate keys.
+
+Misses that remain after expanding sample count:
+
+| split | misses |
+| --- | --- |
+| random 50% | `local(fallback)` 19, `cap/combination` 17, `local` 5, `scalar:other` 2 |
+| phase 206 vs the rest | `local` 3, `scalar:other` 1 |
+| phase 201 vs earlier, and vs the rest | `cap/combination` 1, `local` 2 |
+
+`local` means the observed local vector is not among the material's parsed
+locals. `local(fallback)` means the program had no usable material and the
+donor locals for its unit mask did not include the observed vector.
+`scalar:other` means output gamma, shadow flags, dither, or stencil differed
+from every projected context. `cap/combination` means the observed global
+context was in the projected set, so the miss is the combination with the
+local vectors rather than a missing scalar or sampler type. No context cap
+was applied. No miss in these splits was charged to a missing global sampler
+type.
+
+New-program key recall is 675/677 for the dealership against the earlier
+starter, and 548/551 for the collection against everything before it.
+
+Vertex programs are compiled as the catalogue inventory at GPU modes 0 and 1
+(1,120 programs, 2,240 variants), not as a context product. Against the
+starter, 478 of 482 observed (program, GPU mode) variants have their source
+key in that set: 14/18 at mode 0 and 464/464 at mode 1. The four misses are
+mode 0 variants that are not in the asset inventory, so the compile never
+selected them. All 2,240 inventory compiles succeeded.
+
+## Catalogue compile
+
+The fragment catalogue is `shadercache/library-v1/all`: 8,142 payload files,
+8,069 accepted, 5,864 identities, plus 1,120 vertex programs. Material tables
+cover 5,319 programs, 5,249 of them with a complete local vector. The other
+615 use donor locals.
+
+The catalogue plan at `--msaa 2,4` is 39,937 fragment jobs (6.81 per
+identity). 82 identities produced no job: the projection found no global
+context for their sampler-type set, or a fallback program had no donor local
+for its unit mask. Four locked stages, 40 chunks of 1,024 jobs (the last
+chunk is one job), compiled 39,803 jobs and failed 134, across 34 identities,
+in 963.2 seconds of stage time (299.6 + 300.9 + 287.0 + 75.7). About 41
+successful fragment jobs per second on this machine. The stage reports'
+failure counters disagree with each other because a resumed chunk is not
+counted again; the 134 is a scan of the chunk rows. The compiler's reason
+for each failure was discarded with the work log and was not re-run.
+
+Vertex compilation was one locked run: 9 chunks, 2,240 compiled, 0 failed,
+307.0 seconds.
+
+The private cache holds 27,151 DXBC files, 292,693,484 bytes. That is 24,911
+distinct fragment source keys plus the 2,240 vertex source keys.
+
+## Runtime
+
+The reference engine (180,406,784 bytes, the v0.2.3 binary) contains
+`RSX_SHADER_CACHE` and the pipeline metric switches. It does not contain
+`RSX_PSO_COVERAGE`, so the Phase 192 coverage log is not available without a
+separate patched engine. `shader_pending` is a per-frame flag and this binary
+does not print a pending-draw count. What it does print, with
+`RSX_PIPELINE_METRICS=1`, is `shader_compiles` (incremented on D3DCompile).
+`RSX_PSO_TIMING=1` prints `[pso-time]` pipeline misses for each 5 second
+window and the same compile total as "compiled so far". A draw skipped
+because a shader was still compiling is not in that line.
+
+The route is High Speed Ring through `scripts/test/race.ps1` at the script's
+720p and `RSX_MSAA=2`, sampling for 20 seconds from the moment the grid
+appears, with `RSX_SHADER_ASYNC=1` and `RSX_SHADER_WARMUP_SCAN=0`. The game
+root and both caches are private copies under scratch. The empty cache ran
+first. The enumerated cache is a copy of the 27,151 DXBC files, so the
+compile directory itself is not what the game writes. Disk lookup is the
+runtime's HLSL source-key file name (`%016llx.dxbc`), which is what the
+offline compiler wrote. A hit reads that file and does not call D3DCompile.
+`shader_compiles` counts D3DCompile calls. `[dxbc-mem]` misses count the
+times that bytecode was not already in the process memory cache, including
+both disk hits and compiles. Native pipeline blobs (`pso_*.bin`) are a
+separate cache; enumeration does not write them.
+
+Both runs reached the grid about 65 seconds after launch and then sampled
+20 seconds. The window shot 10 seconds into that sample shows the same HUD
+on both (position 8/16, lap 1/2, about 120 km/h, race clock still at
+0:00.000). The empty-cache shot shows that HUD over a black view. The
+enumerated-cache shot shows High Speed Ring.
+
+| run | last `shader_compiles` | DXBC files after | dxbc-mem hits / misses | pso-disk hits / misses / saved | median fps |
+| --- | ---: | ---: | --- | --- | ---: |
+| empty private cache | 375, with further compile lines after that sample | 0 → 399 | 3 / 366 | 0 / 285 / 285 | 20 |
+| enumerated private cache | 205, and that sample is the end of the log | 27,151 → 27,360 | 7 / 1,154 | 377 / 1,066 / 1,066 | 29 |
+
+The empty run's last pipeline-metrics line is `shader_compiles=365`; the
+later pso-time line says 375, and 19 more fragment-compile lines follow
+before the process was stopped. The 399 files are the disk result. The
+enumerated run's last metrics line and last pso-time line both say 205, and
+the cache grew by 209 DXBC files. Memory misses (1,154) minus compiles (205)
+are reads of a DXBC file that was already there: about 950 shaders served
+from the enumerated cache. The empty run's misses and compiles stay in step,
+and it started with no files.
+
+Pipeline creation was not removed. The empty run finished the sample at 284
+driver pipeline calls and 0 cached calls. The enumerated run reached 1,442
+driver calls and 376 cached calls, and wrote 1,173 `pso_*.bin` files beside
+the DXBC. Those cached calls are pipeline blobs created and then reused
+inside that one process. The enumerated run also drew more (the present
+thread's last pipeline-cache size is 949, against 284), which is why its
+median over the same 20 seconds is 29 fps rather than 20. The on-screen
+"compiling" badge counts shaders and pipelines together. Its longest showing
+was 12.2 seconds on the empty run and 14.5 seconds on the enumerated run;
+the long enumerated showing lines up with the pipeline burst, not with a
+larger shader-compile count.
+
+## Limits
+
+This is one prologue catalogue, one GPU, and one settings pair on one route.
+It is not whole-game coverage and it is not a first-draw guarantee. Programs
+with no asset payload (215 fragment identities) are invisible to enumeration.
+One payload per identity leaves other constant variants uncompiled. 82
+programs had no candidate. 134 fragment jobs failed, and their compiler
+errors were not kept. Donor locals and projected contexts can emit keys the
+held-out route never uses (about 2.8 wasted keys per test program). 2× and
+4× duplicate DXBC when both are enumerated. Native pipelines are not
+enumerated.
+
+A GT5 catalogue would need that game's own executable, volume, material
+tables, and extracted programs, and the context set would have to be
+re-measured from GT5 play. The prologue starter does not establish those
+contexts. At the rate above, a few tens of thousands of fragment jobs are a
+quarter-hour of chunked offline compile; a much larger car list is hours of
+the same kind of run, on that game's own assets, rather than a claim that
+this cache covers it.
