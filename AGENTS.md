@@ -44,6 +44,15 @@ has the evidence, newest phase first (Phase 205 is the latest).
 
 ### What works now
 
+- **Collected pipelines in the starter:** the local 1080p/16:9 collection
+  reviewed to 1,219 unambiguous additions and 0 conflicts; 149 of 1,368 verified
+  records were already in the previous 4,450. Original-volume search located all
+  300 new programs. A fresh native prepare prepared 1,219/1,219, reusing verified
+  shaders and creating the native keys again. The source starter is 5,669 records
+  / 1,881 programs (477 VP, 1,404 FP). The volume map adds 36 search-map members
+  (201 total). Warmup membership is unchanged and re-pinned; the new keys stay on
+  the demand path. No commit, release, or full 5,669-record generation.
+
 - **Faster preparation reads (Phase 205):** four bounded readers check reusable
   shaders/driver hints, persisted cache and pack dependencies; all writes and
   publication remain on the owner. GT5P_PREPARE_IO_WORKERS=1 restores serial I/O.

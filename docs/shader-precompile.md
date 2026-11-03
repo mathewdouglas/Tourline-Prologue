@@ -28,8 +28,11 @@ verification after the launcher stops the current game (Phase 204). This require
 the matching new launcher/engine/helper package. `GT5P_PIPELINE_TOOLS=0` disables
 those settings actions; the standalone CMD entries remain available.
 
-The Phase-201 development starter contains 4,450 verified observed pipelines /
-1,581 original program identities. Dealership test 1 contributes 1,348 additions,
+The development starter contains 5,669 verified observed pipelines /
+1,881 original program identities (477 VP, 1,404 FP). A local 1080p/16:9
+collection contributes 1,219 additions, all located in the original volume and
+prepared with exact native keys. The previous 4,450 records stay. Phase 201 had
+reached 4,450 pipelines / 1,581 programs. Dealership test 1 contributes 1,348 additions,
 all reconstructed from original assets with exact fresh native keys and persisted
 driver blobs. Full frozen-helper growth from the older 3,102-record cache passes
 cancellation/resume and both bounded native chunks. The expanded lookup maps and

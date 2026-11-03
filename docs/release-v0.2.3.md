@@ -3,12 +3,16 @@
 This update expands optional shader preparation and adds player controls for
 learning and verifying pipelines from your own play sessions.
 
-- The starter now contains **4,450 verified observed pipelines**, including
-  dealership collection, with matching original-program lookup maps and observed
-  menu/race warmup membership. It remains partial game coverage.
+- The starter now contains **5,669 verified observed pipelines**, including
+  dealership and subsequent player collection, with matching original-program
+  lookup maps. Observed menu/race warmup membership is retained; newly added
+  keys without observed membership stay on the demand path. Coverage is partial.
 - Preparation retains completed additional-translation fragment chunks through
   cancellation. Resume checks saved work before reuse. Smaller chunks provide
   progress between compiler jobs; normal compiler limits remain unchanged.
+- Retained preparation generations no longer hit the old fixed 100,000-entry
+  scan limit. The bounded scan allowance now follows catalogue capacity and
+  retained generations, keeping link and ownership checks in place.
 - Bounded parallel reads reduce cached preparation overhead. One local full
   4,450-record pair measured 261.34 seconds with serial reads and 202.52 seconds
   with four readers. This is a cached preparation result on one machine, not a
