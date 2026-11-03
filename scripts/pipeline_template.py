@@ -190,7 +190,8 @@ def bundle(document, output):
     output.mkdir(parents=True)
     for name,data in payloads:
         (output/name).write_bytes(data)
-    save_report(output/'index.json',dict(schema=SCHEMA+'-bundle',version=VERSION,parts=parts))
+    index=dict(schema=SCHEMA+'-bundle',version=VERSION,parts=parts)
+    (output/'index.json').write_bytes((json.dumps(index,indent=2)+'\n').encode())
 
 
 def envelope(record, vs, ps, check_lengths=True):
@@ -355,13 +356,16 @@ def packs_enabled(choice, warmup_plan):
 
 
 def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False):
-    from shader_reconstruct import offline_warmup
+    from shader_reconstruct import offline_warmup, native_profile
     from shader_vertex_batch import poll_seconds
     offline_warmup()
+    native_profile()
     from preparation_workers import compiler_workers
     from train_pipeline_cache import verification_batch
     compiler_workers()
     verification_batch()
+    from preparation_native_handoff import choice
+    choice()
     if vertex_mode == 'batch':
         poll_seconds()
     from pipeline_translation import MODES, fragment_batch_size
@@ -645,8 +649,14 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
     fresh,failures=compile_fragments(pending,root,cache,engine,game_root,mode=fragment_mode)
     compiled.update(fresh)
     report['fragment_preparation']=json.loads((root/'fragment-preparation-report.json').read_text())
+    from preparation_native_handoff import NativeRequests
+    input_started=time.perf_counter()
+    checkpoint.stage('native-input',requested=len(jobs))
+    handoff = NativeRequests(engine,cache)
     requests = []
-    for job in jobs:
+    for number,job in enumerate(jobs):
+        if checkpoint.progress and number%32==0:
+            checkpoint.progress('native-input',dict(completed=number,total=len(jobs)))
         r, vs = by_id[job['id']]
         try:
             if job['id'] in failures:
@@ -655,25 +665,31 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
             if key != r['fp_source'] or f'{fnv64(ps):016x}' != r['ps']:
                 raise ValueError('Rebuilt fragment identifier differs')
             proof = root / job['id'] / 'pipeline'
-            proof.mkdir(parents=True,exist_ok=True)
-            (proof / 'request.recipe').write_bytes(envelope(r, vs, ps))
-            for code in (vs, ps):
-                (proof / f'code_{fnv64(code):016x}.dxbc').write_bytes(code)
-            (proof/'result.json').write_text('{"pending":true}\n')
+            handoff.write(proof,envelope(r,vs,ps),vs,ps)
             requests.append(job['id'])
         except ValueError as exc:
             report['records'].append(dict(key=r['key'], status='incompatible', reason=str(exc)))
+    report['native_input_seconds']=time.perf_counter()-input_started
     if requests:
+        handoff.release()
         checkpoint.stage('native',requested=len(requests))
         env = offline_env(game_root, cache)
         env.update(RSX_PSO_PREPARE_BATCH=str(root), RSX_PSO_TEMPLATE_PREPARE='1', RSX_PSO_RECIPE_KEEP_DAYS='0')
+        handoff.environment(env,root)
+        report['native_timings']=[]
         run_batches(requests, root, engine, game_root, env, output/'native.log', run_offline,
-                    lambda done, total: checkpoint.stage('native', completed=done, total=total, requested=total))
+                    lambda done, total: checkpoint.stage('native', completed=done, total=total, requested=total),
+                    results=handoff.results,timings=report['native_timings'],
+                    recipes=lambda identity:handoff.recipe(root,identity))
+    report['native_handoff']=handoff.report
+    result_started=time.perf_counter()
     for identity in requests:
         r = by_id[identity][0]
-        result = json.loads((root / identity / 'pipeline/result.json').read_text())
+        result = handoff.result(root,identity)
         passed = result.get('created') and result.get('actual') == result.get('expected') == r['key']
         report['records'].append(dict(key=r['key'], status='prepared' if passed else 'key-rejected', result=result))
+    handoff.finish()
+    report['native_result_seconds']=time.perf_counter()-result_started
     checkpoint.stage('verifying-cache')
     report['inventory'] = inventory(cache, True, checkpoint.progress)
     report['counts'] = dict(Counter(r['status'] for r in report['records']))

@@ -115,6 +115,12 @@ def main():
     cached=json.loads((generation/'report.json').read_text())['additional_translation']
     assert cached['fragment_jobs_reused']==a.count and cached['fragment_preparation']['processes']==0
     assert pointer.read_text()==selected_pointer and snapshot(source)==before
+    run('cached-handoff-rollback',{'GT5P_PREPARE_HANDOFF':'0'})
+    rollback=json.loads((generation/'report.json').read_text())
+    assert rollback['native_handoff']['enabled'] is False
+    assert rollback['additional_translation']['native_handoff']['enabled'] is False
+    assert rollback['additional_translation']['fragment_jobs_reused']==a.count
+    assert pointer.read_text()==selected_pointer and snapshot(source)==before
     preserved=snapshot(state.parent)
     run('invalid-chunk',{'GT5P_PREPARE_FRAGMENT_CHUNK':'0'},False)
     assert pointer.read_text()==selected_pointer and snapshot(source)==before
@@ -122,6 +128,7 @@ def main():
     assert snapshot(state.parent)==preserved
     for name, overrides in (
             ('invalid-workers',{'GT5P_PREPARE_COMPILER_WORKERS':'5'}),
+            ('invalid-handoff',{'GT5P_PREPARE_HANDOFF':'2'}),
             ('invalid-verification',{'GT5P_PREPARE_VERIFY_BATCH':'0'})):
         run(name,overrides,False)
         assert pointer.read_text()==selected_pointer and snapshot(source)==before
@@ -131,6 +138,7 @@ def main():
         clean_path=True,old_selection_preserved_on_cancel=True,source_unchanged=True,
         chunk_rollback_reused_all=True,invalid_chunk_preserved_selection=True,
         invalid_worker_and_verification_preserved_selection=True,
+        native_handoff_rollback_reused_all=True,
         seconds=time.perf_counter()-started,
         limitation='Frozen offline subset on one GPU; no live rendering or stutter measurement.'),indent=2)+'\n')
     print('Frozen fragment checkpoint, resume, rollback and selection/source preservation passed:',out)

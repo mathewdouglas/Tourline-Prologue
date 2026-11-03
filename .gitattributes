@@ -3,3 +3,5 @@
 patches/ps3recomp-4e8f3ca8-local.patch -text
 # Metadata shards have byte-level checksums; preserve their LF bytes on Windows.
 assets/pipeline-templates/**/part-*.json text eol=lf
+# Warmup plans hash bundle indices too; their bytes must survive Windows checkout.
+assets/pipeline-templates/**/index.json text eol=lf

@@ -36,13 +36,27 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 209)
+## Start here: state of play (2026-11-03, Phase 210)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 209 is the latest).
+has the evidence, newest phase first (Phase 210 is the latest).
 
 ### What works now
+
+- **Native preparation timing and bounded handoff (Phase 210, development):**
+  default-off aggregate timing separates startup, recipe/shader reads, driver
+  creation and persistence. The original native batch spends 92.3 s reading
+  inputs versus 24.2 s in driver calls. A capability-gated shared bytecode pool,
+  bounded binary recipe chunks and atomic result manifests reduce batch time
+  144.13 -> 65.63 s; driver time stays about 24 s. Full fresh preparation is
+  451.93 -> 336.33 s, with identical packs and all 5,669 shader/native/persistence
+  checks passing. Records/maps/membership are unchanged; source fingerprint and
+  plan/index pins are reissued. Frozen cancel/resume/legacy rollback, corrupt
+  input rejection, budget fallback and old-engine auto fallback pass. Private
+  test caches/builds are removed. Warm cached trials converge near 2.1 s, so no
+  universal cached or gameplay claim follows. See progress for limits/controls;
+  published v0.2.3 stays unchanged.
 
 - **Compiler concurrency and cache verification (Phase 209, development):**
   offline preparation selects four workers on CPUs with at least eight logical

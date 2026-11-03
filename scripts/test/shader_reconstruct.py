@@ -11,6 +11,16 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
 from preparation_workers import compiler_workers
 
+with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':'0','RSX_PSO_PREPARE_PROFILE':'1'}):
+    assert 'RSX_PSO_PREPARE_PROFILE' not in m.offline_env(Path('game'),Path('cache'))
+with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':'1'}):
+    assert m.offline_env(Path('game'),Path('cache'))['RSX_PSO_PREPARE_PROFILE']=='1'
+for value in ('','2','true'):
+    with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':value}):
+        try:m.native_profile()
+        except ValueError:pass
+        else:raise AssertionError('Invalid native profile setting accepted')
+
 for cpus, expected in ((None,2),(2,2),(4,2),(7,2),(8,4),(12,4),(64,4)):
     with patch('preparation_workers.os.cpu_count',return_value=cpus):
         assert compiler_workers({}) == expected

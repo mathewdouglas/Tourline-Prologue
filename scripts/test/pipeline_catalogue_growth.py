@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     t.bundle(copy.deepcopy(document), root/'bundle')
     assert len(json.loads((root/'bundle/index.json').read_text())['parts']) == 65
+    assert b'\r\n' not in (root/'bundle/index.json').read_bytes()
     assert t.read(root/'bundle') == document
     try:
         c.encode(document)

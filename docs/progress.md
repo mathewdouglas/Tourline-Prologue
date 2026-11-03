@@ -9,6 +9,145 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 210 - Native timing and bounded intermediate handoff (2026-11-03)
+
+Native preparation now exposes default-off aggregate timing via
+`GT5P_PREPARE_NATIVE_PROFILE=1`. One summary per native chunk separates recipe
+validation, shader reads/hashing, driver-hint reads, existing driver-call timing,
+GetCachedBlob/write/rename persistence, warmup recipe/code persistence and result
+publication. Child creation-to-batch entry is measured from Windows process
+creation time and includes initialization/manifest parsing. Other intervals use
+QPC; controller timers separate request serialization, result parsing and process
+wall time. The residual includes host launch/preflight, wait, native cleanup and
+exit. It must not be called pure startup. No per-frame trace, new native worker,
+parallel native process or live draw policy is introduced.
+
+The full legacy diagnostic control identifies file traffic, not driver creation,
+as the largest native cost. Keeping driver calls sequential, the final transport
+uses capability-gated `GT5P_OFFLINE_HANDOFF_V2`, a shared verified bytecode pool,
+one bounded numeric recipe bundle per chunk and an atomic result manifest.
+`GT5P_PREPARE_HANDOFF=auto` selects it only for matching engines; `=0` restores
+per-request inputs/results and `=1` requires the capability. The executable scan
+uses bounded buffers; larger/unknown engines conservatively fall back. A real
+32-record fresh proof with the existing release engine confirms legacy fallback,
+exact keys/persistence and cache cleanup, with timing disabled.
+
+Host bytecode references are bounded to 128 MiB and complete recipe buffering to
+16 MiB. Overflow recipes use the old file path and are read into bounded chunks;
+no records are silently omitted. A chunk has at most 4,096 records / 11,567,120
+serialized bytes, including 64-byte identifiers and the unchanged 2,760-byte
+recipe. Native input validates magic, exact size/count, identifier membership and
+every original envelope/descriptor check before the first driver call. Its code
+cache is limited to 128 MiB / 8,192 entries per process; cache-full reads use
+ordinary owned buffers. All caches free on batch completion or process teardown.
+Input arrays are private to the guarded offline owner. Normal gameplay never
+activates this state. Existing async policy, shader workers, native chunk limits,
+root signature/key ABI, process jobs and shutdown guarantees stay intact.
+
+Grouped results retain the existing result fields and publish only after every
+native creation succeeds and the stream closes without error. Publication does
+not itself establish persistence or authorize cache selection. Completion publication,
+exact membership, duplicate/missing IDs, expected/actual keys and persisted cache
+verification are independently checked by the owner. An earlier manifest is
+invalidated before each launch; partial/stale results cannot authorize success.
+Shader checkpoints stay durable; native input is rebuilt on resume from verified
+shaders plus pinned numeric metadata. Cancellation polls during input generation
+and native chunks retain their existing owned cleanup. Switching transports on
+resume preserves selection/source cache. Existing legacy files are not deleted.
+
+Three ordered full fresh runs measure legacy input, shared bytecode/results,
+then the final bundled transport. The final format adds recipe bundling after
+the first comparison showed individual recipe opens still cost about 30 seconds.
+All runs use four compiler workers, four verification readers, the original
+packed game, default translation and identical 5,669 numeric records/observed
+plan membership. All 482 vertex variants / 3,696 exact fragment requests
+(3,609 canonical compiler jobs) compile without application-cache reuse. Every
+native request/persisted blob passes, in 4,096/1,573 chunks with zero cached-blob
+calls. Menu/race pack hashes are identical. The legacy control and final format
+use separate private engine builds; the intermediate and final formats therefore
+are an ordered development series, not a single ABBA compiler/native trial.
+
+| Measured cost | Legacy control | Final bundle |
+| --- | ---: | ---: |
+| Full preparation | 451.93 s | 336.33 s |
+| Host native-input staging | 19.08 s | 3.76 s |
+| Native stage wall time | 149.50 s | 70.05 s |
+| Aggregate native batch time | 144.13 s | 65.63 s |
+| Recipe reads/validation | 32.52 s | 0.042 s |
+| Shader reads/validation | 59.42 s | 20.20 s |
+| Actual driver creation | 24.17 s | 23.92 s |
+| Blob persistence | 11.76 s | 10.20 s |
+| Warmup recipe/code persistence | 12.58 s | 9.57 s |
+| Result writes/publication | 1.964 s | 0.054 s |
+| Child startup, both chunks | 2.72 s | 2.48 s |
+
+Full preparation takes 115.60 seconds / 25.58% less time; native batch time falls
+78.50 seconds / 54.47%. Driver creation is approximately unchanged at the endpoints;
+it did vary in the intermediate run. Compiler times also vary (252.26 -> 236.51 s
+combined), so the whole preparation gain must not be attributed solely to native
+transport. Bucket/report scopes differ and must not all be added together.
+Hardware: i5-12400F, 16 GB RAM, RTX 4060, driver 32.0.16.1088, `PS3_VERBOSE=0`.
+These are profiled, application-cache-cold runs; OS/driver caches are preserved.
+No live rendering, stutter, all-settings or whole-game acceptance is claimed.
+
+Fresh working-file count falls 43,600 -> 20,926 (52.0% fewer); bytes at completion
+fall 1,016,339,582 -> 632,305,430. This counts files, not every filesystem operation.
+The owner checks/writes 4,067 shared code bodies instead of 11,338 per-request
+copies. Native reads fall 11,338 -> 4,468, with 6,870 verified in-memory hits across
+two separate processes. Peak host references are 62,189,856 bytecode bytes and
+15,646,440 recipe bytes; native cached code peaks at 53,471,336 bytes. Recipe
+serialization and current uncached payloads have additional bounded buffers.
+Maximum individual offline-engine peak commit is about 2,221 -> 2,222 MiB; this
+does not measure the parent/process-tree peak. Existing old generations retain
+their files; the lower count applies to fresh outputs.
+
+A 128-key same-cache old/new/new/old native trial creates all 128 PSOs from cached
+driver blobs each time, verifies every key and leaves selected seed blobs
+byte-identical. Wall times are 3.866 / 2.070 / 2.054 / 2.076 seconds. The first old
+trial's input-file reads are much slower than the last old trial's; after warming,
+overall wall time converges near 2.1 seconds. This does not establish a stable
+large cached-preparation gain. Per-request result writes remain about 45 ms vs
+2 ms aggregate, but startup dominates this small subset. Full fresh file creation
+and first-open behavior are separate from steady warm-cache costs.
+
+Real native negative proofs reject corrupt shared bytecode, a nonzero descriptor
+pointer with a recomputed valid envelope checksum, truncated input and a mismatched
+ID. Every failed batch performs zero requested driver calls and leaves an earlier
+result manifest unchanged. The actual header's synthetic native test proves
+byte/slot-cap fallback, ownership/freeing, default-off clocks and bundle guards;
+it stubs the loader/recipe validator, while the real negative proof exercises
+production validation. Host malformed-result, byte/recipe-budget spill, content
+conflict, marker-boundary/fallback, translation, large-catalogue, metadata-contract
+and package regressions pass. The final frozen clean-PATH default/ultrawide subset
+cancels after eight saved fragments, resumes them, validates all 32 native calls,
+reuses shaders on cached/chunk rollback and switches to legacy native handoff.
+Invalid chunk/worker/handoff/verification settings preserve selected cache, source
+and derived work. Existing UI/launch ownership is retained; no new live route is run.
+
+The runtime patch changes its conservative source fingerprint. All 45 starter
+shards and index are reissued with the same 5,669 records; maps and observed
+membership are unchanged, and the plan's template hash is re-pinned coherently.
+Bundle indices now use explicit LF generation/checkout because their bytes are
+hashed by warmup plans, matching the existing shard policy. The metadata audit
+against 7a5c950 checks records, other compatibility fields, maps and membership.
+No new shader/pipeline coverage is added. Old contribution contracts still require
+maintainer re-verification/reissue; a fingerprint change is not permission to trust
+an old claimed proof.
+
+Ignored evidence: `scratch/native-preparation-210/full/{legacy,shared}.json`
+(first transport), `final/shared.json` (final format), each `acceptance.json` and
+`frozen-validation.json`, `native-policy.json`, `old-engine.json`, controller logs
+and comparison metadata. `preparation_native_profile.py --full` builds the changed
+backend/presentation objects privately and links unchanged read-only CI objects;
+`--shared-only` runs the final proof against an already measured control. It verifies
+the pinned baseline backend before applying the authored patch. No shared runtime,
+CI objects or install are overwritten. Every build/test/compiler operation owns
+the shared validation mutex through child cleanup. All private shader/driver/raw
+program caches, engines, objects, helper/PyInstaller outputs and native test builds
+are removed; only metadata/logs remain. Original game files, user caches and driver
+caches stay intact. Main, tags, v0.2.3 and release workflows remain unchanged;
+development commits/pushes use `[skip ci]`.
+
 ## Phase 209 - Compiler concurrency and size-aware cache verification (2026-11-03)
 
 Offline preparation now selects four compiler workers on CPUs reporting at

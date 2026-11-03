@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import subprocess
+import struct
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,7 +31,7 @@ def main():
     ap.add_argument('--profile', action='store_true')
     ap.add_argument('--compare-verification', action='store_true', help='Read-only same-cache 1/32/32/1 verification pair')
     args = ap.parse_args()
-    from pipeline_template import prepare, read, bundle
+    from pipeline_template import prepare, read, bundle, envelope
     from preparation_workers import compiler_workers
     from shader_reconstruct import run_offline
     import pipeline_template
@@ -159,7 +160,73 @@ def main():
                 verification.append(dict(batch=int(choice),seconds=time.perf_counter()-begin,
                     recipes=len(checked['recipes']),blobs=len(checked['valid_driver_blobs'])))
         progress('cleanup', {})
-        counts = dict(files=sum(1 for p in output.rglob('*') if p.is_file()))
+        files=[p for p in output.rglob('*') if p.is_file()]
+        counts = dict(files=len(files),bytes=sum(p.stat().st_size for p in files))
+        native_rejection = None
+        native_cached_comparison=[]
+        if report.get('native_handoff',{}).get('enabled'):
+            from shader_reconstruct import offline_env
+            from preparation_native_handoff import NativeRequests
+            from pipeline_native_batch import run_batches
+            from shader_coverage import fnv64
+            cache=output/'shadercache';warm=cache/'warmup-v1'
+            pair=fresh/'native-pair';pair.mkdir()
+            recipes={};expected={};seed={}
+            with patch.dict(os.environ,{'GT5P_PREPARE_HANDOFF':'0'}):writer=NativeRequests(args.engine,cache)
+            for row in document['records'][:128]:
+                identity=hashlib.sha256(row['key'].encode()).hexdigest()
+                vs=(warm/('code_'+row['vs']+'.dxbc')).read_bytes()
+                ps=(warm/('code_'+row['ps']+'.dxbc')).read_bytes()
+                recipe=envelope(row,vs,ps);recipes[identity]=recipe;expected[identity]=row['key']
+                writer.write(pair/identity/'pipeline',recipe,vs,ps)
+                path=cache/('pso_'+row['key']+'.bin');seed[path]=hashlib.sha256(path.read_bytes()).hexdigest()
+            for number,enabled in enumerate((False,True,True,False)):
+                env=offline_env(args.game_root,cache)
+                env.update(RSX_PSO_PREPARE_BATCH=str(pair),RSX_PSO_TEMPLATE_PREPARE='1',RSX_PSO_PREPARE_PROFILE='1')
+                if enabled:env.update(RSX_PSO_PREPARE_CODE_DIR=str(warm),RSX_PSO_PREPARE_RESULTS=str(pair/'batch-results.jsonl'),
+                    RSX_PSO_PREPARE_REQUESTS=str(pair/'batch-requests.bin'))
+                results={};timing=[];begin=time.perf_counter()
+                counts_pair=run_batches(list(recipes),pair,args.engine,args.game_root,env,pair/f'{number}.log',run_offline,
+                    results=results,timings=timing,recipes=lambda identity:recipes[identity])
+                assert counts_pair==[len(recipes)]*4,counts_pair
+                for identity,key in expected.items():
+                    value=results[identity] if enabled else writer.result(pair,identity)
+                    assert value['actual']==value['expected']==key and value['created']
+                native_cached_comparison.append(dict(handoff=enabled,requests=len(recipes),counts=counts_pair,
+                    wall_seconds=time.perf_counter()-begin,timing=timing[0]))
+            assert all(hashlib.sha256(path.read_bytes()).hexdigest()==value for path,value in seed.items())
+            identity,recipe=next(iter(recipes.items()))
+            reject=fresh/'reject';reject.mkdir()
+            code_hash,=struct.unpack_from('<Q',recipe,24)
+            length,=struct.unpack_from('<I',recipe,40)
+            assert 0<length<=4*1024*1024
+            bad=reject/'bad';bad.mkdir()
+            (bad/f'code_{code_hash:016x}.dxbc').write_bytes(bytes(length))
+            (reject/'jobs.txt').write_text(identity+'\n')
+            manifest=reject/'batch-results.jsonl';manifest.write_text('previous-result-sentinel\n')
+            env=offline_env(args.game_root,output/'shadercache')
+            env.update(RSX_PSO_PREPARE_BATCH=str(reject),RSX_PSO_TEMPLATE_PREPARE='1',
+                RSX_PSO_PREPARE_CODE_DIR=str(bad),RSX_PSO_PREPARE_RESULTS=str(manifest),
+                RSX_PSO_PREPARE_REQUESTS=str(reject/'batch-requests.bin'))
+            prefix=struct.pack('<8sII',b'GT5PPRQ2',1,2760)+identity.encode()
+            (reject/'batch-requests.bin').write_bytes(prefix+recipe)
+            text=run_offline(args.engine,args.game_root,env,reject/'native.log',timeout=60)
+            assert '[pso-material-batch] valid=1 requests=1 created=0 driver_calls=0 cached_blob_calls=0' in text
+            assert '[pso-offline-results] version=1 rows=1 published=0' in text
+            assert manifest.read_text()=='previous-result-sentinel\n'
+            env['RSX_PSO_PREPARE_CODE_DIR']=str(warm)
+            pointer=bytearray(recipe);struct.pack_into('<Q',pointer,48,1)
+            struct.pack_into('<Q',pointer,2752,fnv64(pointer[:2752]))
+            for label,payload in (('pointer',prefix+pointer),('truncated',(prefix+recipe)[:-1]),
+                    ('id',prefix[:16]+b'f'*64+recipe)):
+                (reject/'batch-requests.bin').write_bytes(payload)
+                text=run_offline(args.engine,args.game_root,env,reject/(label+'.log'),timeout=60)
+                assert '[pso-material-batch] valid=0 requests=1 created=0 driver_calls=0 cached_blob_calls=0' in text
+                assert '[pso-offline-results] version=1 rows=1 published=0' in text
+                assert manifest.read_text()=='previous-result-sentinel\n'
+            native_rejection=dict(corrupt_shared_code_rejected=True,previous_result_manifest_preserved=True,
+                failed_batch_driver_calls=0,invalid_pointer_truncation_and_id_rejected=True,
+                cached_comparison_driver_blobs_unchanged=True)
         timings = []
         if args.profile:
             stats = pstats.Stats(profiler)
@@ -168,6 +235,11 @@ def main():
         summary = dict(passed=True, application_cache_cold=True, driver_cache_cleared=False,
             requested=report['requested'], counts=report['counts'], seconds=report['preparation_seconds'],
             vertex=report['vertex_preparation'], fragment=report['fragment_preparation'],
+            native_timings=report.get('native_timings',[]),native_handoff=report.get('native_handoff'),
+            native_input_seconds=report.get('native_input_seconds'),
+            native_result_seconds=report.get('native_result_seconds'),
+            native_rejection=native_rejection,
+            native_cached_comparison=native_cached_comparison,
             resume=report['resume'], hashing=report['hashing'], lookup=report['lookup'],
             stages=stages, offline_processes=native_calls, profile=timings, temporary_files=counts,
             engine_sha256=hashlib.sha256(args.engine.read_bytes()).hexdigest(),

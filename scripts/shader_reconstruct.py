@@ -157,8 +157,15 @@ def offline_warmup(environ=None):
     return value
 
 
+def native_profile():
+    profile = os.environ.get('GT5P_PREPARE_NATIVE_PROFILE','0')
+    if profile not in ('0','1'):raise ValueError('GT5P_PREPARE_NATIVE_PROFILE must be unset, 0, or 1')
+    return profile
+
+
 def offline_env(game_root, cache):
     from preparation_workers import compiler_workers
+    profile = native_profile()
     env = {k: v for k, v in os.environ.items()
            if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
            and k.upper() != 'PS3_HEADLESS'}
@@ -167,6 +174,7 @@ def offline_env(game_root, cache):
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',
                GT5P_PREPARE_OFFLINE_WARMUP=offline_warmup(),
                RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS=str(compiler_workers()), RSX_PSO_PROVENANCE='0')
+    if profile == '1':env['RSX_PSO_PREPARE_PROFILE']='1'
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'
     return env

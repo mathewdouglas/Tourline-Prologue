@@ -226,8 +226,12 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
         publish('translation-native', requested=len(document['records']))
         native_root = root/'r'
         native_root.mkdir(exist_ok=True)
+        from preparation_native_handoff import NativeRequests
+        handoff = NativeRequests(engine,cache)
         requests, derived, seen = [], [], {}
-        for record in document['records']:
+        for number,record in enumerate(document['records']):
+            if progress and number%32==0:
+                progress('translation-native-input',dict(completed=number,total=len(document['records'])))
             vi = record['vp']['sha256']+':'+str(record['vp_gpu'])
             fi = _sha(record['key'].encode())
             vs, ps = vertex_codes[vi], fragment_codes[fi]
@@ -236,27 +240,29 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             if row['key'] not in seen:
                 identity = _sha(row['key'].encode())
                 proof = native_root/identity/'pipeline'
-                proof.mkdir(parents=True, exist_ok=True)
-                (proof/'request.recipe').write_bytes(envelope(row, vs, ps))
-                for code in (vs, ps):
-                    save_code(proof/f'code_{fnv64(code):016x}.dxbc', code)
-                (proof/'result.json').write_text('{"pending":true}\n')
+                handoff.write(proof,envelope(row,vs,ps),vs,ps)
                 requests.append(identity)
                 seen[row['key']] = identity
             derived.append(dict(template_key=record['key'], key=row['key'],
                                 vp_source=row['vp_source'], fp_source=row['fp_source']))
         native_counts = None
+        handoff.release()
+        native_timings=[]
         if requests:
             env = offline_env(game_root, cache)
             env.update(RSX_PSO_PREPARE_BATCH=str(native_root), RSX_PSO_TEMPLATE_PREPARE='1',
                        RSX_PSO_RECIPE_KEEP_DAYS='0')
+            handoff.environment(env,native_root)
             native_counts = run_batches(requests, native_root, engine, game_root, env, root/'native.log', runner,
-                lambda done, total: stage('translation-native', completed=done, total=total, requested=total))
+                lambda done, total: stage('translation-native', completed=done, total=total, requested=total),
+                results=handoff.results,timings=native_timings,
+                recipes=lambda identity:handoff.recipe(native_root,identity))
         for row in derived:
-            result = json.loads(bounded_read(native_root/seen[row['key']]/'pipeline/result.json', 65536))
+            result = handoff.result(native_root,seen[row['key']])
             if not result.get('created') or result.get('actual') != result.get('expected') or result['actual'] != row['key']:
                 raise ValueError('Derived native pipeline key/creation rejected')
         stage('translation-verifying')
+        handoff.finish()
         checked = inventory(cache, True)
         if checked['rejected'] or not set(seen) <= set(checked['valid_driver_blobs']):
             raise ValueError('Derived native cache persistence failed')
@@ -264,7 +270,8 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             vertex_preparation=vertex_report, vertex_variants_reused=reused_v,
             fragment_jobs_reused=reused_f, fragment_preparation=json.loads(
                 bounded_read(fp_root/'fragment-preparation-report.json', 1024*1024)),
-            native_counts=native_counts, records=derived, root_signature=f'{root_hash:016x}',
+            native_counts=native_counts, native_timings=native_timings,native_handoff=handoff.report,
+            records=derived, root_signature=f'{root_hash:016x}',
             seconds=time.perf_counter()-started,
             limitation='Additional translations of observed numeric state; other settings and unseen draws use demand compilation.')
         save_report(root/'report.json', report)

@@ -5,6 +5,34 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Development Phase 210 profiles and reduces native preparation file traffic.
+`GT5P_PREPARE_NATIVE_PROFILE=1` enables one aggregate timing summary per native
+chunk; unset/`=0` keeps instrumentation off. Reports separate child startup,
+recipe/shader loading, driver-hint lookup, actual driver creation, blob/recipe
+persistence, results and controller work. Startup is creation-to-batch entry
+(including initialization/manifest checks), not CPU time. Controller residual
+includes launch/preflight, wait, cleanup and exit; it is not pure startup.
+
+Matching engines advertise `GT5P_OFFLINE_HANDOFF_V2`. The helper's default
+`GT5P_PREPARE_HANDOFF=auto` selects shared, independently verified bytecode,
+binary recipe chunks and atomic batch results. `=0` restores per-request files;
+`=1` requires the matching capability. Older engines automatically keep the
+legacy path; a 32-record packed-game proof passes. Native processes still run
+sequentially in at most 4,096-request chunks, before guest entry.
+
+Host verified bytecode references are capped at 128 MiB and recipe buffering at
+16 MiB, with disk spill instead of dropped work. Each encoded chunk is under
+12 MiB; native code reuse is capped at 128 MiB / 8,192 entries, with ordinary
+owned reads if full. Every bundled recipe passes the original complete envelope
+and descriptor checks before any driver call. Expected keys, both shader hashes,
+completion and persisted blobs remain mandatory. Results publish atomically after
+all native creations and a successful stream close; publication alone does not
+authorize cache selection. Shader checkpoints remain durable; native
+inputs are regenerated/revalidated on resume. Existing generations and legacy
+files are retained. Runtime caches/draw policy, workers, jobs and shutdown
+ownership are unchanged. See Phase 210 in [progress](progress.md) for fresh,
+cached, corruption, memory and frozen-helper evidence. Published v0.2.3 is unchanged.
+
 Development after v0.2.3 reduces vertex pipe polling from 100 ms to 10 ms,
 keeping the worker job/memory limits. `GT5P_PREPARE_VERTEX_POLL_MS=100`
 restores the old interval. A matching development engine also skips replaying
