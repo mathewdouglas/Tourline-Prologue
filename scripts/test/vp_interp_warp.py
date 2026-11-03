@@ -6,6 +6,7 @@ not a rasterization, catalogue coverage or whole-game correctness claim.
 """
 from pathlib import Path
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "scratch" / "runtime-src"
@@ -23,7 +24,7 @@ def main() -> None:
         str(RUNTIME / "libs" / "video" / "rsx_vp_decompiler.c"),
         "/link", "d3d11.lib", "d3dcompiler.lib",
     ], cwd=out, check=True)
-    subprocess.run([str(exe)], check=True)
+    subprocess.run([str(exe)] + sys.argv[1:], check=True)
 
 
 if __name__ == "__main__":

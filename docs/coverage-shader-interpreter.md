@@ -740,6 +740,28 @@ total / 4 ms maximum with the driver already warmed. This is not evidence that
 cold first-use hitches are gone. HSR, a starter-program WARP comparison and
 pending-only empty-cache runs remain to be validated.
 
+Locked `interp-vp-catalogue-hsr` subsequently resolves all 477 starter VPs
+through the verified original ELF/GT.VOL maps, without an unpacked catalogue.
+All 477 pass in both IA and GPU-fetch form. Together with the synthetic suite:
+1,062 passes, zero failures, worst absolute error 4.76837158e-7. This uses
+synthetic attributes/constants and compares vertex outputs, not actual game
+draw state or raster pixels. The raw inputs and generated shader bodies stay
+private; only the resolver and test harness are tracked.
+
+That locked run then exercises HSR with vertex force / fragment off, 720p,
+MSAA 2, SSAA off, 35 s sampling after a 12 s delay. Script median is 30 fps;
+last GPU window 5.27 ms mean / 7.85 ms maximum. Final counters: 3,341,152
+interpreted vertex draw attempts; fallback/miss/arena/PSO failure all zero;
+211 seen programs, 211 KiB peak arena, zero bytecode compilation milliseconds.
+803 interpreter PSOs cost 17,390 ms total / 771 ms maximum in synchronous
+driver calls. This is elapsed call time, not an isolated driver-compiler cost.
+The race024 shot visibly contains track, cars, mirror, signage and HUD. The
+race000 shot is black and 10,168 fragment-pending replay attempts were omitted:
+vertex-only interpretation does not fix pending fragment work. HUD underlayers
+also appear incomplete in the later shot. This is a vertex-route rendering
+proof with fragment omissions, not a complete race acceptance or speed win;
+it was not the standard foreground FrameTest or a matched baseline pair.
+
 `RSX_SHADER_INTERP_STATS=1` is an independent, default-off diagnostic for the
 async baseline and the interpreter paths. Every five seconds `[interp-pending]`
 reports cumulative replay vertex/fragment omissions, recording-time GPU-fetch

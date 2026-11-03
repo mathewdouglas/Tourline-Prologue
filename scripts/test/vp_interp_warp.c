@@ -86,7 +86,7 @@ static void ins(unsigned *w,unsigned v,unsigned s,unsigned dst,unsigned input,un
     if(s) { w[0]&=~(1u<<30); w[3]=(w[3]&~(15u<<13))|(15u<<17); }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     D3D_FEATURE_LEVEL fl;
     CHECK(D3D11CreateDevice(NULL,D3D_DRIVER_TYPE_WARP,NULL,0,NULL,0,D3D11_SDK_VERSION,&dev,&fl,&ctx));
@@ -174,6 +174,45 @@ int main(void)
             }
             if(bad){fail++;fprintf(stderr,"FAIL fetch=%d test=%u vec=%u sca=%u\n",fetch,test,op,sca);}else pass++;
             spec->lpVtbl->Release(spec); prog->lpVtbl->Release(prog); hb->lpVtbl->Release(hb);
+        }
+        if(argc>1) {
+            char pattern[1024],path[1024]; WIN32_FIND_DATAA fd;
+            snprintf(pattern,sizeof pattern,"%s/*.vp",argv[1]);
+            HANDLE find=FindFirstFileA(pattern,&fd);
+            if(find==INVALID_HANDLE_VALUE)return 2;
+            unsigned tested=0;
+            do {
+                unsigned image[16+544*4]={0};
+                snprintf(path,sizeof path,"%s/%s",argv[1],fd.cFileName);
+                FILE *f=fopen(path,"rb"); if(!f)return 2;
+                size_t bytes=fread(image+16,1,544*16,f); int extra=fgetc(f); fclose(f);
+                if(extra!=EOF||!bytes||bytes%16)return 2;
+                unsigned nins=rsx_vp_program_size_instrs((u8*)(image+16),(u32)bytes);
+                if(!nins)return 2;
+                image[0]=64;image[1]=nins;image[5]=0xFFFF;
+                ID3D11ShaderResourceView *prog=raw(image,sizeof image);
+                ctx->lpVtbl->CSSetShaderResources(ctx,21,1,&prog);
+                unsigned head[4]={0}; ID3D11Buffer *hb=buffer(head,sizeof head,D3D11_BIND_CONSTANT_BUFFER,0);
+                ctx->lpVtbl->CSSetConstantBuffers(ctx,4,1,&hb);
+                static char hlsl[300000];
+                int n=fetch?rsx_vp_decompile_gpufetch((u8*)(image+16),nins*16,hlsl,sizeof hlsl)
+                           :rsx_vp_decompile((u8*)(image+16),nins*16,hlsl,sizeof hlsl);
+                if(n<0)return 2;
+                ID3D11ComputeShader *spec=compile(hlsl,fetch);
+                float a[224],b[224];run(spec,a);run(interp,b);
+                int bad=0;
+                for(int i=0;i<224;i++) {
+                    float e=fabsf(a[i]-b[i]);
+                    if((isnan(a[i])&&isnan(b[i]))||a[i]==b[i])continue;
+                    if(!isfinite(e)||e>0.0001f*fmaxf(1,fabsf(a[i])))bad=1;
+                    if(e>worst)worst=e;
+                }
+                if(bad){fail++;fprintf(stderr,"FAIL catalogue fetch=%d file=%s\n",fetch,fd.cFileName);}else pass++;
+                spec->lpVtbl->Release(spec); prog->lpVtbl->Release(prog); hb->lpVtbl->Release(hb);
+                if(++tested%50==0)fprintf(stderr,"catalogue fetch=%d tested=%u fail=%d\n",fetch,tested,fail);
+            } while(FindNextFileA(find,&fd));
+            FindClose(find);
+            fprintf(stderr,"catalogue fetch=%d tested=%u\n",fetch,tested);
         }
         interp->lpVtbl->Release(interp);
     }
