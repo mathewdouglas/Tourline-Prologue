@@ -3,18 +3,38 @@ import json
 import os
 from pathlib import Path
 
+from pipeline_catalogue_limits import MAX_RECORDS
 from shader_coverage import bounded_read
 from train_pipeline_cache import save_report
 
+# Measured shape of one prepared record, rounded up from a completed generation:
+# requests/<id>/pipeline holds the recipe, two bytecode files and the result
+# (6 entries), and the selected extra translation repeats that shape (7).
+# The shader cache holds about five more entries per record outside warmup.
+# Warmup follows the runtime recipe cap: one recipe file and one bytecode file.
+_RECORD_ENTRIES = 6 + 7 + 5
+_WARMUP_ENTRIES = 8192 * 2
+_GENERATION_OVERHEAD = 256
 
-def preflight_tree(root):
+
+def generation_entry_budget(records=MAX_RECORDS):
+    """Directory entries one preparation generation is allowed to contain."""
+    if type(records) is not int or records < 1 or records > MAX_RECORDS:
+        raise ValueError('Preparation entry budget requires a catalogue-sized record count')
+    return _GENERATION_OVERHEAD + _WARMUP_ENTRIES + records * _RECORD_ENTRIES
+
+
+OUTPUT_ENTRY_BUDGET = generation_entry_budget()
+
+
+def preflight_tree(root, budget=OUTPUT_ENTRY_BUDGET):
     stack=[root];visited=0
     while stack:
         folder=stack.pop()
         with os.scandir(folder) as entries:
             for entry in entries:
                 visited+=1
-                if visited>100000:raise ValueError('Preparation output entry budget exceeded')
+                if visited>budget:raise ValueError('Preparation output entry budget exceeded')
                 info=entry.stat(follow_symlinks=False)
                 if entry.is_symlink() or getattr(info,'st_file_attributes',0)&0x400:
                     raise ValueError('Redirected preparation output is not writable: '+entry.path)

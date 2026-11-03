@@ -18,7 +18,7 @@ import time
 
 import pipeline_template as template
 import shader_fragment_batch
-from preparation_checkpoint import preflight_tree
+from preparation_checkpoint import generation_entry_budget, preflight_tree
 from shader_coverage import ROOT
 from pipeline_asset_map import read as read_map
 from preparation_reuse import cache_root, regular_read
@@ -186,7 +186,9 @@ def main():
     token=preparation_token(metadata,hashlib.sha256(engine.read_bytes()).hexdigest(),
                             hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document)
     parent=storage/'preparation'
-    if parent.exists():preflight_tree(parent)
+    # Retained generations share this directory. A few thousand records across
+    # two generations can exceed the old 100000-entry scan limit.
+    if parent.exists():preflight_tree(parent, generation_entry_budget()*MAX_GENERATIONS)
     parent.mkdir(exist_ok=True)
     cancel=storage/'prepare.cancel';status=storage/'prepare-status.txt'
     last_status=['',0.0]

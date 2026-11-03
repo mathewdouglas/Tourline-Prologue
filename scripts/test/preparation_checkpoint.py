@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 sys.path.insert(0,str(Path(__file__).parents[1]))
-from preparation_checkpoint import Checkpoint
+from preparation_checkpoint import Checkpoint, generation_entry_budget, preflight_tree
 from shader_coverage import ROOT
 
 (ROOT/'scratch').mkdir(exist_ok=True)
@@ -72,4 +72,16 @@ try:
     with Checkpoint(hard,contract,resume=True):raise AssertionError('Hard-linked output accepted')
 except ValueError:pass
 assert (external/'keep.txt').read_text()=='preserved'
+budget_root=base/'budget';budget_root.mkdir()
+(budget_root/'a.txt').write_text('a');(budget_root/'b.txt').write_text('b')
+preflight_tree(budget_root, budget=2)
+try:
+    preflight_tree(budget_root, budget=1)
+    raise AssertionError('Entry budget accepted')
+except ValueError as exc:
+    assert str(exc)=='Preparation output entry budget exceeded'
+# One played generation of a few thousand records, plus its warmup files,
+# must fit. The old fixed cap of 100000 did not fit two such generations.
+assert generation_entry_budget(2892)>63000
+assert generation_entry_budget()*2>100000
 print('Checkpoint identity, interruption, cross-process ownership and link/hard-link rejection passed:',base)
