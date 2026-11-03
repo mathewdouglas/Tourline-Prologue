@@ -1,6 +1,6 @@
 """Compile every unique starter fragment profile with the private engine.
 
-RSX_FP_DUAL_SHAPE is set only for --mode on, and only after offline_env
+RSX_FP_SAMPLE_SHARE is set only for --mode on, and only after offline_env
 clears inherited renderer settings. Counts go to the output JSON. Shader
 bytes stay in the scratch cache.
 """
@@ -34,9 +34,9 @@ def install_mode(mode):
 
     def offline_env(game_root, cache):
         env = original_env(game_root, cache)
-        env.pop('RSX_FP_DUAL_SHAPE', None)
+        env.pop('RSX_FP_SAMPLE_SHARE', None)
         if mode == 'on':
-            env['RSX_FP_DUAL_SHAPE'] = '1'
+            env['RSX_FP_SAMPLE_SHARE'] = '1'
         return env
 
     def run_offline(engine, game_root, env, log, timeout=180):
@@ -141,8 +141,8 @@ def main():
     args.cache.mkdir(parents=True, exist_ok=True)
     args.work.mkdir(parents=True, exist_ok=True)
     # Inherited renderer switches must not reach the compiler. offline_env drops them;
-    # the mode hook above is the only place RSX_FP_DUAL_SHAPE is put back.
-    os.environ.pop('RSX_FP_DUAL_SHAPE', None)
+    # the mode hook above is the only place RSX_FP_SAMPLE_SHARE is put back.
+    os.environ.pop('RSX_FP_SAMPLE_SHARE', None)
     compiled, failures = shader_fragment_batch.compile_batch(
         jobs, args.work, args.cache, args.engine, args.game_root, translation='default', batch_size=4096)
     summary = summarize(args.mode, jobs, expected, compiled, failures, started, args.output)

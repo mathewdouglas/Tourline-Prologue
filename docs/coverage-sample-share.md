@@ -1,6 +1,6 @@
 # Fragment sample-count sharing
 
-`RSX_FP_DUAL_SHAPE=1` makes a one-sample fragment profile and a multisample
+`RSX_FP_SAMPLE_SHARE=1` makes a one-sample fragment profile and a multisample
 profile of the same program compile to one pixel shader. Unset, or any value
 other than `1`, leaves the compiled text as it is today. The pipeline sample
 count is unchanged either way.
@@ -63,8 +63,8 @@ key is the HLSL source hash (`fp_source`). `ps` is the FNV-1a of the DXBC.
 
 ## What the switch does
 
-`patches/ps3recomp-fp-dual-shape.patch` adds `fp_sample_qualifier`. With
-`RSX_FP_DUAL_SHAPE=1` the `sample` rewrite runs for every count, including
+`patches/ps3recomp-fp-sample-share.patch` adds `fp_sample_qualifier`. With
+`RSX_FP_SAMPLE_SHARE=1` the `sample` rewrite runs for every count, including
 one sample, still gated by `RSX_SSAA`. `SampleDesc.Count` still follows bits
 16–19. The root signature, sampler registers `s0`–`s15`, and texture
 declarations are untouched.
@@ -86,18 +86,18 @@ It stays future work for a capture where one unit is actually both shapes.
 
 Private engine: current `patches/ps3recomp-4e8f3ca8-local.patch`, then the
 overlay, with only `rsx_d3d12_backend.c` relinked ahead of the v0.2.3 runtime
-archive (`scripts/test/fp_dual_shape_build.py`). Starter programs come from
+archive (`scripts/test/fp_sample_share_build.py`). Starter programs come from
 `player-map.json` offsets in the original volume. Catalogue filenames are the
 raw SHA-256; the starter stores `fp_identity()`, and 215 of the 1,404
 identities are absent from `shadercache/library-v1/all`.
 
-`scripts/test/fp_dual_shape_native.py` compiles the three helpers with no
+`scripts/test/fp_sample_share_native.py` compiles the three helpers with no
 GPU. `cube_units16(1<<30)` is unit 14. `cube_units16(0x20000)` and
 `cube_units16(0x40000)` are 0. The qualifier follows "nibble > 1" for an
-unset value, `0`, `2`, and an empty string. `RSX_FP_DUAL_SHAPE=1` is true
+unset value, `0`, `2`, and an empty string. `RSX_FP_SAMPLE_SHARE=1` is true
 for every tested mask, including a count of 1 and unit 14's cube bit.
 
-`scripts/test/fp_dual_shape_batch.py` compiled all 3,696 unique fragment
+`scripts/test/fp_sample_share_batch.py` compiled all 3,696 unique fragment
 profiles (5,669 records, 1,404 programs), each into its own shader cache:
 
 | | Switch off | Switch on |
@@ -113,7 +113,7 @@ Off matches the shipped starter on every profile. On lands on the predicted
 did not change (already multisample, or no interpolant rewrite). The faster
 on-run is the shared source key: a second profile hits DXBC already compiled
 in that process. Both runs were locked, one at a time, with private
-`RSX_SHADER_CACHE` directories under `scratch/fp-dual-shape/`.
+`RSX_SHADER_CACHE` directories under `scratch/fp-sample-share/`.
 
 ## In-game pictures
 

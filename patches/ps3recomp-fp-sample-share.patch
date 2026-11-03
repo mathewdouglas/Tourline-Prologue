@@ -10,21 +10,21 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
   * reflection vector's x and y, which painted the silver car black and smeared
   * the glass (Phase 46). RSX_CUBE_HI=0 goes back to units 0-3 only. */
  static u32 cube_units16(u32 key) { return (key & 0xFu) | ((key >> 16) & 0xFFF0u); }
-+/* RSX_FP_DUAL_SHAPE=1 compiles the per-sample interpolant qualifier for every
++/* RSX_FP_SAMPLE_SHARE=1 compiles the per-sample interpolant qualifier for every
 + * sample count in bits 16-19, including one sample. Counts above one already
 + * share that text; emitting it for one sample as well lets both profiles hash
 + * to one shader. Any other value keeps the qualifier on multisample targets
 + * only. The pipeline sample count is unchanged. RSX_SSAA=0 still forces
 + * once-per-pixel shading. */
-+static int fp_dual_shape_on(void)
++static int fp_sample_share_on(void)
 +{
 +    static int on = -1;
-+    if (on < 0) { const char* e = getenv("RSX_FP_DUAL_SHAPE"); on = e && e[0] == '1'; }
++    if (on < 0) { const char* e = getenv("RSX_FP_SAMPLE_SHARE"); on = e && e[0] == '1'; }
 +    return on;
 +}
 +static int fp_sample_qualifier(u32 cube_mask)
 +{
-+    return fp_dual_shape_on() || (((cube_mask >> 16) & 0xFu) > 1u);
++    return fp_sample_share_on() || (((cube_mask >> 16) & 0xFu) > 1u);
 +}
  /* The upper half of the existing ghi shader/profile key records volume
   * units. Older library profiles leave it zero and remain readable. */
@@ -44,7 +44,7 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
      { static int ss = -1;
        if (ss < 0) { const char* e = getenv("RSX_SSAA"); ss = (e && *e == '0') ? 0 : 1; }
 -      if (ss && ((cube_mask >> 16) & 0xFu) > 1) {
-+      /* RSX_FP_DUAL_SHAPE=1 emits that qualifier for one sample too.
++      /* RSX_FP_SAMPLE_SHARE=1 emits that qualifier for one sample too.
 +       * fp_sample_qualifier owns the choice. Unset keeps this test. */
 +      if (ss && fp_sample_qualifier(cube_mask)) {
            hlsl_replace_all(hlsl, sizeof hlsl, "float4 col0 : COLOR0;", "sample float4 col0 : COLOR0;");

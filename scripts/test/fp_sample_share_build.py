@@ -1,10 +1,10 @@
 """Link a private gt5p.exe with the fragment sample-qualifier overlay.
 
 Applies patches/ps3recomp-4e8f3ca8-local.patch, then
-patches/ps3recomp-fp-dual-shape.patch, and recompiles libs/video/rsx_d3d12_backend.c
+patches/ps3recomp-fp-sample-share.patch, and recompiles libs/video/rsx_d3d12_backend.c
 with the reference ninja command. The new object is linked ahead of the
 read-only runtime archive. Every other object stays the reference build.
-RSX_FP_DUAL_SHAPE is off unless a later process sets it.
+RSX_FP_SAMPLE_SHARE is off unless a later process sets it.
 
 Run from an x64 VS environment (vcvars64.bat). Output stays under scratch.
 """
@@ -22,7 +22,7 @@ HEADER = 'libs/video/rsx_offline_batch.h'
 
 
 def patched_source(dest):
-    """Upstream backend, current main patch, then the dual-shape overlay."""
+    """Upstream backend, current main patch, then the sample-share overlay."""
     dest = Path(dest).resolve()
     scratch = (ROOT / 'scratch').resolve()
     if dest != scratch and scratch not in dest.parents:
@@ -36,7 +36,7 @@ def patched_source(dest):
     subprocess.run(['git', 'init', '-q', str(dest)], check=True)
     subprocess.run(['git', '-C', str(dest), 'config', 'core.autocrlf', 'false'], check=True)
     main = ROOT / 'patches' / 'ps3recomp-4e8f3ca8-local.patch'
-    overlay = ROOT / 'patches' / 'ps3recomp-fp-dual-shape.patch'
+    overlay = ROOT / 'patches' / 'ps3recomp-fp-sample-share.patch'
     subprocess.run(['git', '-C', str(dest), 'apply', '--whitespace=nowarn',
                     '--include=' + NAME, '--include=' + HEADER, str(main)], check=True)
     subprocess.run(['git', '-C', str(dest), 'apply', '--whitespace=nowarn',

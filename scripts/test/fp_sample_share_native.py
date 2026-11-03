@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fp_dual_shape_build import ROOT, patched_source
+from fp_sample_share_build import ROOT, patched_source
 
 
 def function(source, name):
@@ -39,7 +39,7 @@ def main():
     ap.add_argument('--vcvars', type=Path, default=Path(r'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat'))
     ap.add_argument('--compiler', type=Path, default=Path(r'C:\Program Files\LLVM\bin\clang-cl.exe'))
     args = ap.parse_args()
-    source_path = patched_source(ROOT / 'scratch' / 'fp-dual-shape' / 'native-src')
+    source_path = patched_source(ROOT / 'scratch' / 'fp-sample-share' / 'native-src')
     source = source_path.read_text(encoding='utf-8')
     if source.count('if (ss && fp_sample_qualifier(cube_mask))') != 1:
         raise ValueError('Sample qualifier is not the sole call site')
@@ -48,7 +48,7 @@ def main():
     if 'pd.SampleDesc.Count = ((cube_mask >> 16) & 0xFu) ? ((cube_mask >> 16) & 0xFu) : 1;' not in source:
         raise ValueError('Pipeline sample count no longer follows bits 16-19')
     snippets = '\n'.join(function(source, name) for name in
-                          ('cube_units16', 'fp_dual_shape_on', 'fp_sample_qualifier'))
+                          ('cube_units16', 'fp_sample_share_on', 'fp_sample_qualifier'))
     folder = source_path.parents[2]
     driver = r'''
 #include <stdio.h>
@@ -57,7 +57,7 @@ typedef unsigned int u32;
 ''' + snippets + r'''
 int main(void) {
     unsigned masks[] = {0, 0x10000u, 0x20000u, 0x40000u, 0x60000u, 1u << 30, 0xFu | (1u << 30), 0x20000u | (1u << 30)};
-    printf("dual %d\n", fp_dual_shape_on());
+    printf("dual %d\n", fp_sample_share_on());
     printf("units %u %u %u %u %u\n",
         cube_units16(1u << 30), cube_units16(0x20000u), cube_units16(0x40000u),
         cube_units16(0xFu | (1u << 30)), cube_units16(0x20000u | 0xFu));
@@ -76,9 +76,9 @@ int main(void) {
 
     def run(value):
         env = os.environ.copy()
-        env.pop('RSX_FP_DUAL_SHAPE', None)
+        env.pop('RSX_FP_SAMPLE_SHARE', None)
         if value is not None:
-            env['RSX_FP_DUAL_SHAPE'] = value
+            env['RSX_FP_SAMPLE_SHARE'] = value
         out = subprocess.check_output([str(exe)], env=env, text=True)
         lines = out.splitlines()
         dual = int(lines[0].split()[1])
@@ -98,7 +98,7 @@ int main(void) {
             want = expect_qualifier(enabled, mask)
             if got != want:
                 raise SystemExit(f'{name}: mask 0x{mask:x} qualifier {got}, expected {want}')
-    print('sample qualifier matches bits 16-19 unless RSX_FP_DUAL_SHAPE=1; cube units 17/18 unpack to none')
+    print('sample qualifier matches bits 16-19 unless RSX_FP_SAMPLE_SHARE=1; cube units 17/18 unpack to none')
 
 
 if __name__ == '__main__':
