@@ -254,6 +254,12 @@
         "label": "Fuji Speedway F",
         "slot": 2,
         "identity": "measured"
+      },
+      {
+        "id": "slot-3",
+        "label": "Eiger Nordwand",
+        "slot": 3,
+        "identity": "measured"
       }
     ]
   }
