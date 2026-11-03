@@ -18,11 +18,19 @@ Stage 1 offline status (2026-11-03): the fragment encoder and the ps_5_1
 interpreter match `rsx_fp_decompile_buffered` on WARP. Three synthetic
 programs and 80 catalogue programs (30 ALU, 20 branch, 20 textured, 10
 predicated) plus 5 of those textured programs resampled as cube unit 0 all
-compared equal (max abs error 0, tolerance 1e-4). The runtime hook, the
-overlay patch, and the in-game `force` screenshots are not done. The
-instruction image and register file below are the ones that comparison
-used. An earlier draft of this section described a different packing and a
-64-wide register file; that draft was not what ran.
+compared equal (max abs error 0, tolerance 1e-4). Epilogues were off for
+that compare. The instruction image and register file below are the ones
+that comparison used. An earlier draft of this section described a
+different packing and a 64-wide register file; that draft was not what ran.
+
+Stage 1b (2026-11-04) wires that interpreter into the D3D12 replay path.
+The overlay is `patches/ps3recomp-shader-interp.patch`, applied after
+`patches/ps3recomp-4e8f3ca8-local.patch`. The private build is
+`scripts/test/interp_private_build.py`. The 16 input/sample/target
+variants are compiled once by `scripts/test/fp_interp_precompile.c`
+(D3DCompile flags 0) into the private shader cache. In-game `force`
+screenshots are below. `RSX_SHADER_INTERP=1` and the vertex interpreter
+are not run yet.
 
 Runtime facts below are from a private copy of ps3recomp `4e8f3ca8` plus
 `patches/ps3recomp-4e8f3ca8-local.patch` (`libs/video/rsx_fp_decompiler.c`,
@@ -532,9 +540,10 @@ Upload is a per-frame arena, not a buffer per draw. One upload buffer of
 showroom is about 4,300 draws with heavy reuse) is reset at frame start.
 Each distinct program is copied once; later draws of it reuse the offset.
 The offset and length go in `profile[0]`. A frame that would exceed the
-arena falls those extra draws back to today's path and counts them. 2 MiB
-is a hypothesis until a dealership frame is measured; the switch
-`RSX_SHADER_INTERP_ARENA_KB` raises it without a rebuild.
+arena falls those extra draws back to today's path and counts them. The
+default 2 MiB held the measured frames: dealership peak 217 KB, High Speed
+Ring peak 389 KB, and the arena-overflow counter stayed 0. The switch
+`RSX_SHADER_INTERP_ARENA_KB` (256..16384) raises it without a rebuild.
 
 Loop and branch limits. The pixel shader runs a counted loop of at most
 `RSX_FP_INTERP_STEPS` steps (default 2048). Catalogue programs are at most
@@ -550,14 +559,19 @@ Register file. The decompiler's files are `float4 r[48]` and `float4 h[48]`,
 plus two condition registers. The interpreter uses those sizes. A used
 index at or above 48 is an encoder reject (49 catalogue programs). Both
 files start at 0. Dynamic indexing lands in indexable temporary memory.
-That is the expensive part. A catalogue-mean program of 55 instructions is
-expected to cost several times a specialized shader, and less than a 50 ms
-compile hitch, for one or a few frames. This cost is a hypothesis until
-`RSX_GPU_TIME` is read on a dealership frame in `force` mode. The offline
-WARP run did not measure GPU time. Default D3DCompile optimisation of the
-ps_5_1 shader takes about 15 s (single target) and 25 s (MRT). The earlier
-ps_5_0 literal texture switch was still optimising after 8 minutes and was
-not used.
+That is the expensive part. A catalogue-mean program of 55 instructions
+costs several times a specialized shader when every draw takes the
+interpreter. Measured with `GT5P_PRESENT_PROF=1` and `RSX_SSAA=0` (pixel
+rate), the dealership's last 5 s window was gpu 77.05 ms (avg 80.52) against
+3.32 ms (avg 8.53) with the switch unset. High Speed Ring on-track windows
+were about 45-88 ms against about 8-14 ms. That is the steady cost of
+`force`, which never returns to the specialized pixel shader. `=1` pays it
+only while a specialized shader is pending. The offline WARP run did not
+measure GPU time. Default D3DCompile optimisation of the ps_5_1 shader
+takes about 15 s (single target) and 25 s (MRT). The runs below used flags
+0 and loaded the cached DXBC (`warmup 0 ms`, `compile 0 ms`, 71440-74284
+bytes). The earlier ps_5_0 literal texture switch was still optimising
+after 8 minutes and was not used.
 
 Texture shape in the shader. Two profile bits per unit are 0 = 2D, 1 = cube,
 2 = 3D. The sample indexes the matching ps_5_1 texture array and switches
@@ -617,18 +631,65 @@ not compared. The harness reads the catalogue in place and writes only under
 
 The offline pieces are `scripts/test/gen_fp_interp_hlsl.py` (the HLSL),
 `scripts/test/fp_interp_harness.c`, and `scripts/test/fp_interp_warp.py`.
-The encoder is `rsx_fp_interp.h` in the private runtime copy; it is not in
-the overlay patch until the backend includes it. On 2026-11-03 the locked
-WARP compare (`fp-interp-warp`) reported synthetic math, colour, and texture
+The encoder and the embedded HLSL ship in
+`patches/ps3recomp-shader-interp.patch`. On 2026-11-03 the locked WARP
+compare (`fp-interp-warp`) reported synthetic math, colour, and texture
 worst error 0, then `pass=80 fail=0 skip=0 spec_compile_fail=0 worst=0
-cube_pass=5 cube_fail=0`. Epilogue flags (alpha test, fog, WPOS scale, dither,
-sRGB write) were off, so this matches the decompiler, not yet the backend
-rewrites. In-game `force` screenshots are still required before stage 1 is
-done.
+cube_pass=5 cube_fail=0`. Epilogue flags (alpha test, fog, WPOS scale,
+dither, sRGB write) were off, so that compare matches the decompiler.
+The backend epilogues are constant bits in the arena header and were on
+for the game runs below. The WARP compare was not re-run after the
+input-variant ifdefs.
 
-Then one `force` game run on the dealership and one on High Speed Ring,
-screenshots against a normal run (pixel diff), and `RSX_GPU_TIME` per frame.
-Those runs use the lock and a private `RSX_SHADER_CACHE`.
+### Stage 1b game runs (2026-11-04)
+
+Private `gt5p.exe` from `interp_private_build.py`, private
+`RSX_SHADER_CACHE`, lock, `PS3_VERBOSE=0`. `RSX_GPU_TIME` is the
+`[present-prof]` gpu field (`GT5P_PRESENT_PROF=1`). Counters are
+cumulative.
+
+Switch unset (mode 0), `RSX_SSAA=0`: DealerTopRoot at 30.3 s. No `[interp]`
+line. Last window gpu 3.32 ms avg 8.53. The same binary with default SSAA
+also reached the dealership and logged no `[interp]` line. This is the
+patched exe with the switch off, not a pixel compare against an unpatched
+exe.
+
+`RSX_SHADER_INTERP=force`, default SSAA (sample-rate variant, dealership
+MSAA 4): the interpreter loaded (`warmup 0 ms`, `pso_fail 0`) but the top
+menu settled near gpu 130 ms, about 6 fps. `winshot.ps1`'s 100 ms pad taps
+are shorter than a frame, so DealerTopRoot was not reached. That run is a
+navigation failure, not a crash.
+
+`force` with `RSX_SSAA=0` (pixel rate) did reach DealerTopRoot, at 31.8 s.
+Last window gpu 77.05 ms avg 80.52. Final counter line: `draws 314670
+fallback 940 reject 0 gap 940 arena 0 pso_fail 0 pso 118 peak 217KB
+compile 0ms`. The shot is the Acura studio: two NSX, floor reflections,
+readable "GRAN TURISMO 5 Prologue" and "ACURA" text. It is a different
+turntable moment from the mode-0 shot (about 6 fps against 30 fps over the
+settle), so a whole-frame diff was not taken. Nothing in the frame reads
+as a missing material.
+
+High Speed Ring, `race.ps1 -RaceShots 12 -Seconds 35 -SampleDelay 12`,
+`RSX_SSAA=0`, 720p MSAA 2. Mode 0: the script printed median 14 fps; the
+last on-track window was gpu 12.48 ms avg 42.73; `race024` is a broadcast
+view (blue car, HUD 8/16, 120 km/h). Force: the script printed median
+6.79 fps. On-track windows sat around gpu 45-88 ms (one late window
+45.43 ms avg 55.95, an earlier one 79.97 ms avg 80.40). Final counter
+line: `draws 780648 fallback 11279 reject 0 gap 11279 arena 0 pso_fail 0
+pso 345 peak 389KB compile 0ms`. `race000` is still the starting grid
+(readable car names). `race024` and the closing window are a chase view:
+the car ahead, Bridgestone and brembo banners, crowd, HUD, and speedo.
+Different camera from the mode-0 shot, so again no whole-frame diff.
+Draw counts on track stayed in the same band as the mode-0 race (about
+1,000-2,600). Replay CPU was also high (about 55-70 ms per frame in the
+present-thread log), so the fps drop is not the GPU alone.
+
+On every force log line, `fallback` equalled `gap`. Those are the known
+`tex_dz` / `tex_mip` skips, which keep the specialized shader. `reject`,
+`arena`, and `pso_fail` stayed 0. Interpreter pipelines are created on
+first use and are not written to the disk PSO cache: 118 by the end of
+the dealership, 345 by the end of the race. That first-use create is the
+hitch stage 3 should precreate. `RSX_SHADER_INTERP=1` was not launched.
 
 Stage 2 is the vertex interpreter, including GPU fetch, under
 `RSX_SHADER_INTERP_VP` with the same 0 / 1 / `force` meanings. The vertex
@@ -654,5 +715,7 @@ hitch.
   "fixed", until a separate change does both paths.
 - The interpreter is not a claim that unseen shaders are free. It is a claim
   that they can draw, at a higher GPU cost, while the specialized shader
-  compiles. The cost is unmeasured until stage 1's `RSX_GPU_TIME` numbers
-  exist.
+  compiles. In `force` that cost is the whole frame: about 77 ms GPU on the
+  dealership and about 45-88 ms on High Speed Ring, against about 3.3 ms and
+  8-14 ms with the switch unset (`RSX_SSAA=0`). `=1` is implemented in the
+  replay hook and is not measured.

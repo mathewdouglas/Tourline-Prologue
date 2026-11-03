@@ -1,11 +1,191 @@
+diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
+index b0a23fc..86163f4 100644
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -238,6 +238,24 @@ typedef struct {
+     u32   rb_ea;
+ } D3D12DrawRecord;
+ 
++/* Fragment interpreter (RSX_SHADER_INTERP). Definitions are at the bottom of
++ * this file. Mode 0 returns before touching a signature, heap, or binding. */
++static int fp_interp_mode(void);
++static u32 fp_interp_srv_extra(void);
++static void fp_interp_init_views(void);
++static void fp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp);
++static void fp_interp_startup(void);
++static void fp_interp_shutdown(void);
++static void fp_interp_sig_reset(void);
++static void fp_interp_use_sig(int on);
++static void fp_interp_sig_restore(void);
++static void fp_interp_note_fallback(void);
++static void fp_interp_log_tick(void);
++static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
++    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
++    u32* hdr_off);
++static void fp_interp_bind(const D3D12DrawRecord* dr, u32 draw_i, u32 hdr_off);
++
+ /* Offscreen render target (render-to-texture). Persistent across frames --
+  * pass N's output is sampled by pass N+1 and possibly by later frames. */
+ typedef struct {
+@@ -1869,7 +1887,7 @@ static int init_d3d12(u32 width, u32 height)
+         {
+             D3D12_DESCRIPTOR_HEAP_DESC hd = {0};
+             hd.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+-            hd.NumDescriptors = SRV_HEAP_ALLOC;
++            hd.NumDescriptors = SRV_HEAP_ALLOC + fp_interp_srv_extra();
+             hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+             hr = s_d3d.device->lpVtbl->CreateDescriptorHeap(
+                 s_d3d.device, &hd, &IID_ID3D12DescriptorHeap, (void**)&s_d3d.srv_heap);
+@@ -1884,10 +1902,11 @@ static int init_d3d12(u32 width, u32 height)
+                 nv.Texture2D.MipLevels = 1;
+                 D3D12_CPU_DESCRIPTOR_HANDLE hh;
+                 s_d3d.srv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(s_d3d.srv_heap, &hh);
+-                for (int _i = 0; _i < SRV_HEAP_ALLOC; _i++) {
++                for (UINT _i = 0; _i < hd.NumDescriptors; _i++) {
+                     s_d3d.device->lpVtbl->CreateShaderResourceView(s_d3d.device, NULL, &nv, hh);
+                     hh.ptr += s_d3d.srv_inc;
+                 }
++                fp_interp_init_views();
+             }
+         }
+ 
+@@ -2020,6 +2039,7 @@ static int init_d3d12(u32 width, u32 height)
+             sig->lpVtbl->Release(sig);
+             s_vgpu_rs = s_d3d.vp_root_sig != NULL;
+         } else if (err) { printf("[D3D12] VP root sig: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
++        fp_interp_make_root_sig(samp);
+ 
+         /* raw float4 vertex buffer + constant bank (both UPLOAD, persistently mapped) */
+         D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+@@ -2161,6 +2181,7 @@ static int init_d3d12(u32 width, u32 height)
+                (void*)s_d3d.vp_root_sig, (void*)s_d3d.vp_vb, (void*)s_d3d.vp_cb);
+     }
+ 
++    fp_interp_startup();
+     printf("[D3D12] Initialization complete (%ux%u, %u buffers, pipeline=%s)\n",
+            width, height, FRAME_COUNT,
+            s_d3d.pipeline_ready ? "ready" : "NOT ready");
+@@ -11572,6 +11593,7 @@ static void render_frame_body(void)
+                     (void*)vpso, (void*)s_d3d.vp_root_sig); } }
+         if (any && vpso) {
+             s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
++            if (fp_interp_mode()) fp_interp_sig_reset();
+             s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list, vpso);
+             s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(s_d3d.cmd_list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+             s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
+@@ -11846,19 +11868,42 @@ static void render_frame_body(void)
+                 s_pso_vmask = dr->vtx_mask ? dr->vtx_mask : 0xFFFFu; s_pso_ghi = dr->tex_gamma_hi | (dr_volume_mask(dr) << 16);
+                 s_pso_unhi = dr_unnorm_hi(dr);
+                 s_pso_shd = dr->tex_shd ? (dr->tex_shd | ((u32)dr->shd_func << 16)) : 0u;
+-                ID3D12PipelineState* dpso =
+-                    dr->fp_addr ? vp_get_fp_pso(dr->vs_idx, dr->fp_addr, dr->blend_key,
+-                                                dr_num_rts(dr),
+-                                                dr->rt_off ? rsx_surface_dxgi(dr->rt_fmt)
+-                                                           : DXGI_FORMAT_R8G8B8A8_UNORM,
+-                                                dr->fp_exp32, dr->zonly ? 0u : dr->cmask, dr->cull,
+-                                                /* bits 16-19: samples of the bound target */
+-                                                dr_cube_mask(dr) |
+-                                                    ((cur_rt >= 0 && s_d3d.off_rt[cur_rt].ms)
+-                                                         ? (s_d3d.off_rt[cur_rt].ms_n << 16) : 0u),
+-                                                /* bit 27: no depth buffer is bound */
+-                                                dr->stencil | (cur_has_dsv ? 0u : (1u << 27)),
++                /* RSX_SHADER_INTERP: force runs the fragment interpreter first;
++                 * 1 uses it only while the specialized PS (or its driver PSO)
++                 * is still pending. A reject, known gap, or full arena keeps
++                 * today's path. The signature switch is before SetPipelineState
++                 * so the PSO matches the root signature that draw binds. */
++                int use_interp = 0;
++                u32 hdr_off = 0;
++                int _nrt = dr_num_rts(dr);
++                DXGI_FORMAT _rtfmt = dr->rt_off ? rsx_surface_dxgi(dr->rt_fmt)
++                                                : DXGI_FORMAT_R8G8B8A8_UNORM;
++                u32 _cmask = dr->zonly ? 0u : dr->cmask;
++                u32 _cube = dr_cube_mask(dr) |
++                    ((cur_rt >= 0 && s_d3d.off_rt[cur_rt].ms)
++                         ? (s_d3d.off_rt[cur_rt].ms_n << 16) : 0u);
++                u32 _sten = dr->stencil | (cur_has_dsv ? 0u : (1u << 27));
++                int _imode = fp_interp_mode();
++                ID3D12PipelineState* dpso = NULL;
++                if (_imode == 2 && dr->fp_addr) {
++                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
++                                             _cmask, dr->cull, _cube, _sten, &hdr_off);
++                    use_interp = dpso != NULL;
++                    if (!use_interp) fp_interp_note_fallback();
++                }
++                if (!use_interp)
++                    dpso = dr->fp_addr ? vp_get_fp_pso(dr->vs_idx, dr->fp_addr, dr->blend_key,
++                                                _nrt, _rtfmt,
++                                                dr->fp_exp32, _cmask, dr->cull,
++                                                _cube, _sten,
+                                                 _un_mask, _un_dim, dr->samp_key) : NULL;
++                if (!dpso && s_fp_pending && _imode == 1 && dr->fp_addr) {
++                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
++                                             _cmask, dr->cull, _cube, _sten, &hdr_off);
++                    if (dpso) { use_interp = 1; s_fp_pending = 0; }
++                    else fp_interp_note_fallback();
++                }
++                if (use_interp) s_fp_pending = 0;
+                 /* Its shader is still compiling in the background: leave the
+                  * draw out until it is ready. */
+                 if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] d=%u dpso=%p fp_pending=%d vtx_mask=0x%X cur_rt=%d has_dsv=%d n=%u%c",
+@@ -11867,6 +11912,7 @@ static void render_frame_body(void)
+                 /* The fallback pipeline reads sixteen slots; a packed draw
+                  * would read garbage through it. */
+                 if (!dpso && dr->vtx_mask && dr->vtx_mask != 0xFFFFu) continue;
++                if (_imode) fp_interp_use_sig(use_interp);
+                 s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list,
+                                                          dpso ? dpso : vpso);
+                 if (dr->stencil & 1u)
+@@ -11980,9 +12026,13 @@ static void render_frame_body(void)
+                         rt != cur_m[0] && rt != cur_m[1] && rt != cur_m[2])
+                         off_rt_transition(rt, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                 }
+-                D3D12_GPU_DESCRIPTOR_HANDLE gh = gh_base;
+-                gh.ptr += (u64)(DRAW_SRV_BASE + d * RSX_TEX_UNITS) * s_d3d.srv_inc;
+-                s_d3d.cmd_list->lpVtbl->SetGraphicsRootDescriptorTable(s_d3d.cmd_list, 1, gh);
++                if (use_interp)
++                    fp_interp_bind(dr, d, hdr_off);
++                else {
++                    D3D12_GPU_DESCRIPTOR_HANDLE gh = gh_base;
++                    gh.ptr += (u64)(DRAW_SRV_BASE + d * RSX_TEX_UNITS) * s_d3d.srv_inc;
++                    s_d3d.cmd_list->lpVtbl->SetGraphicsRootDescriptorTable(s_d3d.cmd_list, 1, gh);
++                }
+                 /* Per-draw constants: this draw's vp_cb + FP texscale slots. */
+                 s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
+                     frame_gva(s_d3d.vp_cb)
+@@ -12087,6 +12137,7 @@ static void render_frame_body(void)
+                 s_d3d.cmd_list->lpVtbl->RSSetViewports(s_d3d.cmd_list, 1, &vp);
+                 s_d3d.cmd_list->lpVtbl->RSSetScissorRects(s_d3d.cmd_list, 1, &sc);
+             }
++            if (fp_interp_mode()) { fp_interp_sig_restore(); fp_interp_log_tick(); }
+         }
+     }
+ 
+@@ -15747,6 +15798,7 @@ void rsx_d3d12_backend_shutdown(void)
+     rt_stop();
+     pso_queue_stop();
+     wait_for_gpu();
++    fp_interp_shutdown();
+     spack_race_end_ex(1);   /* quitting from a race keeps what it learned */
+     dxbc_mem_clear();
+     pso_warm_clear();
+@@ -15909,6 +15961,8 @@ void rsx_d3d12_backend_present(void)
+     }
+ }
+ 
++#include "rsx_fp_interp_backend.inc"
++
+ #else /* !_WIN32 */
+ 
+ #include <ps3emu/ps3types.h>   /* u32 (header includes above are inside the _WIN32 guard) */
 diff --git a/libs/video/rsx_fp_interp.h b/libs/video/rsx_fp_interp.h
 new file mode 100644
-index 0000000..a4eece4
+index 0000000..6011b6f
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp.h
-@@ -0,0 +1,424 @@
+@@ -0,0 +1,445 @@
 +/*
-+ * RSX fragment-program image for the ps_5_0 interpreter.
++ * RSX fragment-program image for the ps_5_1 interpreter.
 + *
 + * The image is original. Bit fields follow rsx_fp_decompiler.c (the NV40
 + * encoding that translator already accepts). One 16-byte word per instruction,
@@ -69,6 +249,27 @@ index 0000000..a4eece4
 +#ifdef __cplusplus
 +}
 +#endif
++
++/* Prefix shared by the engine and scripts/test/fp_interp_precompile.c.
++ * targets == 1 is the single-output entry (no MRT define). The bytes are part
++ * of the DXBC cache key, so both callers must use this function. */
++static int rsx_fp_interp_variant_prefix(char* dst, unsigned cap, int fullin, int sample, int targets)
++{
++    int n;
++    if (!dst || cap < 8u) return -1;
++    if (targets < 1) targets = 1;
++    if (targets > 4) targets = 4;
++    if (targets == 1)
++        n = snprintf(dst, cap, "#define RSX_INTERP_FULLIN %d\n#define RSX_INTERP_SAMPLE %d\n",
++                     fullin ? 1 : 0, sample ? 1 : 0);
++    else
++        n = snprintf(dst, cap,
++                     "#define RSX_INTERP_FULLIN %d\n#define RSX_INTERP_SAMPLE %d\n"
++                     "#define RSX_INTERP_MRT 1\n#define RSX_INTERP_TARGETS %d\n",
++                     fullin ? 1 : 0, sample ? 1 : 0, targets);
++    if (n < 0 || (unsigned)n >= cap) return -1;
++    return n;
++}
 +
 +#ifdef RSX_FP_INTERP_EMBED_HLSL
 +#include "rsx_fp_interp_hlsl.inc"
@@ -428,9 +629,627 @@ index 0000000..a4eece4
 +}
 +
 +#endif
+diff --git a/libs/video/rsx_fp_interp_backend.inc b/libs/video/rsx_fp_interp_backend.inc
+new file mode 100644
+index 0000000..02d8253
+--- /dev/null
++++ b/libs/video/rsx_fp_interp_backend.inc
+@@ -0,0 +1,612 @@
++/* Fragment-interpreter replay. Included at the bottom of rsx_d3d12_backend.c
++ * so it can call that file's static helpers. RSX_SHADER_INTERP unset or 0
++ * returns before any allocation, signature, or binding. */
++
++#define RSX_FP_INTERP_IMPLEMENTATION
++#define RSX_FP_INTERP_EMBED_HLSL
++#include "rsx_fp_interp.h"
++
++static ID3D12RootSignature* s_interp_rs;
++static ID3DBlob* s_interp_ps[16];
++static ID3D12Resource* s_interp_arena[2];
++static u8* s_interp_map[2];
++static u32 s_interp_arena_bytes;
++static u32 s_interp_used[2];
++static u64 s_interp_tag[2];
++static int s_interp_sig_on;
++
++typedef struct { u64 hash; u32 off; u32 nbytes; } InterpProg;
++static InterpProg s_interp_prog[2][4096];
++static u32 s_interp_prog_n[2];
++
++typedef struct {
++    u32 vs_hash, blend, cmask, rtfmt, stencil, cull, samples, vmask, packed;
++    int vs_idx;
++} InterpPsoKey;
++typedef struct { InterpPsoKey key; ID3D12PipelineState* pso; } InterpPsoSlot;
++static InterpPsoSlot s_interp_pso[4096];
++static u32 s_interp_pso_n;
++static u32 s_interp_img[RSX_FP_INTERP_MAX_INSNS * 4];
++static char s_interp_src[65536];
++
++static struct {
++    u32 draws, fallback, reject, gap, arena, pso_fail;
++    u32 arena_peak, compile_ms;
++} s_interp_stat;
++
++static int fp_interp_mode(void)
++{
++    static int m = -1;
++    if (m >= 0) return m;
++    const char* e = getenv("RSX_SHADER_INTERP");
++    if (!e || !e[0] || e[0] == '0') m = 0;
++    else if (e[0] == 'f' || e[0] == 'F') m = 2;   /* force: every eligible draw */
++    else if (e[0] == '1') m = 1;                  /* only while the specialized PS is pending */
++    else m = 0;
++    return m;
++}
++
++static u32 fp_interp_srv_extra(void)
++{
++    /* 48 template descriptors plus one 48-wide table per draw record. */
++    if (!fp_interp_mode()) return 0;
++    return 48u + (u32)MAX_DRAWS * 48u;
++}
++
++static void fp_interp_note_fallback(void) { s_interp_stat.fallback++; }
++
++static D3D12_CPU_DESCRIPTOR_HANDLE fp_interp_cpu(u32 slot)
++{
++    D3D12_CPU_DESCRIPTOR_HANDLE h;
++    s_d3d.srv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(s_d3d.srv_heap, &h);
++    h.ptr += (SIZE_T)slot * s_d3d.srv_inc;
++    return h;
++}
++
++static void fp_interp_init_views(void)
++{
++    if (!fp_interp_mode() || !s_d3d.srv_heap || !s_d3d.device) return;
++    D3D12_SHADER_RESOURCE_VIEW_DESC cube = {0};
++    cube.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
++    cube.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
++    cube.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
++    cube.TextureCube.MipLevels = 1;
++    D3D12_SHADER_RESOURCE_VIEW_DESC vol = {0};
++    vol.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
++    vol.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
++    vol.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
++    vol.Texture3D.MipLevels = 1;
++    for (u32 i = 0; i < 16; i++) {
++        D3D12_CPU_DESCRIPTOR_HANDLE c = fp_interp_cpu(SRV_HEAP_ALLOC + 16u + i);
++        D3D12_CPU_DESCRIPTOR_HANDLE v = fp_interp_cpu(SRV_HEAP_ALLOC + 32u + i);
++        s_d3d.device->lpVtbl->CreateShaderResourceView(s_d3d.device, NULL, &cube, c);
++        s_d3d.device->lpVtbl->CreateShaderResourceView(s_d3d.device, NULL, &vol, v);
++    }
++}
++
++static void fp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp)
++{
++    if (!fp_interp_mode() || !s_d3d.device || !samp) return;
++    D3D12_DESCRIPTOR_RANGE rng[3];
++    memset(rng, 0, sizeof rng);
++    rng[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
++    rng[0].NumDescriptors = 16;
++    rng[0].BaseShaderRegister = 0;
++    rng[0].OffsetInDescriptorsFromTableStart = 0;
++    rng[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
++    rng[1].NumDescriptors = 16;
++    rng[1].BaseShaderRegister = 32;
++    rng[1].OffsetInDescriptorsFromTableStart = 16;
++    rng[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
++    rng[2].NumDescriptors = 16;
++    rng[2].BaseShaderRegister = 48;
++    rng[2].OffsetInDescriptorsFromTableStart = 32;
++
++    D3D12_ROOT_PARAMETER rp[7];
++    memset(rp, 0, sizeof rp);
++    rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[0].Descriptor.ShaderRegister = 0;
++    rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
++    rp[1].DescriptorTable.NumDescriptorRanges = 3;
++    rp[1].DescriptorTable.pDescriptorRanges = rng;
++    rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    rp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[2].Descriptor.ShaderRegister = 1;
++    rp[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    rp[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
++    rp[3].Descriptor.ShaderRegister = 20;
++    rp[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[4].Descriptor.ShaderRegister = 2;
++    rp[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
++    rp[5].Descriptor.ShaderRegister = 16;
++    rp[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    rp[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
++    rp[6].Constants.ShaderRegister = 3;
++    rp[6].Constants.Num32BitValues = 4;
++    rp[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++
++    D3D12_ROOT_SIGNATURE_DESC rd = {0};
++    rd.NumParameters = 7;
++    rd.pParameters = rp;
++    rd.NumStaticSamplers = RSX_TEX_UNITS;
++    rd.pStaticSamplers = samp;
++    rd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
++    ID3DBlob* sig = NULL; ID3DBlob* err = NULL;
++    HRESULT hr = D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
++    if (FAILED(hr)) {
++        fprintf(stderr, "[interp] root signature serialize 0x%08lX %s\n", (unsigned long)hr,
++                err ? (const char*)err->lpVtbl->GetBufferPointer(err) : "");
++        if (err) err->lpVtbl->Release(err);
++        return;
++    }
++    hr = s_d3d.device->lpVtbl->CreateRootSignature(s_d3d.device, 0,
++        sig->lpVtbl->GetBufferPointer(sig), sig->lpVtbl->GetBufferSize(sig),
++        &IID_ID3D12RootSignature, (void**)&s_interp_rs);
++    sig->lpVtbl->Release(sig);
++    if (FAILED(hr)) fprintf(stderr, "[interp] root signature create 0x%08lX\n", (unsigned long)hr);
++}
++
++static UINT fp_interp_opt(void)
++{
++    static UINT f = 0xFFFFFFFFu;
++    if (f != 0xFFFFFFFFu) return f;
++    const char* e = getenv("RSX_SHADER_INTERP_OPT");
++    f = !e ? 0u
++         : !strcmp(e, "skip") ? D3DCOMPILE_SKIP_OPTIMIZATION
++         : e[0] == '0' ? D3DCOMPILE_OPTIMIZATION_LEVEL0
++         : e[0] == '2' ? D3DCOMPILE_OPTIMIZATION_LEVEL2
++         : e[0] == '3' ? D3DCOMPILE_OPTIMIZATION_LEVEL3 : 0u;
++    return f;
++}
++
++static ID3DBlob* fp_interp_blob(int full, int sample, int targets)
++{
++    int v = (full ? 8 : 0) + (sample ? 4 : 0) + (targets - 1);
++    if (targets < 1 || targets > 4 || v < 0 || v >= 16) return NULL;
++    if (s_interp_ps[v]) return s_interp_ps[v];
++    int n = rsx_fp_interp_variant_prefix(s_interp_src, sizeof s_interp_src, full, sample, targets);
++    size_t hl = strlen(rsx_fp_interp_hlsl);
++    if (n < 0 || (size_t)n + hl + 1 > sizeof s_interp_src) return NULL;
++    memcpy(s_interp_src + n, rsx_fp_interp_hlsl, hl + 1);
++    ID3DBlob* pb = NULL; ID3DBlob* err = NULL;
++    ULONGLONG t0 = GetTickCount64();
++    HRESULT hr = d3d_compile_cached(s_interp_src, (size_t)n + hl, "rsx_fp_interp", "ps_5_1",
++                                    fp_interp_opt(), &pb, &err);
++    s_interp_stat.compile_ms += (u32)(GetTickCount64() - t0);
++    if (FAILED(hr) || !pb) {
++        static int logged;
++        if (logged < 8) {
++            logged++;
++            fprintf(stderr, "[interp] compile variant %d failed 0x%08lX %s\n", v, (unsigned long)hr,
++                    err ? (const char*)err->lpVtbl->GetBufferPointer(err) : "");
++        }
++        if (err) err->lpVtbl->Release(err);
++        return NULL;
++    }
++    if (err) err->lpVtbl->Release(err);
++    s_interp_ps[v] = pb;
++    fprintf(stderr, "[interp] ps %s %s targets %d: %u bytes\n",
++            full ? "full" : "common", sample ? "sample" : "pixel", targets,
++            (unsigned)pb->lpVtbl->GetBufferSize(pb));
++    return pb;
++}
++
++static void fp_interp_startup(void)
++{
++    if (!fp_interp_mode() || !s_d3d.device) return;
++    u32 kb = 2048;
++    const char* e = getenv("RSX_SHADER_INTERP_ARENA_KB");
++    if (e && atoi(e) >= 256) kb = (u32)atoi(e);
++    if (kb > 16384u) kb = 16384u;
++    s_interp_arena_bytes = kb << 10;
++    D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
++    D3D12_RESOURCE_DESC bd = {0};
++    bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
++    bd.Width = s_interp_arena_bytes;
++    bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1;
++    bd.SampleDesc.Count = 1;
++    bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
++    D3D12_RANGE nr = {0, 0};
++    for (int p = 0; p < 2; p++) {
++        void* mapped = NULL;
++        if (SUCCEEDED(create_dyn_buffer(&hp, &bd, &s_interp_arena[p])) &&
++            SUCCEEDED(s_interp_arena[p]->lpVtbl->Map(s_interp_arena[p], 0, &nr, &mapped)))
++            s_interp_map[p] = (u8*)mapped;
++    }
++    ULONGLONG t0 = GetTickCount64();
++    for (int full = 0; full < 2; full++)
++        for (int sample = 0; sample < 2; sample++)
++            for (int t = 1; t <= 4; t++)
++                fp_interp_blob(full, sample, t);
++    fprintf(stderr, "[interp] mode %d arena %u KB warmup %llu ms opt 0x%X\n",
++            fp_interp_mode(), kb, (unsigned long long)(GetTickCount64() - t0), fp_interp_opt());
++}
++
++static void fp_interp_shutdown(void)
++{
++    for (u32 i = 0; i < s_interp_pso_n; i++)
++        if (s_interp_pso[i].pso) s_interp_pso[i].pso->lpVtbl->Release(s_interp_pso[i].pso);
++    s_interp_pso_n = 0;
++    for (int i = 0; i < 16; i++)
++        if (s_interp_ps[i]) { s_interp_ps[i]->lpVtbl->Release(s_interp_ps[i]); s_interp_ps[i] = NULL; }
++    if (s_interp_rs) { s_interp_rs->lpVtbl->Release(s_interp_rs); s_interp_rs = NULL; }
++    for (int p = 0; p < 2; p++) {
++        if (s_interp_arena[p]) {
++            s_interp_arena[p]->lpVtbl->Unmap(s_interp_arena[p], 0, NULL);
++            s_interp_arena[p]->lpVtbl->Release(s_interp_arena[p]);
++            s_interp_arena[p] = NULL;
++        }
++        s_interp_map[p] = NULL;
++    }
++}
++
++static void fp_interp_sig_reset(void) { s_interp_sig_on = 0; }
++
++static void fp_interp_use_sig(int on)
++{
++    if (!s_interp_rs) { s_interp_sig_on = 0; return; }
++    if (s_interp_sig_on == (on ? 1 : 0)) return;
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list,
++        on ? s_interp_rs : s_d3d.vp_root_sig);
++    s_interp_sig_on = on ? 1 : 0;
++}
++
++static void fp_interp_sig_restore(void)
++{
++    if (s_interp_sig_on && s_d3d.vp_root_sig && s_d3d.cmd_list)
++        s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
++    s_interp_sig_on = 0;
++}
++
++static void fp_interp_log_tick(void)
++{
++    if (!fp_interp_mode()) return;
++    static ULONGLONG last;
++    ULONGLONG now = GetTickCount64();
++    if (last && now - last < 5000) return;
++    last = now;
++    fprintf(stderr, "[interp] draws %u fallback %u reject %u gap %u arena %u pso_fail %u pso %u peak %uKB compile %ums\n",
++            s_interp_stat.draws, s_interp_stat.fallback, s_interp_stat.reject, s_interp_stat.gap,
++            s_interp_stat.arena, s_interp_stat.pso_fail, s_interp_pso_n,
++            s_interp_stat.arena_peak >> 10, s_interp_stat.compile_ms);
++}
++
++/* Cube wins over volume when both are set: srv_write_ex writes the cube view last. */
++static u32 fp_interp_shape(const D3D12DrawRecord* dr)
++{
++    u32 cubes = cube_units16(dr_cube_mask(dr));
++    u32 vols = dr_volume_mask(dr);
++    u32 shape = 0;
++    for (u32 u = 0; u < 16; u++) {
++        u32 s = (cubes & (1u << u)) ? 1u : (vols & (1u << u)) ? 2u : 0u;
++        shape |= s << (u * 2);
++    }
++    return shape;
++}
++
++static int fp_interp_reads_extra(const u32* img, u32 nins)
++{
++    for (u32 i = 0; i < nins; i++) {
++        const u32* w = img + i * 4;
++        if (w[0] & 0x80000000u) continue;
++        u32 id = (w[1] >> 22) & 15u;
++        if (id < 12u) continue;
++        u32 s0 = w[1] & 0x3FFFFFu, s1 = w[2] & 0x3FFFFFu, s2 = w[3] & 0x3FFFFFu;
++        if ((s0 & 3u) == 1u || (s1 & 3u) == 1u || (s2 & 3u) == 1u) return 1;
++    }
++    return 0;
++}
++
++static u32 fp_interp_header_flags(const D3D12DrawRecord* dr, int half, int nrt,
++                                  DXGI_FORMAT rtfmt, u32 cmask)
++{
++    static int lg = -1, noat = -1, fog = -1, fd = -1, gd = -1;
++    if (lg < 0) { const char* e = getenv("RSX_LG2_ABS"); lg = !(e && e[0] == '0'); }
++    if (noat < 0) noat = getenv("FP_NO_ATEST") ? 1 : 0;
++    if (fog < 0) { const char* e = getenv("RSX_FOG"); fog = !(e && e[0] == '0'); }
++    if (fd < 0) { const char* e = getenv("RSX_FINAL_DITHER"); fd = !(e && e[0] == '0'); }
++    if (gd < 0) { const char* e = getenv("RSX_GAME_DITHER"); gd = e ? e[0] != '0' : !rsx_hp(); }
++    u32 f = lg ? 256u : 0u;
++    if (half) f |= 1u;
++    if (!noat) f |= 16u;
++    if (fog) f |= 32u;
++    if (rs_on()) f |= 64u;
++    if (fd && rsx_hp() && rtfmt == DXGI_FORMAT_R8G8B8A8_UNORM && nrt == 1 && (cmask & 0xEu))
++        f |= 128u;
++    if (!gd) f |= 512u;          /* bit 512: replace the title's small WPOS dither sample with 0.5 */
++    if (dr->srgb_wr) f |= 1024u;
++    return f;
++}
++
++static u32 fp_interp_alloc(int par, u32 bytes)
++{
++    bytes = (bytes + 15u) & ~15u;
++    if (!s_interp_map[par] || s_interp_used[par] + bytes > s_interp_arena_bytes) return 0xFFFFFFFFu;
++    u32 off = s_interp_used[par];
++    s_interp_used[par] += bytes;
++    if (s_interp_used[par] > s_interp_stat.arena_peak) s_interp_stat.arena_peak = s_interp_used[par];
++    return off;
++}
++
++static int fp_interp_ssaa(void)
++{
++    static int ss = -1;
++    if (ss < 0) { const char* e = getenv("RSX_SSAA"); ss = (e && *e == '0') ? 0 : 1; }
++    return ss;
++}
++
++static ID3D12PipelineState* fp_interp_get_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
++                                              u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
++                                              int variant, ID3DBlob* ps)
++{
++    ID3DBlob* vsb = NULL; u32 vs_hash = 0; int gpu = 0;
++    int vs_idx = dr->vs_idx;
++    if (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) {
++        vsb = s_d3d.vp_vs[vs_idx].vs;
++        vs_hash = s_d3d.vp_vs[vs_idx].hash;
++        gpu = s_d3d.vp_vs[vs_idx].gpu ? 1 : 0;
++    }
++    if (!vsb) { vsb = s_d3d.vp_vs_blob; vs_idx = -1; vs_hash = 0; gpu = 0; }
++    if (!vsb || !ps || !s_interp_rs) return NULL;
++    u32 samples = (cube_mask >> 16) & 0xFu; if (!samples) samples = 1;
++    InterpPsoKey key;
++    memset(&key, 0, sizeof key);
++    key.vs_hash = vs_hash; key.blend = blend; key.cmask = cmask; key.rtfmt = (u32)rtfmt;
++    key.stencil = stencil; key.cull = cull; key.samples = samples;
++    key.vmask = gpu ? 0u : (s_pso_vmask ? s_pso_vmask : 0xFFFFu);
++    key.packed = (u32)nrt | ((u32)gpu << 8) | ((u32)variant << 16);
++    key.vs_idx = vs_idx;
++    for (u32 i = 0; i < s_interp_pso_n; i++)
++        if (memcmp(&s_interp_pso[i].key, &key, sizeof key) == 0) return s_interp_pso[i].pso;
++    if (s_interp_pso_n >= 4096) { s_interp_stat.pso_fail++; return NULL; }
++
++    D3D12_INPUT_ELEMENT_DESC il[16];
++    u32 vmask = key.vmask ? key.vmask : 0xFFFFu;
++    for (int i = 0; i < 16; i++) {
++        il[i].SemanticName = "ATTR"; il[i].SemanticIndex = (UINT)i;
++        il[i].Format = DXGI_FORMAT_R32G32B32A32_FLOAT; il[i].InputSlot = 0;
++        u32 r = 0; for (int j = 0; j < i; j++) if (vmask & (1u << j)) r++;
++        il[i].AlignedByteOffset = (vmask & (1u << i)) ? (UINT)(r * 16) : 0;
++        il[i].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
++        il[i].InstanceDataStepRate = 0;
++    }
++    D3D12_GRAPHICS_PIPELINE_STATE_DESC pd;
++    memset(&pd, 0, sizeof pd);
++    pd.pRootSignature = s_interp_rs;
++    pd.VS.pShaderBytecode = vsb->lpVtbl->GetBufferPointer(vsb);
++    pd.VS.BytecodeLength = vsb->lpVtbl->GetBufferSize(vsb);
++    pd.PS.pShaderBytecode = ps->lpVtbl->GetBufferPointer(ps);
++    pd.PS.BytecodeLength = ps->lpVtbl->GetBufferSize(ps);
++    pd.InputLayout.pInputElementDescs = il;
++    pd.InputLayout.NumElements = gpu ? 0u : 16u;
++    pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
++    { static int co = -1, cfl = -1;
++      if (co < 0) co = getenv("CULL_OFF") ? 1 : 0;
++      if (cfl < 0) cfl = getenv("CULL_FLIP") ? 1 : 0;
++      pd.RasterizerState.CullMode = (!co && (cull & 1u))
++          ? ((cull & 2u) ? D3D12_CULL_MODE_FRONT : D3D12_CULL_MODE_BACK)
++          : D3D12_CULL_MODE_NONE;
++      pd.RasterizerState.FrontCounterClockwise = (((cull & 4u) ? 1 : 0) ^ cfl) ? TRUE : FALSE; }
++    pd.BlendState.RenderTarget[0].BlendEnable = (blend & 1) ? TRUE : FALSE;
++    pd.BlendState.RenderTarget[0].SrcBlend = (blend & 1) ? (D3D12_BLEND)((blend >> 1) & 0x1F) : D3D12_BLEND_ONE;
++    pd.BlendState.RenderTarget[0].DestBlend = (blend & 1) ? (D3D12_BLEND)((blend >> 6) & 0x1F) : D3D12_BLEND_ZERO;
++    pd.BlendState.RenderTarget[0].BlendOp = (blend & 1) ? (D3D12_BLEND_OP)((blend >> 21) & 0x7) : D3D12_BLEND_OP_ADD;
++    pd.BlendState.RenderTarget[0].SrcBlendAlpha = (blend & 1) ? (D3D12_BLEND)((blend >> 11) & 0x1F) : D3D12_BLEND_ONE;
++    pd.BlendState.RenderTarget[0].DestBlendAlpha = (blend & 1) ? (D3D12_BLEND)((blend >> 16) & 0x1F) : D3D12_BLEND_ZERO;
++    pd.BlendState.RenderTarget[0].BlendOpAlpha = (blend & 1) ? (D3D12_BLEND_OP)((blend >> 24) & 0x7) : D3D12_BLEND_OP_ADD;
++    pd.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
++    pd.SampleMask = UINT_MAX;
++    pd.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
++    if (nrt < 1) nrt = 1; if (nrt > 4) nrt = 4;
++    pd.NumRenderTargets = (UINT)nrt;
++    for (int r = 0; r < nrt; r++) {
++        pd.RTVFormats[r] = rtfmt;
++        pd.BlendState.RenderTarget[r] = pd.BlendState.RenderTarget[0];
++    }
++    { static int cf = -1; if (cf < 0) cf = getenv("CMASK_FORCE") ? 1 : 0;
++      if (cf) cmask = 0xF; }
++    for (int r = 0; r < nrt; r++)
++        pd.BlendState.RenderTarget[r].RenderTargetWriteMask = (UINT8)(cmask & 0xF);
++    pd.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
++    pd.DepthStencilState.DepthEnable = TRUE;
++    pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
++    pd.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
++    if (depth_state_on()) {
++        pd.DepthStencilState.DepthFunc = (D3D12_COMPARISON_FUNC)(((stencil >> 28) & 7u) + 1u);
++        if (stencil & (1u << 31)) pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
++    }
++    if (stencil & (1u << 26)) {
++        u32 op = (stencil >> 13) & 0xF;
++        D3D12_BLEND sc = op == 6 ? D3D12_BLEND_INV_DEST_COLOR :
++                         (op == 2 || op == 1) ? D3D12_BLEND_ZERO : D3D12_BLEND_ONE;
++        D3D12_BLEND sa = op == 6 ? D3D12_BLEND_INV_DEST_ALPHA :
++                         (op == 2 || op == 1) ? D3D12_BLEND_ZERO : D3D12_BLEND_ONE;
++        D3D12_BLEND dd = op == 1 ? D3D12_BLEND_ONE : D3D12_BLEND_ZERO;
++        for (int r = 0; r < nrt; r++) {
++            pd.BlendState.RenderTarget[r].BlendEnable = TRUE;
++            pd.BlendState.RenderTarget[r].SrcBlend = sc;
++            pd.BlendState.RenderTarget[r].DestBlend = dd;
++            pd.BlendState.RenderTarget[r].BlendOp = D3D12_BLEND_OP_ADD;
++            pd.BlendState.RenderTarget[r].SrcBlendAlpha = sa;
++            pd.BlendState.RenderTarget[r].DestBlendAlpha = dd;
++            pd.BlendState.RenderTarget[r].BlendOpAlpha = D3D12_BLEND_OP_ADD;
++            pd.BlendState.RenderTarget[r].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
++        }
++        pd.DepthStencilState.DepthEnable = FALSE;
++        pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
++    } else if (stencil & 1u) {
++        D3D12_DEPTH_STENCILOP_DESC so;
++        so.StencilFunc = (D3D12_COMPARISON_FUNC)((stencil >> 1) & 0xF);
++        so.StencilFailOp = (D3D12_STENCIL_OP)((stencil >> 5) & 0xF);
++        so.StencilDepthFailOp = (D3D12_STENCIL_OP)((stencil >> 9) & 0xF);
++        so.StencilPassOp = (D3D12_STENCIL_OP)((stencil >> 13) & 0xF);
++        pd.DepthStencilState.StencilEnable = TRUE;
++        pd.DepthStencilState.StencilReadMask = (UINT8)((stencil >> 17) & 0xFF);
++        pd.DepthStencilState.StencilWriteMask = 0xFF;
++        pd.DepthStencilState.FrontFace = so;
++        pd.DepthStencilState.BackFace = so;
++        if (stencil & (1u << 25)) {
++            pd.DepthStencilState.DepthEnable = FALSE;
++            pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
++        }
++    }
++    { static int pa = -1;
++      if (pa < 0) pa = getenv("PSO_DSV_ALWAYS") ? 1 : 0;
++      if ((stencil & (1u << 27)) && !pa) {
++          pd.DSVFormat = DXGI_FORMAT_UNKNOWN;
++          pd.DepthStencilState.DepthEnable = FALSE;
++          pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
++          pd.DepthStencilState.StencilEnable = FALSE;
++      } }
++    { static int doff = -1;
++      if (doff < 0) { const char* e = getenv("DEPTH_OFF"); doff = e ? atoi(e) : 0; }
++      if (doff) { pd.DepthStencilState.DepthEnable = FALSE;
++                  pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; } }
++    pd.SampleDesc.Count = samples;
++    ID3D12PipelineState* pso = NULL;
++    HRESULT hr = s_d3d.device->lpVtbl->CreateGraphicsPipelineState(
++        s_d3d.device, &pd, &IID_ID3D12PipelineState, (void**)&pso);
++    if (FAILED(hr) || !pso) {
++        s_interp_stat.pso_fail++;
++        static int logged;
++        if (logged < 16) {
++            logged++;
++            fprintf(stderr, "[interp] PSO fail 0x%08lX nrt=%d fmt=%u samples=%u gpu=%d variant=%d vs=%d\n",
++                    (unsigned long)hr, nrt, (unsigned)rtfmt, samples, gpu, variant, vs_idx);
++        }
++        return NULL;
++    }
++    s_interp_pso[s_interp_pso_n].key = key;
++    s_interp_pso[s_interp_pso_n].pso = pso;
++    s_interp_pso_n++;
++    { static int logk = -1;
++      if (logk < 0) { const char* e = getenv("RSX_SHADER_INTERP_LOG"); logk = e && e[0] == '1'; }
++      if (logk && s_interp_pso_n <= 64)
++          fprintf(stderr, "[interp] pso %u vs=0x%08X nrt=%d fmt=%u samples=%u variant=%d\n",
++                  s_interp_pso_n, vs_hash, nrt, (unsigned)rtfmt, samples, variant); }
++    return pso;
++}
++
++static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
++    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
++    u32* hdr_off)
++{
++    if (!fp_interp_mode() || !dr || !dr->fp_addr || !hdr_off) return NULL;
++    if (draw_i >= MAX_DRAWS) return NULL;
++    if (dr->tex_dz || dr->tex_mip) { s_interp_stat.gap++; return NULL; }
++    if (s_device_lost || !s_interp_rs) return NULL;
++    extern uint8_t* vm_base;
++    extern u32 cellGcmResolveLocated(int local, u32 offset);
++    if (!vm_base) return NULL;
++    u32 loc = cellGcmResolveLocated((dr->fp_addr & 0x3u) == 1, dr->fp_addr & ~0x3u);
++    if (loc == 0xFFFFFFFFu) return NULL;
++    const u8* code = vm_base + loc;
++    static int ctl_auto = -1;
++    if (ctl_auto < 0) ctl_auto = getenv("FP_CTRL_AUTO") ? 1 : 0;
++    u32 ctrl = ctl_auto ? RSX_FP_CTRL_AUTO : (dr->fp_exp32 ? 0x40u : 0u);
++    rsx_fp_interp_info info;
++    memset(&info, 0, sizeof info);
++    if (rsx_fp_interp_encode(code, FP_UCODE_MAX, ctrl, s_interp_img,
++                             RSX_FP_INTERP_MAX_INSNS * 4u, &info)) {
++        s_interp_stat.reject++;
++        return NULL;
++    }
++    int par = FR->parity & 1;
++    if (!s_interp_map[par]) return NULL;
++    if (s_interp_tag[par] != s_d3d.frame_count) {
++        s_interp_tag[par] = s_d3d.frame_count;
++        s_interp_used[par] = 0;
++        s_interp_prog_n[par] = 0;
++    }
++    u32 nbytes = info.instructions * 16u;
++    u64 hash = 1469598103934665603ull;
++    for (u32 i = 0; i < nbytes; i++) {
++        hash ^= ((const u8*)s_interp_img)[i];
++        hash *= 1099511628211ull;
++    }
++    u32 ioff = 0xFFFFFFFFu;
++    for (u32 i = 0; i < s_interp_prog_n[par]; i++)
++        if (s_interp_prog[par][i].hash == hash && s_interp_prog[par][i].nbytes == nbytes) {
++            ioff = s_interp_prog[par][i].off;
++            break;
++        }
++    if (ioff == 0xFFFFFFFFu) {
++        ioff = fp_interp_alloc(par, nbytes ? nbytes : 16u);
++        if (ioff == 0xFFFFFFFFu) { s_interp_stat.arena++; return NULL; }
++        if (nbytes) memcpy(s_interp_map[par] + ioff, s_interp_img, nbytes);
++        if (s_interp_prog_n[par] < 4096) {
++            InterpProg* slot = &s_interp_prog[par][s_interp_prog_n[par]++];
++            slot->hash = hash; slot->off = ioff; slot->nbytes = nbytes;
++        }
++    }
++    u32 hoff = fp_interp_alloc(par, 64u);
++    if (hoff == 0xFFFFFFFFu) { s_interp_stat.arena++; return NULL; }
++    u32 dim[16][2];
++    u32 un_lo = dr_unnorm(dr, dim);
++    u32 un = (un_lo & 0xFu) | (dr_unnorm_hi(dr) & 0xFFF0u);
++    u32 srgb = (u32)(dr->tex_gamma & 0xFu) | (u32)dr->tex_gamma_hi;
++    if (dr->tex_dz) srgb &= ~(u32)(dr->tex_dz & 0xFu);
++    u32 shadow = 0;
++    if (dr->tex_shd) {
++        static int sh_off = -1, soft = -1;
++        if (sh_off < 0) { const char* e = getenv("RSX_SHADOW"); sh_off = e && e[0] == '0'; }
++        if (soft < 0) { const char* e = getenv("RSX_SHADOW_SOFT"); soft = !(e && e[0] == '0'); }
++        u32 func = sh_off ? 7u : (dr->shd_func & 7u);
++        shadow = (u32)dr->tex_shd | (func << 16) | (soft ? (1u << 19) : 0u);
++    }
++    u32 flags = fp_interp_header_flags(dr, info.half != 0, nrt, rtfmt, cmask);
++    u32 hdr[16];
++    memset(hdr, 0, sizeof hdr);
++    hdr[0] = ioff; hdr[1] = info.instructions; hdr[2] = flags; hdr[3] = fp_interp_shape(dr);
++    hdr[4] = un; hdr[5] = srgb; hdr[6] = shadow;
++    hdr[7] = (u32)dr->samp_key; hdr[8] = (u32)(dr->samp_key >> 32);
++    memcpy(s_interp_map[par] + hoff, hdr, sizeof hdr);
++    u32 samples = (cube_mask >> 16) & 0xFu;
++    int sample = fp_interp_ssaa() && samples > 1;
++    int targets = nrt < 1 ? 1 : nrt > 4 ? 4 : nrt;
++    int full = fp_interp_reads_extra(s_interp_img, info.instructions);
++    int variant = (full ? 8 : 0) + (sample ? 4 : 0) + (targets - 1);
++    ID3DBlob* ps = fp_interp_blob(full, sample, targets);
++    if (!ps) return NULL;
++    ID3D12PipelineState* pso = fp_interp_get_pso(dr, targets, rtfmt, blend, cmask, cull,
++                                                 cube_mask, stencil, variant, ps);
++    if (!pso) return NULL;
++    *hdr_off = hoff;
++    s_interp_stat.draws++;
++    return pso;
++}
++
++static void fp_interp_bind(const D3D12DrawRecord* dr, u32 draw_i, u32 hdr_off)
++{
++    if (!dr || draw_i >= MAX_DRAWS || !s_d3d.srv_heap || !s_d3d.cmd_list) return;
++    int par = FR->parity & 1;
++    if (!s_interp_arena[par]) return;
++    u32 base = SRV_HEAP_ALLOC + 48u + draw_i * 48u;
++    u32 tmpl = SRV_HEAP_ALLOC;
++    s_d3d.device->lpVtbl->CopyDescriptorsSimple(s_d3d.device, 16,
++        fp_interp_cpu(base), fp_interp_cpu(tmpl), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++    s_d3d.device->lpVtbl->CopyDescriptorsSimple(s_d3d.device, 16,
++        fp_interp_cpu(base + 16), fp_interp_cpu(tmpl + 16), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++    s_d3d.device->lpVtbl->CopyDescriptorsSimple(s_d3d.device, 16,
++        fp_interp_cpu(base + 32), fp_interp_cpu(tmpl + 32), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++    u32 shape = fp_interp_shape(dr);
++    for (u32 u = 0; u < RSX_TEX_UNITS; u++) {
++        u32 s = (shape >> (u * 2)) & 3u;
++        u32 range = s == 1u ? 16u : s == 2u ? 32u : 0u;
++        s_d3d.device->lpVtbl->CopyDescriptorsSimple(s_d3d.device, 1,
++            fp_interp_cpu(base + range + u),
++            fp_interp_cpu(DRAW_SRV_BASE + draw_i * RSX_TEX_UNITS + u),
++            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
++    }
++    D3D12_GPU_DESCRIPTOR_HANDLE gh;
++    s_d3d.srv_heap->lpVtbl->GetGPUDescriptorHandleForHeapStart(s_d3d.srv_heap, &gh);
++    gh.ptr += (UINT64)base * s_d3d.srv_inc;
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRootDescriptorTable(s_d3d.cmd_list, 1, gh);
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRootShaderResourceView(s_d3d.cmd_list, 5,
++        s_interp_arena[par]->lpVtbl->GetGPUVirtualAddress(s_interp_arena[par]));
++    UINT c[4] = { hdr_off, 0, 0, 0 };
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRoot32BitConstants(s_d3d.cmd_list, 6, 4, c, 0);
++}
 diff --git a/libs/video/rsx_fp_interp_hlsl.inc b/libs/video/rsx_fp_interp_hlsl.inc
 new file mode 100644
-index 0000000..54f378b
+index 0000000..f3d2020
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp_hlsl.inc
 @@ -0,0 +1,11 @@
@@ -439,9 +1258,9 @@ index 0000000..54f378b
 +"Texture2D rsx_i2d[16] : register(t0);\nTextureCube rsx_icu[16] : register(t32);\nTexture3D rsx_i3d[16] : register(t48);\nSamplerState rsx_is0 : register(s0);\nSamplerState rsx_is1 : register(s1);\nSamplerState rsx_is2 : register(s2);\nSamplerState rsx_is3 : register(s3);\nSamplerState rsx_is4 : register(s4);\nSamplerState rsx_is5 : register(s5);\nSamplerState rsx_is6 : register(s6);\nSamplerState rsx_is7 : register(s7);\nSamplerState rsx_is8 : register(s8);\nSamplerState rsx_is9 : register(s9);\nSamplerState rsx_is10 : register(s10);\nSamplerState rsx_is11 : register(s11);\nSamplerState rsx_is12 : register(s12);\nSamplerState rsx_is13 : register(s13);\nSamplerState rsx_is14 : register(s14);\nSamplerState rsx_is15 : register(s15);\n\nfloat4 rsx_i_s2d(uint unit, uint samp, float2 uv, uint kind, float lod) {\n    unit &= 15u;\n    switch (samp) {\n    case 0u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is0, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is0, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is0, uv, lod);\n    case 1u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is1, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is1, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is1, uv, lod);\n    case 2u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is2, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is2, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is2, uv, lod);\n    case 3u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is3, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is3, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is3, uv, lod);\n    case 4u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is4, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is4, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is4, uv, lod);\n    case 5u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is5, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is5, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is5, uv, lod);\n    case 6u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is6, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is6, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is6, uv, lod);\n    case 7u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is7, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is7, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is7, uv, lod);\n    case 8u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is8, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is8, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is8, uv, lod);\n    case 9u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is9, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is9, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is9, uv, lod);\n    case 10u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is10, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is10, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is10, uv, lod);\n    case 11u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is11, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is11, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is11, uv, lod);\n    case 12u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is12, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is12, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is12, uv, lod);\n    case 13u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is13, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is13, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is13, uv, lod);\n    case 14u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is14, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is14, uv, lod"
 +");\n        return rsx_i2d[unit].SampleLevel(rsx_is14, uv, lod);\n    case 15u:\n        if (kind == 0u) return rsx_i2d[unit].Sample(rsx_is15, uv);\n        if (kind == 1u) return rsx_i2d[unit].SampleBias(rsx_is15, uv, lod);\n        return rsx_i2d[unit].SampleLevel(rsx_is15, uv, lod);\n    default: break; }\n    return (float4)0;\n}\nfloat4 rsx_i_scu(uint unit, uint samp, float3 uv, uint kind, float lod) {\n    unit &= 15u;\n    switch (samp) {\n    case 0u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is0, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is0, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is0, uv, lod);\n    case 1u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is1, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is1, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is1, uv, lod);\n    case 2u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is2, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is2, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is2, uv, lod);\n    case 3u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is3, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is3, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is3, uv, lod);\n    case 4u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is4, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is4, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is4, uv, lod);\n    case 5u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is5, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is5, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is5, uv, lod);\n    case 6u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is6, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is6, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is6, uv, lod);\n    case 7u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is7, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is7, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is7, uv, lod);\n    case 8u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is8, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is8, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is8, uv, lod);\n    case 9u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is9, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is9, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is9, uv, lod);\n    case 10u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is10, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is10, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is10, uv, lod);\n    case 11u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is11, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is11, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is11, uv, lod);\n    case 12u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is12, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is12, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is12, uv, lod);\n    case 13u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is13, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is13, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is13, uv, lod);\n    case 14u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is14, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is14, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is14, uv, lod);\n    case 15u:\n        if (kind == 0u) return rsx_icu[unit].Sample(rsx_is15, uv);\n        if (kind == 1u) return rsx_icu[unit].SampleBias(rsx_is15, uv, lod);\n        return rsx_icu[unit].SampleLevel(rsx_is15, uv, lod);\n    default: break; }\n    return (float4)0;\n}\nfloat4 rsx_i_s3d(uint unit, uint samp, float3 uv, uint kind, float "
 +"lod) {\n    unit &= 15u;\n    switch (samp) {\n    case 0u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is0, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is0, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is0, uv, lod);\n    case 1u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is1, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is1, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is1, uv, lod);\n    case 2u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is2, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is2, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is2, uv, lod);\n    case 3u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is3, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is3, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is3, uv, lod);\n    case 4u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is4, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is4, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is4, uv, lod);\n    case 5u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is5, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is5, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is5, uv, lod);\n    case 6u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is6, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is6, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is6, uv, lod);\n    case 7u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is7, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is7, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is7, uv, lod);\n    case 8u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is8, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is8, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is8, uv, lod);\n    case 9u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is9, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is9, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is9, uv, lod);\n    case 10u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is10, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is10, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is10, uv, lod);\n    case 11u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is11, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is11, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is11, uv, lod);\n    case 12u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is12, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is12, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is12, uv, lod);\n    case 13u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is13, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is13, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is13, uv, lod);\n    case 14u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is14, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is14, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is14, uv, lod);\n    case 15u:\n        if (kind == 0u) return rsx_i3d[unit].Sample(rsx_is15, uv);\n        if (kind == 1u) return rsx_i3d[unit].SampleBias(rsx_is15, uv, lod);\n        return rsx_i3d[unit].SampleLevel(rsx_is15, uv, lod);\n    default: break; }\n    return (float4)0;\n}\nfloat rsx_i_load2d(uint unit, int2 q) {\n    uint w, h;\n    unit &= 15u;\n    rsx_i2d[unit].GetDimensions(w, h);\n    if (q.x < 0 || q.y < 0 || q.x >= (int)w || q.y >= (int)h) return 1.0;\n    return rsx_i2d[unit].Load(int3(q, 0)).x;\n}\nvoid rsx_i_dim2d(uint unit, out uint w, out uint h) {\n    unit &= 15u;\n    rsx_i2d[unit].GetDimensions(w, h);\n}\n\n\n// RSX fragment interpreter (ps_5_1, so texture and sampler arrays index). Profile gates the backend epilogue so a\n/"
-+"/ harness can compare against the decompiler alone. RSX_INTERP_MRT / RSX_INTERP_SAMPLE\n// select the output signature and sample-rate interpolants.\n\n#ifndef RSX_FP_INTERP_STEPS\n#define RSX_FP_INTERP_STEPS 2048\n#endif\n#ifndef RSX_INTERP_MRT\n#define RSX_INTERP_MRT 0\n#endif\n#ifndef RSX_INTERP_SAMPLE\n#define RSX_INTERP_SAMPLE 0\n#endif\n\n#if RSX_INTERP_SAMPLE\n#define RSX_IL sample\n#else\n#define RSX_IL\n#endif\n\nstruct RSXInterpIn {\n    float4 position : SV_POSITION;\n    RSX_IL float4 col0 : COLOR0;\n    RSX_IL float4 col1 : COLOR1;\n    RSX_IL float4 fog : FOG;\n    RSX_IL float4 tc0 : TEXCOORD0;\n    RSX_IL float4 tc1 : TEXCOORD1;\n    RSX_IL float4 tc2 : TEXCOORD2;\n    RSX_IL float4 tc3 : TEXCOORD3;\n    RSX_IL float4 tc4 : TEXCOORD4;\n    RSX_IL float4 tc5 : TEXCOORD5;\n    RSX_IL float4 tc6 : TEXCOORD6;\n    RSX_IL float4 tc7 : TEXCOORD7;\n    RSX_IL float4 tc8 : TEXCOORD8;\n    RSX_IL float4 tc9 : TEXCOORD9;\n    bool front : SV_IsFrontFace;\n};\n\ncbuffer PSConstants : register(b1) {\n    float4 rsx_texscale[4];\n    float4 rsx_alphatest;\n    float4 fp_constants[256];\n    float4 rsx_fogstate;\n    float4 rsx_texexpand[4];\n    float4 rsx_texscale_hi[6];\n};\ncbuffer RSXInterpRoot : register(b3) { uint rsx_ip_hdr; uint rsx_ip_pad0; uint rsx_ip_pad1; uint rsx_ip_pad2; };\nByteAddressBuffer rsx_iprog : register(t16);\n\n// Header at rsx_ip_hdr: instr_off, instr_count, flags, shape, unnorm, srgb,\n// shadow, samp0, samp1. Flags: half, target count in bits 1-2 (count-1),\n// depth (unused), atest, fog, wpos scale, final dither, lg2 abs, game dither,\n// srgb write.\n\nfloat4 rsx_i_swz(float4 v, uint s) {\n    float c0 = (s & 3u) == 0u ? v.x : (s & 3u) == 1u ? v.y : (s & 3u) == 2u ? v.z : v.w;\n    uint s1 = (s >> 2) & 3u, s2 = (s >> 4) & 3u, s3 = (s >> 6) & 3u;\n    float c1 = s1 == 0u ? v.x : s1 == 1u ? v.y : s1 == 2u ? v.z : v.w;\n    float c2 = s2 == 0u ? v.x : s2 == 1u ? v.y : s2 == 2u ? v.z : v.w;\n    float c3 = s3 == 0u ? v.x : s3 == 1u ? v.y : s3 == 2u ? v.z : v.w;\n    return float4(c0, c1, c2, c3);\n}\n\nfloat rsx_i_cmp1(float a, uint op) {\n    if (op == 0u) return a == 0.0 ? 1.0 : 0.0;\n    if (op == 1u) return a >= 0.0 ? 1.0 : 0.0;\n    if (op == 2u) return a <= 0.0 ? 1.0 : 0.0;\n    if (op == 3u) return a != 0.0 ? 1.0 : 0.0;\n    if (op == 4u) return a > 0.0 ? 1.0 : 0.0;\n    return a < 0.0 ? 1.0 : 0.0;\n}\nfloat4 rsx_i_cmp4(float4 a, uint op) {\n    return float4(rsx_i_cmp1(a.x, op), rsx_i_cmp1(a.y, op), rsx_i_cmp1(a.z, op), rsx_i_cmp1(a.w, op));\n}\n\nfloat4 rsx_i_fog(float raw) {\n    float c = raw;\n    int m = (int)rsx_fogstate.z;\n    if (m == 0) return raw.xxxx;\n    if (m >= 4) c = abs(c);\n    float t = dot(float2(c, 1), rsx_fogstate.yx);\n    float f = 0;\n    if (m == 1 || m == 4) f = t - 1;\n    else if (m == 2 || m == 5) f = exp((t - 1.5) * 11.084);\n    else { t = (t - 1.5) * 4.709; f = exp(-t * t); }\n    return float4(raw, saturate(f), 0, 0);\n}\n\nfloat4 rsx_i_s2l(float4 s) {\n    float3 c = saturate(s.rgb);\n    s.rgb = lerp(c / 12.92, pow((c + 0.055) / 1.055, (float3)2.4), step((float3)0.04045, c));\n    return s;\n}\nfloat3 rsx_i_l2s(float3 v) {\n    float3 c = saturate(v);\n    return lerp(c * 12.92, 1.055 * pow(c, (float3)(1.0 / 2.4)) - 0.055, step((float3)0.0031308, c));\n}\n\nuint rsx_i_pk4ub(float4 v) {\n    uint4 b = (uint4)round(saturate(v) * 255.0);\n    return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);\n}\nfloat4 rsx_i_up4ub(float v) {\n    uint u = asuint(v);\n    return float4(u & 255u, (u >> 8) & 255u, (u >> 16) & 255u, (u >> 24) & 255u) / 255.0;\n}\nuint rsx_i_pk4b(float4 v) {\n    uint4 b = (uint4)((int4)round(clamp(v, -1.0, 1.0) * 127.0)) & 255u;\n    return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);\n}\nfloat4 rsx_i_up4b(float v) {\n    uint u = asuint(v);\n    int4 b = int4(u & 255u, (u >> 8) & 255u, (u >> 16) & 255u, (u >> 24) & 255u);\n    b = (b << 24) >> 24;\n    return clamp((float4)b / 127.0, -1.0, 1.0);\n}\nuint rsx_i_pk2us(float4 v) {\n    uint2 b = (uint2)round(saturate(v.xy) * 65535.0);\n    return b.x | (b.y << 16);\n}\nfloat4 rsx_i_up2us(float v) {\n    uint u"
-+" = asuint(v);\n    return float4(u & 65535u, u >> 16, u & 65535u, u >> 16) / 65535.0;\n}\nuint rsx_i_pk2h(float4 v) { return f32tof16(v.x) | (f32tof16(v.y) << 16); }\nfloat4 rsx_i_up2h(float v) {\n    uint u = asuint(v);\n    return float4(f16tof32(u & 65535u), f16tof32(u >> 16), f16tof32(u & 65535u), f16tof32(u >> 16));\n}\nfloat4 rsx_i_lin2srgb(float4 cl) {\n    cl = saturate(cl);\n    float4 low = cl * 12.92;\n    float4 high = 1.055 * pow(cl, (float4)(1.0 / 2.4)) - 0.055;\n    return saturate(cl < 0.0031308 ? low : high);\n}\nfloat4 rsx_i_srgb2lin(float4 cs) {\n    float4 a = cs / 12.92;\n    float4 b = pow(max(cs + 0.055, (float4)0.0) / 1.055, (float4)2.4);\n    return cs > 0.04045 ? b : a;\n}\n\nfloat rsx_i_shcmp(float depth, float reference, uint func) {\n    if (func == 0u) return 0.0;\n    if (func == 1u) return depth < reference ? 1.0 : 0.0;\n    if (func == 2u) return depth == reference ? 1.0 : 0.0;\n    if (func == 3u) return depth <= reference ? 1.0 : 0.0;\n    if (func == 4u) return depth > reference ? 1.0 : 0.0;\n    if (func == 5u) return depth != reference ? 1.0 : 0.0;\n    if (func == 6u) return depth >= reference ? 1.0 : 0.0;\n    return 1.0;\n}\nfloat rsx_i_shb(uint unit, float2 p, float r, int w, int h, uint func) {\n    float2 i = floor(p);\n    float2 f = p - i;\n    int2 q = (int2)i;\n    float4 d = float4(rsx_i_load2d(unit, q), rsx_i_load2d(unit, q + int2(1, 0)),\n                      rsx_i_load2d(unit, q + int2(0, 1)), rsx_i_load2d(unit, q + int2(1, 1)));\n    float4 l = float4(rsx_i_shcmp(d.x, r, func), rsx_i_shcmp(d.y, r, func),\n                      rsx_i_shcmp(d.z, r, func), rsx_i_shcmp(d.w, r, func));\n    return lerp(lerp(l.x, l.y, f.x), lerp(l.z, l.w, f.x), f.y);\n}\n\nfloat4 rsx_i_modify(float4 v, uint absb, uint prec, uint neg) {\n    if (prec >= 1u && prec <= 4u) {\n        if (prec == 4u) v = saturate(v);\n        if (absb) v = abs(v);\n        if (prec != 4u) {\n            float b = prec == 1u ? 65504.0 : prec == 2u ? 2.0 : 1.0;\n            v = clamp(v, -b, b);\n        }\n    } else if (absb) v = abs(v);\n    if (neg) v = -v;\n    return v;\n}\n\nfloat4 rsx_i_unnorm(float4 c, uint unit, uint shape, uint unnorm) {\n    if (shape != 0u || (unnorm & (1u << unit)) == 0u) return c;\n    if (unit < 4u) {\n        c.xy = c.xy * rsx_texscale[unit].xy + rsx_texscale[unit].zw;\n    } else {\n        uint pair = (unit - 4u) >> 1;\n        float2 sc = (unit & 1u) ? rsx_texscale_hi[pair].zw : rsx_texscale_hi[pair].xy;\n        c.xy = c.xy * sc;\n    }\n    return c;\n}\n\nvoid rsx_i_atest(float a) {\n    if (rsx_alphatest.x > 0.5) {\n        float r = rsx_alphatest.y;\n        int f = (int)rsx_alphatest.z;\n        bool p = true;\n        if (f == 0) p = false;\n        else if (f == 1) p = a < r;\n        else if (f == 2) p = a == r;\n        else if (f == 3) p = a <= r;\n        else if (f == 4) p = a > r;\n        else if (f == 5) p = a != r;\n        else if (f == 6) p = a >= r;\n        if (!p) discard;\n    }\n}\n\nfloat4 rsx_i_export(uint half, uint target, float4 r[48], float4 h[48]) {\n    uint idx = 0;\n    if (half != 0u) {\n        if (target == 1u) idx = 4u;\n        else if (target == 2u) idx = 6u;\n        else if (target == 3u) idx = 8u;\n    } else {\n        if (target == 1u) idx = 2u;\n        else if (target == 2u) idx = 3u;\n        else if (target == 3u) idx = 4u;\n    }\n    return half != 0u ? h[idx] : r[idx];\n}\n\n#if RSX_INTERP_MRT\nstruct RSXInterpOut {\n    float4 c0 : SV_TARGET0;\n    float4 c1 : SV_TARGET1;\n    float4 c2 : SV_TARGET2;\n    float4 c3 : SV_TARGET3;\n};\nRSXInterpOut main(RSXInterpIn input) {\n#else\nfloat4 main(RSXInterpIn input) : SV_TARGET {\n#endif\n    float4 r[48];\n    float4 h[48];\n    float4 cc0 = 0, cc1 = 0;\n    [loop] for (int zi = 0; zi < 48; zi++) { r[zi] = 0; h[zi] = 0; }\n    uint hdr = rsx_ip_hdr;\n    uint instr_off = rsx_iprog.Load(hdr + 0u);\n    uint instr_count = rsx_iprog.Load(hdr + 4u);\n    uint flags = rsx_iprog.Load(hdr + 8u);\n    uint shape = rsx_iprog.Load(hdr + 12u);\n    uint unnorm = rsx_iprog.Load(hdr + 16u);\n    uint srgb = rsx_ip"
-+"rog.Load(hdr + 20u);\n    uint shadow = rsx_iprog.Load(hdr + 24u);\n    uint samp0 = rsx_iprog.Load(hdr + 28u);\n    uint samp1 = rsx_iprog.Load(hdr + 32u);\n    uint half = flags & 1u;\n    uint lg2abs = (flags & 256u) != 0u;\n    float4 wpos = input.position;\n    if ((flags & 64u) != 0u)\n        wpos *= float4(rsx_fogstate.w > 0.0 ? rsx_fogstate.w : 1.0,\n                       rsx_alphatest.w > 0.0 ? rsx_alphatest.w : 1.0, 1, 1);\n    uint stk_else[8], stk_end[8], stk_kind[8], stk_i[8], stk_step[8], stk_endn[8], stk_body[8];\n    uint sp = 0, pc = 0, steps = 0, killed = 0;\n    [loop]\n    while (pc < instr_count && steps < RSX_FP_INTERP_STEPS) {\n        steps++;\n        [loop]\n        for (int g = 0; g < 16; g++) {\n            if (sp > 0u && stk_kind[sp - 1u] == 0u && stk_else[sp - 1u] == pc) {\n                pc = stk_end[sp - 1u];\n                continue;\n            }\n            if (sp > 0u && stk_end[sp - 1u] == pc) {\n                if (stk_kind[sp - 1u] == 1u) {\n                    uint ni = stk_i[sp - 1u] + stk_step[sp - 1u];\n                    if (ni < stk_endn[sp - 1u]) { stk_i[sp - 1u] = ni; pc = stk_body[sp - 1u]; continue; }\n                }\n                sp--;\n                continue;\n            }\n            break;\n        }\n        if (pc >= instr_count || steps >= RSX_FP_INTERP_STEPS) break;\n        uint4 iw = rsx_iprog.Load4(instr_off + pc * 16u);\n        uint next = pc + 1u;\n        uint op = iw.x & 63u;\n        uint dest = (iw.x >> 6) & 63u;\n        uint dhalf = (iw.x >> 12) & 1u;\n        uint nowrite = (iw.x >> 13) & 1u;\n        uint mask = (iw.x >> 14) & 15u;\n        uint osat = (iw.x >> 18) & 1u;\n        uint scale = (iw.x >> 19) & 7u;\n        uint pred = (iw.x >> 22) & 3u;\n        uint cmpop = (iw.x >> 24) & 7u;\n        uint ccread = (iw.x >> 27) & 1u;\n        uint setcond = (iw.x >> 28) & 1u;\n        uint ccwrite = (iw.x >> 29) & 1u;\n        uint persp = (iw.x >> 30) & 1u;\n        uint flow = (iw.x >> 31) & 1u;\n        if (flow) {\n            uint else_pc = iw.y & 0xFFFFu;\n            uint end_pc = iw.y >> 16;\n            uint init = iw.z & 255u;\n            uint endn = (iw.z >> 8) & 255u;\n            uint step = (iw.z >> 16) & 255u;\n            uint fcsw = iw.w & 255u;\n            float ccv = (ccread != 0u ? rsx_i_swz(cc1, fcsw) : rsx_i_swz(cc0, fcsw)).x;\n            bool cond = pred == 0u ? true : pred == 1u ? false : rsx_i_cmp1(ccv, cmpop) != 0.0;\n            if (op == 2u) {\n                if (cond) {\n                    if (sp < 8u) {\n                        stk_kind[sp] = 0u;\n                        stk_else[sp] = else_pc == 0xFFFFu ? 0xFFFFFFFFu : else_pc;\n                        stk_end[sp] = end_pc;\n                        sp++;\n                    }\n                } else if (else_pc != 0xFFFFu) {\n                    next = else_pc;\n                    if (sp < 8u) {\n                        stk_kind[sp] = 0u;\n                        stk_else[sp] = 0xFFFFFFFFu;\n                        stk_end[sp] = end_pc;\n                        sp++;\n                    }\n                } else next = end_pc;\n            } else if (op == 3u || op == 4u) {\n                uint body = pc + 1u;\n                if (cond && init < endn && body < end_pc && sp < 8u) {\n                    stk_kind[sp] = 1u;\n                    stk_else[sp] = 0xFFFFFFFFu;\n                    stk_end[sp] = end_pc;\n                    stk_i[sp] = init;\n                    stk_step[sp] = step == 0u ? 1u : step;\n                    stk_endn[sp] = endn;\n                    stk_body[sp] = body;\n                    sp++;\n                } else next = end_pc;\n            } else if (op == 0u && cond) {\n                uint look = sp;\n                while (look > 0u && stk_kind[look - 1u] != 1u) look--;\n                if (look > 0u) { next = stk_end[look - 1u]; sp = look - 1u; }\n            }\n            pc = next;\n            continue;\n        }\n        uint s0 = iw.y & 0x3FFFFFu;\n        uint in_src = (iw.y >> 22) & 15u;\n        uint texu "
-+"= (iw.y >> 26) & 15u;\n        uint bx2 = (iw.y >> 30) & 1u;\n        uint s1 = iw.z & 0x3FFFFFu;\n        uint s2 = iw.w & 0x3FFFFFu;\n        uint kslot = (iw.w >> 22) & 255u;\n        float4 tc[10] = { input.tc0, input.tc1, input.tc2, input.tc3, input.tc4,\n                          input.tc5, input.tc6, input.tc7, input.tc8, input.tc9 };\n        float4 a, b, c;\n        {\n            uint spack[3] = { s0, s1, s2 };\n            float4 got[3];\n            [unroll] for (int si = 0; si < 3; si++) {\n                uint pk = spack[si];\n                uint ty = pk & 3u;\n                uint ix = (pk >> 2) & 63u;\n                uint sh = (pk >> 8) & 1u;\n                uint ng = (pk >> 9) & 1u;\n                uint ab = (pk >> 10) & 1u;\n                uint pr = (pk >> 11) & 7u;\n                uint sw = (pk >> 14) & 255u;\n                float4 vv = 0;\n                if (ty == 0u) vv = (sh != 0u ? h[min(ix, 47u)] : r[min(ix, 47u)]);\n                else if (ty == 1u) {\n                    uint id = in_src;\n                    if (id == 0u) vv = wpos;\n                    else if (id == 1u) vv = saturate(input.col0);\n                    else if (id == 2u) vv = saturate(input.col1);\n                    else if (id == 3u) vv = (flags & 32u) != 0u ? rsx_i_fog(input.fog.x) : input.fog;\n                    else if (id >= 4u && id <= 13u) vv = tc[id - 4u];\n                    else if (id == 14u) vv = input.front ? (float4)1 : (float4)(-1);\n                    if (persp != 0u && id >= 4u && id <= 13u) vv *= (1.0 / input.position.w);\n                } else vv = fp_constants[kslot];\n                vv = rsx_i_swz(vv, sw);\n                got[si] = rsx_i_modify(vv, ab, pr, ng);\n            }\n            a = got[0]; b = got[1]; c = got[2];\n        }\n        float4 v = 0;\n        uint do_alu = 1u;\n        if (op == 0x12u) {\n            do_alu = 0u;\n            bool kill = false;\n            if (pred == 0u) kill = true;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                kill = any(rsx_i_cmp4(cv, cmpop) != 0.0);\n            }\n            if (kill) killed = 1u;\n        } else if (op == 0x00u || op == 0x3Du || op == 0x3Eu) do_alu = 0u;\n        else if (op == 0x01u) v = a;\n        else if (op == 0x02u) v = a * b;\n        else if (op == 0x03u) v = a + b;\n        else if (op == 0x04u) v = a * b + c;\n        else if (op == 0x05u) v = dot(a.xyz, b.xyz).xxxx;\n        else if (op == 0x06u) v = dot(a, b).xxxx;\n        else if (op == 0x08u) v = min(a, b);\n        else if (op == 0x09u) v = max(a, b);\n        else if (op == 0x0Au) v = (float4)(a < b);\n        else if (op == 0x0Bu) v = (float4)(a >= b);\n        else if (op == 0x0Cu) v = (float4)(a <= b);\n        else if (op == 0x0Du) v = (float4)(a > b);\n        else if (op == 0x0Eu) v = (float4)(a != b);\n        else if (op == 0x0Fu) v = (float4)(a == b);\n        else if (op == 0x10u) v = frac(a);\n        else if (op == 0x11u) v = floor(a);\n        else if (op == 0x13u) v = asfloat(rsx_i_pk4b(a)).xxxx;\n        else if (op == 0x14u) v = rsx_i_up4b(a.x);\n        else if (op == 0x1Au) v = (1.0 / a.x).xxxx;\n        else if (op == 0x1Bu) v = rsqrt(abs(a.x)).xxxx;\n        else if (op == 0x1Cu) v = exp2(a.x).xxxx;\n        else if (op == 0x1Du) v = (lg2abs ? log2(abs(a.x)) : log2(a.x)).xxxx;\n        else if (op == 0x1Fu) v = lerp(c, b, a);\n        else if (op == 0x22u) v = cos(a.x).xxxx;\n        else if (op == 0x23u) v = sin(a.x).xxxx;\n        else if (op == 0x24u) v = asfloat(rsx_i_pk2h(a)).xxxx;\n        else if (op == 0x25u) v = rsx_i_up2h(a.x);\n        else if (op == 0x26u) v = pow(a.x, b.x).xxxx;\n        else if (op == 0x27u) v = asfloat(rsx_i_pk4ub(a)).xxxx;\n        else if (op == 0x28u) v = rsx_i_up4ub(a.x);\n        else if (op == 0x29u) v = asfloat(rsx_i_pk2us(a)).xxxx;\n        else if (op == 0x2Au) v = rsx_i_up2us(a.x);\n        else if (op == 0x2Cu) v = asfloat(rsx_i_pk4ub(rsx_i_lin2srgb(a))).xxxx;\n        else if (op == 0x2Du"
-+") v = rsx_i_srgb2lin(rsx_i_up4ub(a.x));\n        else if (op == 0x38u) v = dot(a.xy, b.xy).xxxx;\n        else if (op == 0x39u) v = float4(normalize(a.xyz), 1.0);\n        else if (op == 0x3Au) v = a / b.x;\n        else if (op == 0x3Bu) v = abs(a) > 0.0 ? a / sqrt(abs(b.x)) : (float4)0.0;\n        else if (op == 0x3Cu) v = float4(1.0, a.y, a.y > 0.0 ? exp2(a.w) : 0.0, 1.0);\n        else if (op == 0x17u || op == 0x18u || op == 0x2Fu || op == 0x31u) {\n            float4 coord = a;\n            uint shbit = (shadow & (1u << texu)) != 0u;\n            uint kind = op == 0x31u ? 1u : op == 0x2Fu ? 2u : 0u;\n            float lod = b.x;\n            uint shp = (shape >> (texu * 2u)) & 3u;\n            if (shbit != 0u && (op == 0x17u || op == 0x18u)) {\n                float4 sc = op == 0x18u ? coord / coord.w : coord;\n                uint dw, dh;\n                rsx_i_dim2d(texu, dw, dh);\n                float2 p = sc.xy * float2(dw, dh) - 0.5;\n                float ref = saturate(sc.z);\n                uint func = (shadow >> 16) & 7u;\n                uint soft = (shadow >> 19) & 1u;\n                float sv = soft != 0u\n                    ? 0.25 * (rsx_i_shb(texu, p + float2(-0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(-0.5, 0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, 0.5), ref, (int)dw, (int)dh, func))\n                    : rsx_i_shb(texu, p, ref, (int)dw, (int)dh, func);\n                v = sv.xxxx;\n            } else {\n                if (op == 0x18u && shp != 1u) coord.xyz /= coord.w;\n                uint gd = 0u;\n                if ((flags & 512u) != 0u && op == 0x17u && (s0 & 3u) == 1u && in_src == 0u &&\n                    ((s0 >> 14) & 255u) == 228u && ((s0 >> 9) & 3u) == 0u && ((s0 >> 11) & 7u) == 0u && persp == 0u) {\n                    float inv = texu < 4u ? rsx_texscale[texu].x\n                        : ((texu & 1u) != 0u ? rsx_texscale_hi[(texu - 4u) >> 1].z : rsx_texscale_hi[(texu - 4u) >> 1].x);\n                    float thr = texu < 4u ? 0.015625 : 0.001953125;\n                    if (inv >= thr) { v = float4(0.5, 0.5, 0.5, 0.5); gd = 1u; }\n                }\n                if (gd == 0u) {\n                    coord = rsx_i_unnorm(coord, texu, shp, unnorm);\n                    uint sm = texu < 8u ? (samp0 >> (texu * 4u)) & 15u : (samp1 >> ((texu - 8u) * 4u)) & 15u;\n                    if (shp == 1u) v = rsx_i_scu(texu, sm, coord.xyz, kind, lod);\n                    else if (shp == 2u) v = rsx_i_s3d(texu, sm, coord.xyz, kind, lod);\n                    else v = rsx_i_s2d(texu, sm, coord.xy, kind, lod);\n                    if ((srgb & (1u << texu)) != 0u) v = rsx_i_s2l(v);\n                    if (bx2 != 0u) v = v * 2.0 - 1.0;\n                }\n            }\n        } else do_alu = 0u;\n        if (do_alu != 0u && (nowrite == 0u || setcond != 0u)) {\n            if (scale == 1u) v *= 2.0;\n            else if (scale == 2u) v *= 4.0;\n            else if (scale == 3u) v *= 8.0;\n            else if (scale == 5u) v /= 2.0;\n            else if (scale == 6u) v /= 4.0;\n            else if (scale == 7u) v /= 8.0;\n            if (osat != 0u) v = saturate(v);\n            uint di = min(dest, 47u);\n            float4 cur = dhalf != 0u ? h[di] : r[di];\n            float4 nxt = cur;\n            float4 pm = 1;\n            if (pred == 1u) pm = 0;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                pm = rsx_i_cmp4(cv, cmpop);\n            }\n            if (nowrite == 0u && pred != 1u) {\n                if ((mask & 1u) != 0u) nxt.x = (pred == 0u || pm.x != 0.0) ? v.x : cur.x;\n                if ((mask & 2u) != 0u) nxt.y = (pred == 0u || pm.y != 0.0) ? v.y : cur.y;\n                if ((mask & 4u) != 0u) nxt.z = (pred == 0u || pm.z != 0.0) ? v.z : cur.z;\n              "
-+"  if ((mask & 8u) != 0u) nxt.w = (pred == 0u || pm.w != 0.0) ? v.w : cur.w;\n                if (dhalf != 0u) h[di] = nxt; else r[di] = nxt;\n            }\n            if (setcond != 0u) {\n                float4 srcv = nowrite != 0u ? v : (pred == 1u ? cur : nxt);\n                float4 cd = ccwrite != 0u ? cc1 : cc0;\n                if ((mask & 1u) != 0u) cd.x = srcv.x;\n                if ((mask & 2u) != 0u) cd.y = srcv.y;\n                if ((mask & 4u) != 0u) cd.z = srcv.z;\n                if ((mask & 8u) != 0u) cd.w = srcv.w;\n                if (ccwrite != 0u) cc1 = cd; else cc0 = cd;\n            }\n        }\n        pc = next;\n    }\n    if (killed != 0u) discard;\n    float4 o0 = (steps >= RSX_FP_INTERP_STEPS && pc < instr_count) ? (float4)0 : rsx_i_export(half, 0u, r, h);\n    if ((flags & 16u) != 0u) rsx_i_atest(o0.a);\n    if ((flags & 128u) != 0u && (flags & 1024u) == 0u) {\n        uint2 dq = (uint2)input.position.xy;\n        uint ds = (dq.x * 0x8da6b343u) ^ (dq.y * 0xd8163841u);\n        ds ^= ds >> 16; ds *= 0x7feb352du; ds ^= ds >> 15; ds *= 0x846ca68bu; ds ^= ds >> 16;\n        o0.rgb += ((float)(ds & 0xFFFFu) + (float)(ds >> 16)) * (1.0 / (65535.0 * 255.0)) - (1.0 / 255.0);\n    }\n    o0 = (o0 == o0) ? o0 : (float4)0;\n    if ((flags & 1024u) != 0u) o0.rgb = rsx_i_l2s(o0.rgb);\n#if RSX_INTERP_MRT\n    float4 o1 = rsx_i_export(half, 1u, r, h);\n    float4 o2 = rsx_i_export(half, 2u, r, h);\n    float4 o3 = rsx_i_export(half, 3u, r, h);\n    if ((flags & 1024u) != 0u) { o1.rgb = rsx_i_l2s(o1.rgb); o2.rgb = rsx_i_l2s(o2.rgb); o3.rgb = rsx_i_l2s(o3.rgb); }\n    RSXInterpOut o;\n    o.c0 = o0;\n    o.c1 = (o1 == o1) ? o1 : (float4)0;\n    o.c2 = (o2 == o2) ? o2 : (float4)0;\n    o.c3 = (o3 == o3) ? o3 : (float4)0;\n    return o;\n#else\n    return o0;\n#endif\n}\n";
++"/ harness can compare against the decompiler alone. RSX_INTERP_MRT / RSX_INTERP_SAMPLE\n// select the output signature and sample-rate interpolants.\n\n#ifndef RSX_FP_INTERP_STEPS\n#define RSX_FP_INTERP_STEPS 2048\n#endif\n#ifndef RSX_INTERP_MRT\n#define RSX_INTERP_MRT 0\n#endif\n#ifndef RSX_INTERP_SAMPLE\n#define RSX_INTERP_SAMPLE 0\n#endif\n/* 1 (the default) declares TEXCOORD8/9 and SV_IsFrontFace. The engine compiles\n * a second entry with this set to 0 for programs that never read those inputs,\n * so a vertex shader that does not write them still links. */\n#ifndef RSX_INTERP_FULLIN\n#define RSX_INTERP_FULLIN 1\n#endif\n#ifndef RSX_INTERP_TARGETS\n#define RSX_INTERP_TARGETS 4\n#endif\n\n#if RSX_INTERP_SAMPLE\n#define RSX_IL sample\n#else\n#define RSX_IL\n#endif\n\nstruct RSXInterpIn {\n    float4 position : SV_POSITION;\n    RSX_IL float4 col0 : COLOR0;\n    RSX_IL float4 col1 : COLOR1;\n    RSX_IL float4 fog : FOG;\n    RSX_IL float4 tc0 : TEXCOORD0;\n    RSX_IL float4 tc1 : TEXCOORD1;\n    RSX_IL float4 tc2 : TEXCOORD2;\n    RSX_IL float4 tc3 : TEXCOORD3;\n    RSX_IL float4 tc4 : TEXCOORD4;\n    RSX_IL float4 tc5 : TEXCOORD5;\n    RSX_IL float4 tc6 : TEXCOORD6;\n    RSX_IL float4 tc7 : TEXCOORD7;\n#if RSX_INTERP_FULLIN\n    RSX_IL float4 tc8 : TEXCOORD8;\n    RSX_IL float4 tc9 : TEXCOORD9;\n    bool front : SV_IsFrontFace;\n#endif\n};\n\ncbuffer PSConstants : register(b1) {\n    float4 rsx_texscale[4];\n    float4 rsx_alphatest;\n    float4 fp_constants[256];\n    float4 rsx_fogstate;\n    float4 rsx_texexpand[4];\n    float4 rsx_texscale_hi[6];\n};\ncbuffer RSXInterpRoot : register(b3) { uint rsx_ip_hdr; uint rsx_ip_pad0; uint rsx_ip_pad1; uint rsx_ip_pad2; };\nByteAddressBuffer rsx_iprog : register(t16);\n\n// Header at rsx_ip_hdr: instr_off, instr_count, flags, shape, unnorm, srgb,\n// shadow, samp0, samp1. Flags: half, target count in bits 1-2 (count-1),\n// depth (unused), atest, fog, wpos scale, final dither, lg2 abs, game dither,\n// srgb write.\n\nfloat4 rsx_i_swz(float4 v, uint s) {\n    float c0 = (s & 3u) == 0u ? v.x : (s & 3u) == 1u ? v.y : (s & 3u) == 2u ? v.z : v.w;\n    uint s1 = (s >> 2) & 3u, s2 = (s >> 4) & 3u, s3 = (s >> 6) & 3u;\n    float c1 = s1 == 0u ? v.x : s1 == 1u ? v.y : s1 == 2u ? v.z : v.w;\n    float c2 = s2 == 0u ? v.x : s2 == 1u ? v.y : s2 == 2u ? v.z : v.w;\n    float c3 = s3 == 0u ? v.x : s3 == 1u ? v.y : s3 == 2u ? v.z : v.w;\n    return float4(c0, c1, c2, c3);\n}\n\nfloat rsx_i_cmp1(float a, uint op) {\n    if (op == 0u) return a == 0.0 ? 1.0 : 0.0;\n    if (op == 1u) return a >= 0.0 ? 1.0 : 0.0;\n    if (op == 2u) return a <= 0.0 ? 1.0 : 0.0;\n    if (op == 3u) return a != 0.0 ? 1.0 : 0.0;\n    if (op == 4u) return a > 0.0 ? 1.0 : 0.0;\n    return a < 0.0 ? 1.0 : 0.0;\n}\nfloat4 rsx_i_cmp4(float4 a, uint op) {\n    return float4(rsx_i_cmp1(a.x, op), rsx_i_cmp1(a.y, op), rsx_i_cmp1(a.z, op), rsx_i_cmp1(a.w, op));\n}\n\nfloat4 rsx_i_fog(float raw) {\n    float c = raw;\n    int m = (int)rsx_fogstate.z;\n    if (m == 0) return raw.xxxx;\n    if (m >= 4) c = abs(c);\n    float t = dot(float2(c, 1), rsx_fogstate.yx);\n    float f = 0;\n    if (m == 1 || m == 4) f = t - 1;\n    else if (m == 2 || m == 5) f = exp((t - 1.5) * 11.084);\n    else { t = (t - 1.5) * 4.709; f = exp(-t * t); }\n    return float4(raw, saturate(f), 0, 0);\n}\n\nfloat4 rsx_i_s2l(float4 s) {\n    float3 c = saturate(s.rgb);\n    s.rgb = lerp(c / 12.92, pow((c + 0.055) / 1.055, (float3)2.4), step((float3)0.04045, c));\n    return s;\n}\nfloat3 rsx_i_l2s(float3 v) {\n    float3 c = saturate(v);\n    return lerp(c * 12.92, 1.055 * pow(c, (float3)(1.0 / 2.4)) - 0.055, step((float3)0.0031308, c));\n}\n\nuint rsx_i_pk4ub(float4 v) {\n    uint4 b = (uint4)round(saturate(v) * 255.0);\n    return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);\n}\nfloat4 rsx_i_up4ub(float v) {\n    uint u = asuint(v);\n    return float4(u & 255u, (u >> 8) & 255u, (u >> 16) & 255u, (u >> 24) & 255u) / 255.0;\n}\nuint rsx_i_pk4b(float4 v) {\n    uint4 b = (uint4)((int4)round(clamp(v, -1.0, 1.0) * 127.0)) & 255u;\n    return b.x | (b.y << 8) | (b.z << 16) | (b.w"
++" << 24);\n}\nfloat4 rsx_i_up4b(float v) {\n    uint u = asuint(v);\n    int4 b = int4(u & 255u, (u >> 8) & 255u, (u >> 16) & 255u, (u >> 24) & 255u);\n    b = (b << 24) >> 24;\n    return clamp((float4)b / 127.0, -1.0, 1.0);\n}\nuint rsx_i_pk2us(float4 v) {\n    uint2 b = (uint2)round(saturate(v.xy) * 65535.0);\n    return b.x | (b.y << 16);\n}\nfloat4 rsx_i_up2us(float v) {\n    uint u = asuint(v);\n    return float4(u & 65535u, u >> 16, u & 65535u, u >> 16) / 65535.0;\n}\nuint rsx_i_pk2h(float4 v) { return f32tof16(v.x) | (f32tof16(v.y) << 16); }\nfloat4 rsx_i_up2h(float v) {\n    uint u = asuint(v);\n    return float4(f16tof32(u & 65535u), f16tof32(u >> 16), f16tof32(u & 65535u), f16tof32(u >> 16));\n}\nfloat4 rsx_i_lin2srgb(float4 cl) {\n    cl = saturate(cl);\n    float4 low = cl * 12.92;\n    float4 high = 1.055 * pow(cl, (float4)(1.0 / 2.4)) - 0.055;\n    return saturate(cl < 0.0031308 ? low : high);\n}\nfloat4 rsx_i_srgb2lin(float4 cs) {\n    float4 a = cs / 12.92;\n    float4 b = pow(max(cs + 0.055, (float4)0.0) / 1.055, (float4)2.4);\n    return cs > 0.04045 ? b : a;\n}\n\nfloat rsx_i_shcmp(float depth, float reference, uint func) {\n    if (func == 0u) return 0.0;\n    if (func == 1u) return depth < reference ? 1.0 : 0.0;\n    if (func == 2u) return depth == reference ? 1.0 : 0.0;\n    if (func == 3u) return depth <= reference ? 1.0 : 0.0;\n    if (func == 4u) return depth > reference ? 1.0 : 0.0;\n    if (func == 5u) return depth != reference ? 1.0 : 0.0;\n    if (func == 6u) return depth >= reference ? 1.0 : 0.0;\n    return 1.0;\n}\nfloat rsx_i_shb(uint unit, float2 p, float r, int w, int h, uint func) {\n    float2 i = floor(p);\n    float2 f = p - i;\n    int2 q = (int2)i;\n    float4 d = float4(rsx_i_load2d(unit, q), rsx_i_load2d(unit, q + int2(1, 0)),\n                      rsx_i_load2d(unit, q + int2(0, 1)), rsx_i_load2d(unit, q + int2(1, 1)));\n    float4 l = float4(rsx_i_shcmp(d.x, r, func), rsx_i_shcmp(d.y, r, func),\n                      rsx_i_shcmp(d.z, r, func), rsx_i_shcmp(d.w, r, func));\n    return lerp(lerp(l.x, l.y, f.x), lerp(l.z, l.w, f.x), f.y);\n}\n\nfloat4 rsx_i_modify(float4 v, uint absb, uint prec, uint neg) {\n    if (prec >= 1u && prec <= 4u) {\n        if (prec == 4u) v = saturate(v);\n        if (absb) v = abs(v);\n        if (prec != 4u) {\n            float b = prec == 1u ? 65504.0 : prec == 2u ? 2.0 : 1.0;\n            v = clamp(v, -b, b);\n        }\n    } else if (absb) v = abs(v);\n    if (neg) v = -v;\n    return v;\n}\n\nfloat4 rsx_i_unnorm(float4 c, uint unit, uint shape, uint unnorm) {\n    if (shape != 0u || (unnorm & (1u << unit)) == 0u) return c;\n    if (unit < 4u) {\n        c.xy = c.xy * rsx_texscale[unit].xy + rsx_texscale[unit].zw;\n    } else {\n        uint pair = (unit - 4u) >> 1;\n        float2 sc = (unit & 1u) ? rsx_texscale_hi[pair].zw : rsx_texscale_hi[pair].xy;\n        c.xy = c.xy * sc;\n    }\n    return c;\n}\n\nvoid rsx_i_atest(float a) {\n    if (rsx_alphatest.x > 0.5) {\n        float r = rsx_alphatest.y;\n        int f = (int)rsx_alphatest.z;\n        bool p = true;\n        if (f == 0) p = false;\n        else if (f == 1) p = a < r;\n        else if (f == 2) p = a == r;\n        else if (f == 3) p = a <= r;\n        else if (f == 4) p = a > r;\n        else if (f == 5) p = a != r;\n        else if (f == 6) p = a >= r;\n        if (!p) discard;\n    }\n}\n\nfloat4 rsx_i_export(uint half, uint target, float4 r[48], float4 h[48]) {\n    uint idx = 0;\n    if (half != 0u) {\n        if (target == 1u) idx = 4u;\n        else if (target == 2u) idx = 6u;\n        else if (target == 3u) idx = 8u;\n    } else {\n        if (target == 1u) idx = 2u;\n        else if (target == 2u) idx = 3u;\n        else if (target == 3u) idx = 4u;\n    }\n    return half != 0u ? h[idx] : r[idx];\n}\n\n#if RSX_INTERP_MRT\nstruct RSXInterpOut {\n    float4 c0 : SV_TARGET0;\n#if RSX_INTERP_TARGETS > 1\n    float4 c1 : SV_TARGET1;\n#endif\n#if RSX_INTERP_TARGETS > 2\n    float4 c2 : SV_TARGET2;\n#endif\n#if RSX_INTERP_TARGETS > 3\n    float4 c3 : SV_TARGET3;\n#endif\n};\nRSXInterpOut main(RSXInterpIn "
++"input) {\n#else\nfloat4 main(RSXInterpIn input) : SV_TARGET {\n#endif\n    float4 r[48];\n    float4 h[48];\n    float4 cc0 = 0, cc1 = 0;\n    [loop] for (int zi = 0; zi < 48; zi++) { r[zi] = 0; h[zi] = 0; }\n    uint hdr = rsx_ip_hdr;\n    uint instr_off = rsx_iprog.Load(hdr + 0u);\n    uint instr_count = rsx_iprog.Load(hdr + 4u);\n    uint flags = rsx_iprog.Load(hdr + 8u);\n    uint shape = rsx_iprog.Load(hdr + 12u);\n    uint unnorm = rsx_iprog.Load(hdr + 16u);\n    uint srgb = rsx_iprog.Load(hdr + 20u);\n    uint shadow = rsx_iprog.Load(hdr + 24u);\n    uint samp0 = rsx_iprog.Load(hdr + 28u);\n    uint samp1 = rsx_iprog.Load(hdr + 32u);\n    uint half = flags & 1u;\n    uint lg2abs = (flags & 256u) != 0u;\n    float4 wpos = input.position;\n    if ((flags & 64u) != 0u)\n        wpos *= float4(rsx_fogstate.w > 0.0 ? rsx_fogstate.w : 1.0,\n                       rsx_alphatest.w > 0.0 ? rsx_alphatest.w : 1.0, 1, 1);\n    uint stk_else[8], stk_end[8], stk_kind[8], stk_i[8], stk_step[8], stk_endn[8], stk_body[8];\n    uint sp = 0, pc = 0, steps = 0, killed = 0;\n    [loop]\n    while (pc < instr_count && steps < RSX_FP_INTERP_STEPS) {\n        steps++;\n        [loop]\n        for (int g = 0; g < 16; g++) {\n            if (sp > 0u && stk_kind[sp - 1u] == 0u && stk_else[sp - 1u] == pc) {\n                pc = stk_end[sp - 1u];\n                continue;\n            }\n            if (sp > 0u && stk_end[sp - 1u] == pc) {\n                if (stk_kind[sp - 1u] == 1u) {\n                    uint ni = stk_i[sp - 1u] + stk_step[sp - 1u];\n                    if (ni < stk_endn[sp - 1u]) { stk_i[sp - 1u] = ni; pc = stk_body[sp - 1u]; continue; }\n                }\n                sp--;\n                continue;\n            }\n            break;\n        }\n        if (pc >= instr_count || steps >= RSX_FP_INTERP_STEPS) break;\n        uint4 iw = rsx_iprog.Load4(instr_off + pc * 16u);\n        uint next = pc + 1u;\n        uint op = iw.x & 63u;\n        uint dest = (iw.x >> 6) & 63u;\n        uint dhalf = (iw.x >> 12) & 1u;\n        uint nowrite = (iw.x >> 13) & 1u;\n        uint mask = (iw.x >> 14) & 15u;\n        uint osat = (iw.x >> 18) & 1u;\n        uint scale = (iw.x >> 19) & 7u;\n        uint pred = (iw.x >> 22) & 3u;\n        uint cmpop = (iw.x >> 24) & 7u;\n        uint ccread = (iw.x >> 27) & 1u;\n        uint setcond = (iw.x >> 28) & 1u;\n        uint ccwrite = (iw.x >> 29) & 1u;\n        uint persp = (iw.x >> 30) & 1u;\n        uint flow = (iw.x >> 31) & 1u;\n        if (flow) {\n            uint else_pc = iw.y & 0xFFFFu;\n            uint end_pc = iw.y >> 16;\n            uint init = iw.z & 255u;\n            uint endn = (iw.z >> 8) & 255u;\n            uint step = (iw.z >> 16) & 255u;\n            uint fcsw = iw.w & 255u;\n            float ccv = (ccread != 0u ? rsx_i_swz(cc1, fcsw) : rsx_i_swz(cc0, fcsw)).x;\n            bool cond = pred == 0u ? true : pred == 1u ? false : rsx_i_cmp1(ccv, cmpop) != 0.0;\n            if (op == 2u) {\n                if (cond) {\n                    if (sp < 8u) {\n                        stk_kind[sp] = 0u;\n                        stk_else[sp] = else_pc == 0xFFFFu ? 0xFFFFFFFFu : else_pc;\n                        stk_end[sp] = end_pc;\n                        sp++;\n                    }\n                } else if (else_pc != 0xFFFFu) {\n                    next = else_pc;\n                    if (sp < 8u) {\n                        stk_kind[sp] = 0u;\n                        stk_else[sp] = 0xFFFFFFFFu;\n                        stk_end[sp] = end_pc;\n                        sp++;\n                    }\n                } else next = end_pc;\n            } else if (op == 3u || op == 4u) {\n                uint body = pc + 1u;\n                if (cond && init < endn && body < end_pc && sp < 8u) {\n                    stk_kind[sp] = 1u;\n                    stk_else[sp] = 0xFFFFFFFFu;\n                    stk_end[sp] = end_pc;\n                    stk_i[sp] = init;\n                    stk_step[sp] = step == 0u ? 1u : step;\n                    stk_endn[sp] = endn;\n                "
++"    stk_body[sp] = body;\n                    sp++;\n                } else next = end_pc;\n            } else if (op == 0u && cond) {\n                uint look = sp;\n                while (look > 0u && stk_kind[look - 1u] != 1u) look--;\n                if (look > 0u) { next = stk_end[look - 1u]; sp = look - 1u; }\n            }\n            pc = next;\n            continue;\n        }\n        uint s0 = iw.y & 0x3FFFFFu;\n        uint in_src = (iw.y >> 22) & 15u;\n        uint texu = (iw.y >> 26) & 15u;\n        uint bx2 = (iw.y >> 30) & 1u;\n        uint s1 = iw.z & 0x3FFFFFu;\n        uint s2 = iw.w & 0x3FFFFFu;\n        uint kslot = (iw.w >> 22) & 255u;\n#if RSX_INTERP_FULLIN\n        float4 tc8v = input.tc8;\n        float4 tc9v = input.tc9;\n        float4 face = input.front ? (float4)1 : (float4)(-1);\n#else\n        float4 tc8v = 0;\n        float4 tc9v = 0;\n        float4 face = 0;\n#endif\n        float4 tc[10] = { input.tc0, input.tc1, input.tc2, input.tc3, input.tc4,\n                          input.tc5, input.tc6, input.tc7, tc8v, tc9v };\n        float4 a, b, c;\n        {\n            uint spack[3] = { s0, s1, s2 };\n            float4 got[3];\n            [unroll] for (int si = 0; si < 3; si++) {\n                uint pk = spack[si];\n                uint ty = pk & 3u;\n                uint ix = (pk >> 2) & 63u;\n                uint sh = (pk >> 8) & 1u;\n                uint ng = (pk >> 9) & 1u;\n                uint ab = (pk >> 10) & 1u;\n                uint pr = (pk >> 11) & 7u;\n                uint sw = (pk >> 14) & 255u;\n                float4 vv = 0;\n                if (ty == 0u) vv = (sh != 0u ? h[min(ix, 47u)] : r[min(ix, 47u)]);\n                else if (ty == 1u) {\n                    uint id = in_src;\n                    if (id == 0u) vv = wpos;\n                    else if (id == 1u) vv = saturate(input.col0);\n                    else if (id == 2u) vv = saturate(input.col1);\n                    else if (id == 3u) vv = (flags & 32u) != 0u ? rsx_i_fog(input.fog.x) : input.fog;\n                    else if (id >= 4u && id <= 13u) vv = tc[id - 4u];\n                    else if (id == 14u) vv = face;\n                    if (persp != 0u && id >= 4u && id <= 13u) vv *= (1.0 / input.position.w);\n                } else vv = fp_constants[kslot];\n                vv = rsx_i_swz(vv, sw);\n                got[si] = rsx_i_modify(vv, ab, pr, ng);\n            }\n            a = got[0]; b = got[1]; c = got[2];\n        }\n        float4 v = 0;\n        uint do_alu = 1u;\n        if (op == 0x12u) {\n            do_alu = 0u;\n            bool kill = false;\n            if (pred == 0u) kill = true;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                kill = any(rsx_i_cmp4(cv, cmpop) != 0.0);\n            }\n            if (kill) killed = 1u;\n        } else if (op == 0x00u || op == 0x3Du || op == 0x3Eu) do_alu = 0u;\n        else if (op == 0x01u) v = a;\n        else if (op == 0x02u) v = a * b;\n        else if (op == 0x03u) v = a + b;\n        else if (op == 0x04u) v = a * b + c;\n        else if (op == 0x05u) v = dot(a.xyz, b.xyz).xxxx;\n        else if (op == 0x06u) v = dot(a, b).xxxx;\n        else if (op == 0x08u) v = min(a, b);\n        else if (op == 0x09u) v = max(a, b);\n        else if (op == 0x0Au) v = (float4)(a < b);\n        else if (op == 0x0Bu) v = (float4)(a >= b);\n        else if (op == 0x0Cu) v = (float4)(a <= b);\n        else if (op == 0x0Du) v = (float4)(a > b);\n        else if (op == 0x0Eu) v = (float4)(a != b);\n        else if (op == 0x0Fu) v = (float4)(a == b);\n        else if (op == 0x10u) v = frac(a);\n        else if (op == 0x11u) v = floor(a);\n        else if (op == 0x13u) v = asfloat(rsx_i_pk4b(a)).xxxx;\n        else if (op == 0x14u) v = rsx_i_up4b(a.x);\n        else if (op == 0x1Au) v = (1.0 / a.x).xxxx;\n        else if (op == 0x1Bu) v = rsqrt(abs(a.x)).xxxx;\n        else if (op == 0x1Cu) v = exp2(a.x).xxxx;\n        else if (op == 0x1Du) v = (lg2abs ? log2(abs(a.x)) : "
++"log2(a.x)).xxxx;\n        else if (op == 0x1Fu) v = lerp(c, b, a);\n        else if (op == 0x22u) v = cos(a.x).xxxx;\n        else if (op == 0x23u) v = sin(a.x).xxxx;\n        else if (op == 0x24u) v = asfloat(rsx_i_pk2h(a)).xxxx;\n        else if (op == 0x25u) v = rsx_i_up2h(a.x);\n        else if (op == 0x26u) v = pow(a.x, b.x).xxxx;\n        else if (op == 0x27u) v = asfloat(rsx_i_pk4ub(a)).xxxx;\n        else if (op == 0x28u) v = rsx_i_up4ub(a.x);\n        else if (op == 0x29u) v = asfloat(rsx_i_pk2us(a)).xxxx;\n        else if (op == 0x2Au) v = rsx_i_up2us(a.x);\n        else if (op == 0x2Cu) v = asfloat(rsx_i_pk4ub(rsx_i_lin2srgb(a))).xxxx;\n        else if (op == 0x2Du) v = rsx_i_srgb2lin(rsx_i_up4ub(a.x));\n        else if (op == 0x38u) v = dot(a.xy, b.xy).xxxx;\n        else if (op == 0x39u) v = float4(normalize(a.xyz), 1.0);\n        else if (op == 0x3Au) v = a / b.x;\n        else if (op == 0x3Bu) v = abs(a) > 0.0 ? a / sqrt(abs(b.x)) : (float4)0.0;\n        else if (op == 0x3Cu) v = float4(1.0, a.y, a.y > 0.0 ? exp2(a.w) : 0.0, 1.0);\n        else if (op == 0x17u || op == 0x18u || op == 0x2Fu || op == 0x31u) {\n            float4 coord = a;\n            uint shbit = (shadow & (1u << texu)) != 0u;\n            uint kind = op == 0x31u ? 1u : op == 0x2Fu ? 2u : 0u;\n            float lod = b.x;\n            uint shp = (shape >> (texu * 2u)) & 3u;\n            if (shbit != 0u && (op == 0x17u || op == 0x18u)) {\n                float4 sc = op == 0x18u ? coord / coord.w : coord;\n                uint dw, dh;\n                rsx_i_dim2d(texu, dw, dh);\n                float2 p = sc.xy * float2(dw, dh) - 0.5;\n                float ref = saturate(sc.z);\n                uint func = (shadow >> 16) & 7u;\n                uint soft = (shadow >> 19) & 1u;\n                float sv = soft != 0u\n                    ? 0.25 * (rsx_i_shb(texu, p + float2(-0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(-0.5, 0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, 0.5), ref, (int)dw, (int)dh, func))\n                    : rsx_i_shb(texu, p, ref, (int)dw, (int)dh, func);\n                v = sv.xxxx;\n            } else {\n                if (op == 0x18u && shp != 1u) coord.xyz /= coord.w;\n                uint gd = 0u;\n                if ((flags & 512u) != 0u && op == 0x17u && (s0 & 3u) == 1u && in_src == 0u &&\n                    ((s0 >> 14) & 255u) == 228u && ((s0 >> 9) & 3u) == 0u && ((s0 >> 11) & 7u) == 0u && persp == 0u) {\n                    float inv = texu < 4u ? rsx_texscale[texu].x\n                        : ((texu & 1u) != 0u ? rsx_texscale_hi[(texu - 4u) >> 1].z : rsx_texscale_hi[(texu - 4u) >> 1].x);\n                    float thr = texu < 4u ? 0.015625 : 0.001953125;\n                    if (inv >= thr) { v = float4(0.5, 0.5, 0.5, 0.5); gd = 1u; }\n                }\n                if (gd == 0u) {\n                    coord = rsx_i_unnorm(coord, texu, shp, unnorm);\n                    uint sm = texu < 8u ? (samp0 >> (texu * 4u)) & 15u : (samp1 >> ((texu - 8u) * 4u)) & 15u;\n                    if (shp == 1u) v = rsx_i_scu(texu, sm, coord.xyz, kind, lod);\n                    else if (shp == 2u) v = rsx_i_s3d(texu, sm, coord.xyz, kind, lod);\n                    else v = rsx_i_s2d(texu, sm, coord.xy, kind, lod);\n                    if ((srgb & (1u << texu)) != 0u) v = rsx_i_s2l(v);\n                    if (bx2 != 0u) v = v * 2.0 - 1.0;\n                }\n            }\n        } else do_alu = 0u;\n        if (do_alu != 0u && (nowrite == 0u || setcond != 0u)) {\n            if (scale == 1u) v *= 2.0;\n            else if (scale == 2u) v *= 4.0;\n            else if (scale == 3u) v *= 8.0;\n            else if (scale == 5u) v /= 2.0;\n            else if (scale == 6u) v /= 4.0;\n            else if (scale == 7u) v /= 8.0;\n            if (osat != 0u) v = saturate(v);\n            uint di = m"
++"in(dest, 47u);\n            float4 cur = dhalf != 0u ? h[di] : r[di];\n            float4 nxt = cur;\n            float4 pm = 1;\n            if (pred == 1u) pm = 0;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                pm = rsx_i_cmp4(cv, cmpop);\n            }\n            if (nowrite == 0u && pred != 1u) {\n                if ((mask & 1u) != 0u) nxt.x = (pred == 0u || pm.x != 0.0) ? v.x : cur.x;\n                if ((mask & 2u) != 0u) nxt.y = (pred == 0u || pm.y != 0.0) ? v.y : cur.y;\n                if ((mask & 4u) != 0u) nxt.z = (pred == 0u || pm.z != 0.0) ? v.z : cur.z;\n                if ((mask & 8u) != 0u) nxt.w = (pred == 0u || pm.w != 0.0) ? v.w : cur.w;\n                if (dhalf != 0u) h[di] = nxt; else r[di] = nxt;\n            }\n            if (setcond != 0u) {\n                float4 srcv = nowrite != 0u ? v : (pred == 1u ? cur : nxt);\n                float4 cd = ccwrite != 0u ? cc1 : cc0;\n                if ((mask & 1u) != 0u) cd.x = srcv.x;\n                if ((mask & 2u) != 0u) cd.y = srcv.y;\n                if ((mask & 4u) != 0u) cd.z = srcv.z;\n                if ((mask & 8u) != 0u) cd.w = srcv.w;\n                if (ccwrite != 0u) cc1 = cd; else cc0 = cd;\n            }\n        }\n        pc = next;\n    }\n    if (killed != 0u) discard;\n    float4 o0 = (steps >= RSX_FP_INTERP_STEPS && pc < instr_count) ? (float4)0 : rsx_i_export(half, 0u, r, h);\n    if ((flags & 16u) != 0u) rsx_i_atest(o0.a);\n    if ((flags & 128u) != 0u && (flags & 1024u) == 0u) {\n        uint2 dq = (uint2)input.position.xy;\n        uint ds = (dq.x * 0x8da6b343u) ^ (dq.y * 0xd8163841u);\n        ds ^= ds >> 16; ds *= 0x7feb352du; ds ^= ds >> 15; ds *= 0x846ca68bu; ds ^= ds >> 16;\n        o0.rgb += ((float)(ds & 0xFFFFu) + (float)(ds >> 16)) * (1.0 / (65535.0 * 255.0)) - (1.0 / 255.0);\n    }\n    o0 = (o0 == o0) ? o0 : (float4)0;\n    if ((flags & 1024u) != 0u) o0.rgb = rsx_i_l2s(o0.rgb);\n#if RSX_INTERP_MRT\n#if RSX_INTERP_TARGETS > 1\n    float4 o1 = rsx_i_export(half, 1u, r, h);\n#endif\n#if RSX_INTERP_TARGETS > 2\n    float4 o2 = rsx_i_export(half, 2u, r, h);\n#endif\n#if RSX_INTERP_TARGETS > 3\n    float4 o3 = rsx_i_export(half, 3u, r, h);\n#endif\n    if ((flags & 1024u) != 0u) {\n#if RSX_INTERP_TARGETS > 1\n        o1.rgb = rsx_i_l2s(o1.rgb);\n#endif\n#if RSX_INTERP_TARGETS > 2\n        o2.rgb = rsx_i_l2s(o2.rgb);\n#endif\n#if RSX_INTERP_TARGETS > 3\n        o3.rgb = rsx_i_l2s(o3.rgb);\n#endif\n    }\n    RSXInterpOut o;\n    o.c0 = o0;\n#if RSX_INTERP_TARGETS > 1\n    o.c1 = (o1 == o1) ? o1 : (float4)0;\n#endif\n#if RSX_INTERP_TARGETS > 2\n    o.c2 = (o2 == o2) ? o2 : (float4)0;\n#endif\n#if RSX_INTERP_TARGETS > 3\n    o.c3 = (o3 == o3) ? o3 : (float4)0;\n#endif\n    return o;\n#else\n    return o0;\n#endif\n}\n";

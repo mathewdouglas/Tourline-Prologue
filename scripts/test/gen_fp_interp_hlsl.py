@@ -67,6 +67,15 @@ BODY = r'''
 #ifndef RSX_INTERP_SAMPLE
 #define RSX_INTERP_SAMPLE 0
 #endif
+/* 1 (the default) declares TEXCOORD8/9 and SV_IsFrontFace. The engine compiles
+ * a second entry with this set to 0 for programs that never read those inputs,
+ * so a vertex shader that does not write them still links. */
+#ifndef RSX_INTERP_FULLIN
+#define RSX_INTERP_FULLIN 1
+#endif
+#ifndef RSX_INTERP_TARGETS
+#define RSX_INTERP_TARGETS 4
+#endif
 
 #if RSX_INTERP_SAMPLE
 #define RSX_IL sample
@@ -87,9 +96,11 @@ struct RSXInterpIn {
     RSX_IL float4 tc5 : TEXCOORD5;
     RSX_IL float4 tc6 : TEXCOORD6;
     RSX_IL float4 tc7 : TEXCOORD7;
+#if RSX_INTERP_FULLIN
     RSX_IL float4 tc8 : TEXCOORD8;
     RSX_IL float4 tc9 : TEXCOORD9;
     bool front : SV_IsFrontFace;
+#endif
 };
 
 cbuffer PSConstants : register(b1) {
@@ -274,9 +285,15 @@ float4 rsx_i_export(uint half, uint target, float4 r[48], float4 h[48]) {
 #if RSX_INTERP_MRT
 struct RSXInterpOut {
     float4 c0 : SV_TARGET0;
+#if RSX_INTERP_TARGETS > 1
     float4 c1 : SV_TARGET1;
+#endif
+#if RSX_INTERP_TARGETS > 2
     float4 c2 : SV_TARGET2;
+#endif
+#if RSX_INTERP_TARGETS > 3
     float4 c3 : SV_TARGET3;
+#endif
 };
 RSXInterpOut main(RSXInterpIn input) {
 #else
@@ -393,8 +410,17 @@ float4 main(RSXInterpIn input) : SV_TARGET {
         uint s1 = iw.z & 0x3FFFFFu;
         uint s2 = iw.w & 0x3FFFFFu;
         uint kslot = (iw.w >> 22) & 255u;
+#if RSX_INTERP_FULLIN
+        float4 tc8v = input.tc8;
+        float4 tc9v = input.tc9;
+        float4 face = input.front ? (float4)1 : (float4)(-1);
+#else
+        float4 tc8v = 0;
+        float4 tc9v = 0;
+        float4 face = 0;
+#endif
         float4 tc[10] = { input.tc0, input.tc1, input.tc2, input.tc3, input.tc4,
-                          input.tc5, input.tc6, input.tc7, input.tc8, input.tc9 };
+                          input.tc5, input.tc6, input.tc7, tc8v, tc9v };
         float4 a, b, c;
         {
             uint spack[3] = { s0, s1, s2 };
@@ -417,7 +443,7 @@ float4 main(RSXInterpIn input) : SV_TARGET {
                     else if (id == 2u) vv = saturate(input.col1);
                     else if (id == 3u) vv = (flags & 32u) != 0u ? rsx_i_fog(input.fog.x) : input.fog;
                     else if (id >= 4u && id <= 13u) vv = tc[id - 4u];
-                    else if (id == 14u) vv = input.front ? (float4)1 : (float4)(-1);
+                    else if (id == 14u) vv = face;
                     if (persp != 0u && id >= 4u && id <= 13u) vv *= (1.0 / input.position.w);
                 } else vv = fp_constants[kslot];
                 vv = rsx_i_swz(vv, sw);
@@ -602,15 +628,37 @@ def fix_mrt(body: str) -> str:
 }
 """
     new = """#if RSX_INTERP_MRT
+#if RSX_INTERP_TARGETS > 1
     float4 o1 = rsx_i_export(half, 1u, r, h);
+#endif
+#if RSX_INTERP_TARGETS > 2
     float4 o2 = rsx_i_export(half, 2u, r, h);
+#endif
+#if RSX_INTERP_TARGETS > 3
     float4 o3 = rsx_i_export(half, 3u, r, h);
-    if ((flags & 1024u) != 0u) { o1.rgb = rsx_i_l2s(o1.rgb); o2.rgb = rsx_i_l2s(o2.rgb); o3.rgb = rsx_i_l2s(o3.rgb); }
+#endif
+    if ((flags & 1024u) != 0u) {
+#if RSX_INTERP_TARGETS > 1
+        o1.rgb = rsx_i_l2s(o1.rgb);
+#endif
+#if RSX_INTERP_TARGETS > 2
+        o2.rgb = rsx_i_l2s(o2.rgb);
+#endif
+#if RSX_INTERP_TARGETS > 3
+        o3.rgb = rsx_i_l2s(o3.rgb);
+#endif
+    }
     RSXInterpOut o;
     o.c0 = o0;
+#if RSX_INTERP_TARGETS > 1
     o.c1 = (o1 == o1) ? o1 : (float4)0;
+#endif
+#if RSX_INTERP_TARGETS > 2
     o.c2 = (o2 == o2) ? o2 : (float4)0;
+#endif
+#if RSX_INTERP_TARGETS > 3
     o.c3 = (o3 == o3) ? o3 : (float4)0;
+#endif
     return o;
 #else
     return o0;
