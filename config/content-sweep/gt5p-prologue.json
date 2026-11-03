@@ -260,6 +260,12 @@
         "label": "Eiger Nordwand",
         "slot": 3,
         "identity": "measured"
+      },
+      {
+        "id": "slot-4",
+        "label": "Suzuka Circuit",
+        "slot": 4,
+        "identity": "measured"
       }
     ]
   }
