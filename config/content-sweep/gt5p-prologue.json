@@ -266,6 +266,12 @@
         "label": "Suzuka Circuit",
         "slot": 4,
         "identity": "measured"
+      },
+      {
+        "id": "slot-5",
+        "label": "London",
+        "slot": 5,
+        "identity": "measured"
       }
     ]
   }
