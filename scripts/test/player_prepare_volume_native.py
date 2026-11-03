@@ -28,7 +28,7 @@ def main():
     command=[str((a.install/'preparation/GT5P-Prepare.exe').resolve()),
              '--install',str(a.install.resolve()),'--storage',str(storage.resolve()),
              '--no-reuse','--game',str(a.game.resolve())]
-    env=dict(os.environ,PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
+    env=dict(os.environ,PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     with (out/'cancel.log').open('wb') as log:
         child=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,
                                creationflags=subprocess.CREATE_NO_WINDOW)

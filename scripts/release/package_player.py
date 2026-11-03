@@ -45,7 +45,16 @@ def template_files():
             raise ValueError('Collection search map must preserve every player container')
         names.add('search-map.json')
     if {p.name for p in folder.iterdir()}!=names:raise ValueError('Unreviewed template file')
-    return {'assets/pipeline-templates/gt5p-disc-v2/'+n:regular(folder/n) for n in names}
+    result={'assets/pipeline-templates/gt5p-disc-v2/'+n:regular(folder/n) for n in names}
+    from preparation_enumeration import load
+    enumeration=ROOT/'assets/shader-enumeration/gt5p-disc-v1'
+    metadata=load(enumeration,folder)
+    enumeration_names={'plan.json','volume.json'}|{f'programs-{i:04d}.json' for i in range(len(metadata['plan']['files']['programs']))}
+    if {p.name for p in enumeration.iterdir()} != enumeration_names:
+        raise ValueError('Unreviewed shader enumeration asset')
+    result.update({'assets/shader-enumeration/gt5p-disc-v1/'+n:regular(enumeration/n)
+                   for n in enumeration_names})
+    return result
 
 
 def preparation_files(folder):
@@ -181,7 +190,7 @@ def main():
         if p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction()):
             raise ValueError(f'Asset links are not distributable: {p}')
         if p.is_file():
-            if p.relative_to(assets).parts[0]=='pipeline-templates':
+            if p.relative_to(assets).parts[0] in ('pipeline-templates','shader-enumeration'):
                 if 'assets/'+p.relative_to(assets).as_posix() not in files:
                     raise ValueError(f'Unreviewed template asset: {p}')
                 continue

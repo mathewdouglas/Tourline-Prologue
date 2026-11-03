@@ -1,6 +1,7 @@
 """Shader-first enumeration of asset programs across a small observed context set.
 
-Developer-only and default-off: nothing here is wired into player preparation.
+The CLI is maintainer-only. Its candidate generator also produces the pinned,
+metadata-only plan consumed by development player preparation.
 
 Idea: a fragment pipeline's translation profile is (program-local state) x (a few
 global contexts). The program-local part (sampler lanes, texel-addressing and

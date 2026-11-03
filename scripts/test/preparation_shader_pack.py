@@ -109,7 +109,7 @@ def check_player_generations(folder, document, report, plan, blobs):
             patch.object(template,'compatibility',return_value={}), \
             patch.object(template,'template_digest',return_value=report['template_sha256']), \
             patch.object(template,'prepare_document',side_effect=producer), \
-            patch.dict(os.environ,{'GT5P_PREPARE_REUSE':'1','GT5P_PREPARE_REUSE_HANDOFF':'1'}):
+            patch.dict(os.environ,{'GT5P_PREPARE_REUSE':'1','GT5P_PREPARE_REUSE_HANDOFF':'1','GT5P_PREPARE_ENUMERATE':'0'}):
         old_idle=template.idle;old_runner=template.run_offline
         import shader_fragment_batch
         old_fragment_runner=shader_fragment_batch.run_offline

@@ -5,6 +5,29 @@ include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` fiel
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
 not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
 
+## Shader enumeration in development builds
+
+Optional **Prepare shaders**, the first-run **Prepare now** choice and F1
+**Debug > Prepare shaders** now also prepare asset shaders after the existing
+template stages. The new **Enumerating shaders** step handles 30,112 fragment
+and vertex jobs using your original GT.VOL and ELF. No catalogue, unpacker or
+extra asset copy is needed. The package includes 2.54 MiB of metadata before ZIP compression;
+shader bytecode is generated locally. Published v0.2.3 is unchanged.
+
+This adds preparation time and local cache space; measured costs are recorded in
+[player enumeration acceptance](coverage-enumeration.md#default-player-enumeration-development-2026-11-04).
+Cancel/close/Escape retains completed chunks. Repeat preparation to resume;
+completed bytecode is checked before reuse. The previous selected cache stays
+available until preparation succeeds. Individual shader rejections are reported
+and left to normal demand compilation. Native pipeline creation still uses the
+starter templates and the runtime worker, so preparation cannot remove every hitch.
+
+Set `GT5P_PREPARE_ENUMERATE=0` before launching the preparation command to restore
+the previous template-only preparation path. Existing caches are retained;
+switching modes can therefore leave more than one generation on disk. Enumeration
+currently adds default-translation shaders; the existing settings-aware template
+preparation still handles its supported additional translation modes.
+
 ## Pipeline tools in v0.2.3
 
 F1 **PC Settings > Debug** offers **Collect pipelines**, **Verify last collection**

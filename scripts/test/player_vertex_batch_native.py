@@ -57,7 +57,7 @@ def main():
     pointer.write_text(previous)
     command = [str((install/'preparation/GT5P-Prepare.exe').resolve()), '--install', str(install.resolve()),
         '--storage', str(storage.resolve()), '--assets', str(a.assets.resolve())]
-    env = dict(os.environ, PS3_VERBOSE='0',
+    env = dict(os.environ, PS3_VERBOSE='0', GT5P_PREPARE_ENUMERATE='0',
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_PREPARE_VERTEX_BATCH', None)  # Exercise the real unset default.
     env.pop('GT5P_PREPARE_TRANSLATION', None)

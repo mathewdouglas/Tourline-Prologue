@@ -118,7 +118,7 @@ def main():
     helper=install/'preparation/GT5P-Prepare.exe'
     command=[str(helper.resolve()),'--install',str(install.resolve()),'--storage',str(storage.resolve()),
              '--game' if a.game else '--assets',str((a.game or a.assets).resolve())]
-    env=dict(os.environ,PS3_VERBOSE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
+    env=dict(os.environ,PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     env.pop('GT5P_PREPARE_REUSE',None)
     # A bad new template must not start work or disturb the selected old cache.
     index=bundle/'index.json';original=index.read_bytes();index.write_text('{"version":999}')

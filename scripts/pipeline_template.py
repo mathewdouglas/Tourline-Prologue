@@ -355,7 +355,7 @@ def packs_enabled(choice, warmup_plan):
     return choice
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False, enumeration=None, enumeration_sample_share=False):
     from shader_reconstruct import offline_warmup, native_profile
     from shader_vertex_batch import poll_seconds
     offline_warmup()
@@ -403,6 +403,10 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     contract=dict(template=sha(json.dumps(document,sort_keys=True,separators=(',',':')).encode()),
                   engine=sha(engine.read_bytes()),decoder=sha(decoder.read_bytes()),
                   asset_map=map_id)
+    if enumeration is not None:
+        if type(enumeration_sample_share) is not bool:
+            raise ValueError('Enumeration sample sharing must be explicit')
+        contract['enumeration'] = dict(plan=enumeration['sha256'],sample_share=enumeration_sample_share)
     phase_plan = None
     if warmup_plan is not None:
         if translation != 'default':
@@ -472,6 +476,15 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
                     resume=resume,progress=checkpoint.progress)
             report['warmup_plan'] = dict(stage(phase_plan,report,output/'shadercache/warmup-v1',resume=resume),
                 sha256=contract['warmup_plan'])
+            report['preparation_seconds'] = time.perf_counter()-started
+            save_report(output/'report.json',report)
+            checkpoint.stage('complete',counts=report['counts'])
+        if enumeration is not None:
+            if report['counts'] != {'prepared':len(document['records'])}:
+                raise ValueError('Template preparation must succeed before shader enumeration')
+            from preparation_enumeration import stage as enumerate_stage
+            report['enumeration'] = enumerate_stage(enumeration,output,elf,engine,decoder,game_root,
+                checkpoint,volume=volume,assets=assets,collapse=enumeration_sample_share)
             report['preparation_seconds'] = time.perf_counter()-started
             save_report(output/'report.json',report)
             checkpoint.stage('complete',counts=report['counts'])

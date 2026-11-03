@@ -63,7 +63,7 @@ def main():
     command=[str(install/'preparation/GT5P-Prepare.exe'),'--install',str(install),
              '--storage',str(storage),'--game',str(a.game.resolve())]
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
-    env.update(PS3_VERBOSE='0',GT5P_PREPARE_TRANSLATION='ultrawide-native',
+    env.update(PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',GT5P_PREPARE_TRANSLATION='ultrawide-native',
                GT5P_PREPARE_FRAGMENT_CHUNK=str(a.chunk),
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     cancel=storage/'prepare.cancel'

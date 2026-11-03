@@ -8,3 +8,5 @@ patches/ps3recomp-4e8f3ca8-local.patch -text
 assets/pipeline-templates/**/part-*.json text eol=lf
 # Warmup plans hash bundle indices too; their bytes must survive Windows checkout.
 assets/pipeline-templates/**/index.json text eol=lf
+# Player enumeration also pins exact metadata bytes.
+assets/shader-enumeration/**/*.json text eol=lf

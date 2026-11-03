@@ -35,7 +35,7 @@ def shader_pack_plan(translation):
     return plan
 
 
-def preparation_token(metadata, engine_hash, decoder_hash, packs, plan=None):
+def preparation_token(metadata, engine_hash, decoder_hash, packs, plan=None, enumeration=None):
     """Pin the plan as well as pack format; preserve the older no-pack identity."""
     marker = ''
     if packs:
@@ -43,6 +43,8 @@ def preparation_token(metadata, engine_hash, decoder_hash, packs, plan=None):
         validate(plan)
         plan_hash=hashlib.sha256(json.dumps(plan,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         marker='shader-packs-v1:'+plan_hash
+    if enumeration is not None:
+        marker+='enumeration-v1:'+enumeration
     return hashlib.sha256((metadata+engine_hash+decoder_hash+marker).encode()).hexdigest()[:24]
 
 
@@ -183,8 +185,12 @@ def main():
     packs=plan is not None
     from pipeline_warmup_plan import read as read_plan
     plan_document=read_plan(plan) if packs else None
+    from preparation_enumeration import enabled as enumerate_enabled, load as load_enumeration, sample_share
+    enumeration=load_enumeration(install/'assets/shader-enumeration/gt5p-disc-v1',bundle) if enumerate_enabled() else None
+    collapse=sample_share() if enumeration is not None else False
     token=preparation_token(metadata,hashlib.sha256(engine.read_bytes()).hexdigest(),
-                            hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document)
+                            hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document,
+                            enumeration['sha256']+':'+str(collapse) if enumeration is not None else None)
     parent=storage/'preparation'
     # Retained generations share this directory. A few thousand records across
     # two generations can exceed the old 100000-entry scan limit.
@@ -227,7 +233,7 @@ def main():
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
         output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
         vertex_mode=shader_vertex_batch.player_mode(),translation=translation,
-        warmup_plan=plan,shader_packs=packs)
+        warmup_plan=plan,shader_packs=packs,enumeration=enumeration,enumeration_sample_share=collapse)
     if report['counts']!={'prepared':len(document['records'])}:
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     verify_settings(selection,storage)
