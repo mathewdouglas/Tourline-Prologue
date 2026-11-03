@@ -1,6 +1,6 @@
 # Maintainer content sweep
 
-This is a development experiment for BCUS98158 v03.00, not a player feature or a complete game catalogue. `scripts/content_sweep.py` drives the game with scripted pad input, saves window screenshots and provenance into ignored scratch storage, and exports metadata-only candidate templates. The shipped starter is not changed. Candidates require original-asset lookup, both-stage reconstruction and exact native preparation before acceptance.
+This is a development experiment for BCUS98158 v03.00, not a player feature or a complete game catalogue. `scripts/content_sweep.py` drives the game with scripted pad input, saves window screenshots and provenance into ignored scratch storage, and exports metadata-only candidate templates. The sweep tool does not change the shipped starter automatically. Independent maintainer acceptance is recorded below. Candidates require original-asset lookup, both-stage reconstruction and exact native preparation before acceptance.
 
 ## Running
 
@@ -50,6 +50,28 @@ Matching by instruction identity instead, using
 The control now agrees with `docs/coverage-enumeration.md` (1,189 / 215).
 Of the 1,605 candidate fragment programs not already in the starter, 1,420
 are in the catalogue, so shader-first enumeration already compiles their
-bytecode. 185 are absent from the catalogue: only observation (this sweep or
-player collection) can supply those. Candidates remain unverified metadata
-until the usual preparation acceptance.
+bytecode. Another 185 are absent from this catalogue and need further original-asset
+lookup or renewed observation. Exports remain untrusted metadata until the usual
+preparation acceptance.
+
+## Verified starter acceptance (Phase 212, 2026-11-04)
+
+Independent review/preparation accepts **7,000 of the 7,790 candidates**. Another
+790 records depend on 185 fragment identities unresolved in the supplied original
+catalogue/program maps and stay out. No shader mismatch or native-key rejection
+appears in the completed reports; the earlier 47 conflicting keys remain excluded.
+The development starter is **12,669 records / 3,446 programs (622 VP, 2,824 FP)**.
+
+The sweep used the v0.2.3 reference engine, but its exports carry the Phase 210
+source-contract pin. A documented compatibility-only reissue changes that pin to
+Phase 211 after source comparison; all record fields stay identical. Fresh
+current-engine shader/native proofs, exact subset acceptance and original packed
+locations gate every addition. Catalogue raw filenames are not template FP IDs.
+No deleted recorder trace is required or fabricated. The maps add 1,565 programs
+and 96 already verified search-map containers (297 required members total).
+
+Full fresh frozen preparation verifies all 12,669 pipelines and persisted driver
+blobs in 4,096/4,096/4,096/381 chunks, including cancellation/resume and unchanged
+old selection/cache. Observed warmup membership stays unchanged. A single HSR
+replay is a presentation check, not every car/camera/state, all-settings or stutter
+acceptance. Published v0.2.3 is unchanged. See [Phase 212 evidence](progress.md).

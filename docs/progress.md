@@ -9,6 +9,118 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 212 - Verified content-sweep starter expansion (2026-11-04)
+
+The 1080p/2x MSAA/default-16:9 content sweep contributes **7,000 verified
+records**. The development starter is **12,669 records / 3,446 original programs
+(622 VP, 2,824 FP)**; all previous 5,669 records are preserved exactly. The
+7,790-record delta reviews to 7,790 additions and zero further conflicts. Of
+these, 790 remain `unresolved-program`, depending on 185 fragment identities
+absent from the supplied catalogue and existing program-location maps. There
+are zero incompatible shader, unsupported-state or native-key rejections in
+the completed candidate reports. The sweep's earlier 47 conflicting keys remain
+quarantined and do not appear in the delta or new additions. No pending record
+is promoted because its metadata was observed or its program hash looked valid.
+Original `delta-candidates.json` SHA-256:
+`0814f1589f6f0c1881ed3dd0e100a2ba666fbd7c805b9e1c597d623b417702fe`.
+
+**Explicit contract reissue.** Despite the v0.2.3 reference engine used for the
+sweep, its exports actually pin Phase 210's renderer source hash
+`a0d3444f77ffe9d1cb0fd2301e2e76607c1d28993166f6c740975f981e802c43`,
+not the published v0.2.3 pin `227c1fcd...`. This discrepancy is recorded rather
+than silently treating the inputs as already current. The candidate ELF,
+settings, key/root-signature ABI and translation policy match the current
+starter. Only `renderer_sha256` is reissued to Phase 211's `e266e6af...` in a
+private copy; every record stays identical. Reapplying the current main patch
+to its pinned upstream sources and comparing with the reference runtime finds
+73 patched files unchanged, including both decompilers and reconstruction
+headers. The only differences are backend profiling/offline input/result
+transport and its new `rsx_offline_batch.h`; rendering keys, translation calls,
+compiler flags and descriptor construction are unaffected. Fresh exact shader
+and native proofs below independently gate acceptance. No runtime patch or
+default is changed by this metadata update; sample sharing and the other
+coverage experiments stay off.
+
+**Original assets and player lookup.** Fragment catalogue filenames hash raw
+payloads including constants; matching instead uses `fp_identity` with inline
+constants normalized. Vertex matching hashes the bounded, word-swapped program,
+including candidate lengths within original SHDS wrappers. Catalogue source
+offsets and the existing player map locate 2,436 of 2,621 candidate program
+identities, leaving the 185 FP identities above. All source container/program
+hashes and bounded slices are checked. No deleted private recorder trace is
+used, no hash is treated as an asset offset, and no new extraction is made.
+
+Independent packed resolution hashes the original 2,052,954,112-byte GT.VOL,
+the ELF, 298 containers including ELF, 1,811,994,944 decoded bytes and every one
+of the merged starter's 3,446 program slices (13.17 s). Numeric
+volume locations add 96 members already verified in the unchanged 592-member
+search map: 201 -> 297. The complete player map adds 1,565 identities (145 VP,
+1,420 FP); supplemental asset locations are extended too. Old player/archive
+rows are preserved. Maps use compact JSON to stay below the existing 1 MB Git
+file guard; no allowlist or guard is relaxed. The 99-shard bundle/index and
+warmup-plan digest are reissued together. Observed menu/race membership stays
+unchanged; new keys are not assigned invented preload ownership.
+
+**Fresh candidate and acceptance proof.** Eight separate locked preparation
+runs use fresh private outputs/application caches, the current Phase 211 backend,
+production VP decoder, default settings and `RSX_FP_SAMPLE_SHARE` unset. Their
+requested sizes are seven chunks of 1,000 and one of 790. Completed counts total
+7,000 prepared / 790 unresolved; summed internal preparation is
+618.79 s (OS/driver caches preserved). Both rebuilt shader/source
+identifiers, exact native keys and persisted driver blobs are required. The
+four partially successful chunks are filtered by successful proof and complete
+player locations, then prepared again from GT.VOL in new outputs with verified
+shader/driver reuse (112.34 s total). `pipeline_contribution.py accept` consumes each exact candidate digest and its own local complete proof;
+report digests are never relabelled to fit a subset. The coherent union is
+written only after these gates. Private engine SHA-256:
+`862f6687c6bef5d34a4b3fab87b1d159cc915fc218d31fde8d19da0e82273bc7`.
+
+**Full frozen acceptance.** A fresh private `scripts/release/build_preparer.py`
+build runs the enlarged starter directly from the original packed game, with
+a clean PATH, default translation and no previous-cache reuse. Invalid template
+rejection and vertex-stage cancellation preserve the old selection/cache.
+Cancellation retains 8 shader files; resume revalidates
+them and completes every pipeline in the same originally empty generation.
+Both shaders, all 12,669 native keys and persisted driver blobs pass; native chunks
+are 4096, 4096, 4096, 381, with requests/created/
+driver_calls/cached_blob_calls = 12669/12669/12669/0. Both local shader packs
+publish. Resume wall time is 564.62 s; its internal preparation
+is 553.85 s. This is fresh application-cache
+acceptance with checkpoint reuse, not driver-cold timing or an incremental
+growth benchmark. The complete locked harness (installation copy, rejection,
+cancellation and resume) spans 610 seconds in the second-resolution lock log.
+An initial Visual Studio diagnostic was treated as a terminating PowerShell
+wrapper error; that helper output was discarded and a fresh private helper was
+built with native stderr retained and explicit exit-code checks. No product
+validation guard was changed.
+
+Focused template, contribution, asset-map, packed-search, template-coverage,
+warmup-plan, shader-pack, catalogue-growth, search-map/package and translation
+regressions pass separately under the lock. Final coherence checks verify
+strict JSON input, quarantined keys, exact old-record/location preservation,
+complete maps, every native proof, current contract, LF index pin, unchanged
+observed membership and strict package metadata allowlists. A foreground HSR
+route uses a copy of the full prepared cache at 1080p/2x/16:9, with ordinary
+async policy; inspected window-only race samples verify representative
+presentation. It is a single route, not visual acceptance of every added state
+or a stutter measurement.
+
+Evidence: `scratch/s/` contains contract/input pins, review, map proof, chunk
+summaries, frozen/coherence results and window shots; full preparation reports
+are retained compressed in `scratch/s/evidence`. Every test, compiler/build,
+preparation/native and game run uses `C:\tmp\gt5p-testlock\run_locked.py`, the
+shared validation mutex and `tasklist` preflight. The retained private controllers
+ran `work.py prepare 0..7`, `work.py accept 0..7`, `full.py`, the ten named
+`scripts/test` suites, `coherence.py` and `live.py`, each run separately locked.
+Private build/helper outputs,
+game fixture and shader/driver caches are removed after recording evidence;
+original inputs and other checkouts remain read-only. No whole-game, all-car,
+all-camera, arbitrary-settings, GT5, multi-GPU or hitch-free claim follows.
+The 790 pending records need independently located original programs; deleting
+the sweep traces does not authorize reconstructing missing bytes from hashes.
+Published v0.2.3, main, tags and releases stay unchanged; push only this branch
+with `[skip ci]`.
+
 ## Phase 211 - Shader-stage profiling and fewer preparation file opens (2026-11-03)
 
 `GT5P_PREPARE_SHADER_PROFILE=1` adds default-off aggregate instrumentation.

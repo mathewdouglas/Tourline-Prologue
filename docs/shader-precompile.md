@@ -124,8 +124,15 @@ verification after the launcher stops the current game (Phase 204). This require
 the matching new launcher/engine/helper package. `GT5P_PIPELINE_TOOLS=0` disables
 those settings actions; the standalone CMD entries remain available.
 
-The development starter contains 5,669 verified observed pipelines /
-1,881 original program identities (477 VP, 1,404 FP). A local 1080p/16:9
+The development starter contains **12,669 verified observed pipelines /
+3,446 original program identities (622 VP, 2,824 FP)**. Phase 212 verifies 7,000
+content-sweep additions with exact rebuilt shaders/native keys/persisted blobs
+and original packed locations. Another 790 records remain unresolved. Full fresh
+frozen-helper preparation passes all 12,669 records with cancellation/resume and
+unchanged observed warmup membership. See [progress](progress.md) for timings,
+the explicit candidate contract reissue and limits; published v0.2.3 is unchanged.
+
+Phase 206 had 5,669 pipelines / 1,881 programs (477 VP, 1,404 FP). Its local 1080p/16:9
 collection contributes 1,219 additions, all located in the original volume and
 prepared with exact native keys. The previous 4,450 records stay. Phase 201 had
 reached 4,450 pipelines / 1,581 programs. Dealership test 1 contributes 1,348 additions,

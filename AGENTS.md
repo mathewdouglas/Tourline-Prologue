@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 211)
+## Start here: state of play (2026-11-04, Phase 212)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 211 is the latest).
+has the evidence, newest phase first (Phase 212 is the latest).
 
 ### What works now
+
+- **Verified content sweep (Phase 212, development):** 7,000 of 7,790 candidates
+  pass fresh shader/native/persistence proof; 790 depending on 185 unresolved FP
+  identities stay out, as do 47 previously quarantined keys. The starter is
+  12,669 records / 3,446 programs (622 VP, 2,824 FP). Original packed verification
+  covers every program; volume members grow 201 -> 297 using existing search-map
+  rows. The explicit Phase 210 -> 211 candidate contract reissue preserves all
+  records and rendering behavior. Full fresh frozen preparation passes all 12,669
+  requests in 4,096/4,096/4,096/381 native chunks, cancellation/resume and persisted
+  blobs; observed warmup membership is unchanged. Focused/coherence checks and a
+  representative foreground HSR replay pass. Private caches/builds are removed.
+  See progress for timings, evidence and limits; published v0.2.3 is unchanged.
 
 - **Shader-stage profiling and fewer preparation opens (Phase 211, development):**
   opt-in aggregate shader timings distinguish translation/compiler work, queue
@@ -107,8 +119,8 @@ has the evidence, newest phase first (Phase 211 is the latest).
   reviewed to 1,219 unambiguous additions and 0 conflicts; 149 of 1,368 verified
   records were already in the previous 4,450. Original-volume search located all
   300 new programs. A fresh native prepare prepared 1,219/1,219, reusing verified
-  shaders and creating the native keys again. The source starter is 5,669 records
-  / 1,881 programs (477 VP, 1,404 FP). The volume map adds 36 search-map members
+  shaders and creating the native keys again. The Phase 206 starter became 5,669
+  records / 1,881 programs (477 VP, 1,404 FP). The volume map adds 36 search-map members
   (201 total). Warmup membership is unchanged and re-pinned; the new keys stay on
   the demand path. Phase 206's final frozen candidate grows the old cache and
   verifies all 5,669 native requests/persisted blobs in 4,096/1,573 chunks,

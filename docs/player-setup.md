@@ -15,6 +15,10 @@ uploaded automatically. The starter contains 5,669 verified observed pipelines;
 coverage remains partial. See [v0.2.3 notes](release-v0.2.3.md) and
 [contribution instructions](pipeline-contributions.md).
 
+Development Phase 212 expands the source starter to 12,669 verified pipelines
+(3,446 programs: 622 VP / 2,824 FP). It is not part of the published v0.2.3 ZIP.
+See [progress](progress.md) for the fresh frozen preparation and remaining limits.
+
 ## Shader packs in v0.2.2
 
 Default-translation preparation writes local menu and race bytecode packs from
