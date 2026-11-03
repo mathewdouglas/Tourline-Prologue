@@ -30,6 +30,20 @@ REFERENCE = Path(os.environ.get(
     r"C:\actions-runner-tourline-prologue\_work\Tourline-Prologue\Tourline-Prologue\build"))
 
 
+def apply_patch(tree: Path, patch: Path, include: list[str] | None = None) -> None:
+    """git apply rejects a checkout that smudged the patch to CRLF."""
+    data = patch.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    dest = ROOT / "scratch" / "fp-interp" / (patch.name + ".lf")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.is_file() or dest.read_bytes() != data:
+        dest.write_bytes(data)
+    command = ["git", "-C", str(tree), "apply", "--whitespace=nowarn"]
+    for name in include or []:
+        command.append("--include=" + name)
+    command.append(str(dest))
+    subprocess.run(command, check=True)
+
+
 def apply_sources(tree: Path) -> Path:
     video = tree / "libs" / "video"
     video.mkdir(parents=True)
@@ -39,11 +53,9 @@ def apply_sources(tree: Path) -> Path:
     subprocess.run(["git", "-C", str(tree), "config", "core.autocrlf", "false"], check=True)
     (tree / name).parent.mkdir(parents=True, exist_ok=True)
     (tree / name).write_bytes(original)
-    subprocess.run(["git", "-C", str(tree), "apply", "--whitespace=nowarn",
-                    "--include=" + name, "--include=libs/video/rsx_offline_batch.h",
-                    str(ROOT / "patches" / "ps3recomp-4e8f3ca8-local.patch")], check=True)
-    subprocess.run(["git", "-C", str(tree), "apply", "--whitespace=nowarn",
-                    str(ROOT / "patches" / "ps3recomp-shader-interp.patch")], check=True)
+    apply_patch(tree, ROOT / "patches" / "ps3recomp-4e8f3ca8-local.patch",
+                [name, "libs/video/rsx_offline_batch.h"])
+    apply_patch(tree, ROOT / "patches" / "ps3recomp-shader-interp.patch")
     # Quoted includes search the source directory first. The typecheck used the
     # private post-local-patch headers, not the dirty runtime working tree.
     scratch_video = ROOT / "scratch" / "runtime-src" / "libs" / "video"

@@ -26,8 +26,10 @@
 # -GracefulClose asks only the owned game window to close before the existing
 # owned-process timeout cleanup, allowing diagnostic shutdown summaries.
 # -RequireForeground activates the owned window at the grid and rejects focus
-# loss during intro/sampling. Native activation may be needed before the grid
-# when Windows refuses SetForegroundWindow. Shot intervals go to .shots.json.
+# loss during intro/sampling. The D3D window is created hidden with the
+# console and can be replaced, so the grid resolves it again and joins the
+# current foreground input queue before SetForegroundWindow. A same-process
+# console or IME window does not count. Shot intervals go to .shots.json.
 # -ContributionCollector with -PlayerLauncher exercises the frozen opt-in
 # recorder/export around normal player launch; use saved supported settings.
 # -Engine/-GameRoot/-OutputDirectory support isolated audit runs. Another game
@@ -76,20 +78,23 @@ public class RaceWindowShot {
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int how);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
- [DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr h);
  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint one,uint two,bool attach);
  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  public static bool ActivateOwnedWindow(IntPtr h) {
+  if(h==IntPtr.Zero)return false;
   if(GetForegroundWindow()==h)return true;
   uint unused, current=GetCurrentThreadId();
   uint foreground=GetWindowThreadProcessId(GetForegroundWindow(),out unused);
-  uint target=GetWindowThreadProcessId(h,out unused);
-  bool a=foreground!=0 && foreground!=current && AttachThreadInput(current,foreground,true);
-  bool b=target!=0 && target!=current && target!=foreground && AttachThreadInput(current,target,true);
-  try { ShowWindow(h,9); BringWindowToTop(h); SetActiveWindow(h); SetForegroundWindow(h); }
-  finally { if(b)AttachThreadInput(current,target,false); if(a)AttachThreadInput(current,foreground,false); }
+  bool a=foreground!=0 && foreground!=current && AttachThreadInput(foreground,current,true);
+  try { ShowWindow(h,9); BringWindowToTop(h); SetForegroundWindow(h); }
+  finally { if(a)AttachThreadInput(foreground,current,false); }
   return GetForegroundWindow()==h;
+ }
+ public static string ForegroundLabel() {
+  IntPtr fg=GetForegroundWindow(); uint owner; GetWindowThreadProcessId(fg,out owner);
+  var text=new System.Text.StringBuilder(512); GetWindowText(fg,text,512);
+  return "foreground hwnd=0x"+fg.ToInt64().ToString("X")+" pid="+owner+" title='"+text.ToString()+"'";
  }
  public static IntPtr GameWindow(int pid) {
   IntPtr result=IntPtr.Zero;
@@ -135,9 +140,13 @@ function Watch-RaceIdle($Proc, [string]$Stage, [int]$Duration) {
     Save-RaceWindowShot $Proc (Join-Path $dir "$Tag.$Stage-idle-end.png")
 }
 function Assert-RaceForeground {
-    if ($RequireForeground -and [RaceWindowShot]::GetForegroundWindow() -ne $gameWindow) {
-        throw 'Owned game lost foreground; timing run rejected. No other window was activated.'
-    }
+    if (-not $RequireForeground) { return }
+    $fg = [RaceWindowShot]::GetForegroundWindow()
+    if ($fg -eq $gameWindow) { return }
+    $live = [RaceWindowShot]::GameWindow($p.Id)
+    if ($live -ne [IntPtr]::Zero) { $script:gameWindow = $live }
+    if ($fg -eq $gameWindow) { return }
+    throw "Owned game lost foreground; timing run rejected. No other window was activated. $([RaceWindowShot]::ForegroundLabel()) game hwnd=$gameWindow"
 }
 $slot = 0
 $courseIdentity = "measured"
@@ -290,8 +299,13 @@ try {
     if ((Wait-Milestone $p $tail "QuickArcadeRoot" $GridTimeoutSec) -lt 0) { throw "Starting grid not reached" }
     $gridMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     if ($RequireForeground) {
-        [RaceWindowShot]::ShowWindow($gameWindow,5) | Out-Null
-        [RaceWindowShot]::ActivateOwnedWindow($gameWindow) | Out-Null
+        $live = [RaceWindowShot]::GameWindow($p.Id)
+        if ($live -ne [IntPtr]::Zero) { $gameWindow = $live }
+        $activated = $false
+        for ($try = 0; $try -lt 8 -and -not $activated; $try++) {
+            $activated = [RaceWindowShot]::ActivateOwnedWindow($gameWindow)
+            if (-not $activated) { Start-Sleep -Milliseconds 200 }
+        }
         Assert-RaceForeground
     }
     if ($GridIdleSeconds -gt 0) { Watch-RaceIdle $p "grid" ($GridIdleSeconds + 4) }

@@ -14,6 +14,77 @@ Default is off. `RSX_SHADER_INTERP=0` (unset) must leave pipeline keys, HLSL,
 DXBC and pixels unchanged. Unvalidated behaviour stays on an environment
 switch.
 
+## Status (2026-11-04)
+
+The fallback works in game and stays off. `=1` draws with the interpreter
+only while a specialized shader or its driver pipeline is pending, then the
+specialized pipeline replaces it. `force` runs the interpreter for every
+accepted draw. That mode is about 20x slower on the GPU: dealership about
+77 ms against 3.3 ms, High Speed Ring about 45-88 ms against 8-14 ms
+(`RSX_SSAA=0`, earlier locked runs). Only `=1` is a sensible play switch.
+
+What the cold measurements show:
+
+- Dealership, empty private cache, both stages `=1` (locked
+  `interp-cold-dealer-pair-r2`, not re-run here). Replay fragment omissions
+  fell from 408,704 to 91. Replay vertex omissions fell from 837 to 42.
+  Recording-time GPU-fetch vertex omissions fell from 788,510 to 0.
+- High Speed Ring FrameTest, separate empty private caches, same save seed
+  `9161393d2439d610`, 720p, MSAA 2, SSAA off. Foreground activation was
+  accepted (the run was not rejected). The route and settings match; the
+  camera and traffic do not, so this is not a matched-frame speedup.
+  - Baseline, both switches `0` (`interp-hsr-ft-base-b`): 2,723 frames over
+    62.9 s, 43.3 FPS, interval median 17.0 ms, p99 151.8 ms, max 549.3 ms,
+    23.1% of intervals over 20 ms. The once-per-second title sample median
+    was 51.23 fps. Final omissions: replay vertex 713, replay fragment
+    686,163, recording vertex 730,573. The last intro shot is sky, HUD and
+    a few floating tires. Later on-track shots show the circuit, cars and HUD.
+  - `RSX_SHADER_INTERP=1` and `RSX_SHADER_INTERP_VP=1`
+    (`interp-hsr-ft-interp`): 3,046 frames over 62.4 s, 48.8 FPS, median
+    16.7 ms, p99 123.0 ms, max 524.7 ms, 11.5% over 20 ms. Title-sample
+    median 59 fps. Omissions: replay vertex 2,028, replay fragment 1,113,
+    recording vertex 0. Interpreter counters: 269,880 draws, fallback = gap
+    = 3,141, reject 0, arena 0, PSO failures 0, 444 PSOs, 27,831 ms total
+    driver creation, 837 ms maximum. Settled GPU windows were about
+    4.3-5.0 ms mean, in the same band as the baseline's settled windows.
+    The rolling-start shot shows the bridge, cars, Bridgestone banners and
+    grandstand. On-track shots show cars, the mirror, barriers and HUD.
+- `RSX_SHADER_INTERP_PAIR` was not part of this race pair. The dealership
+  paired-prewarm run already showed it is not a frame-time win. The
+  checkpoint's race comparison is independent `=1`.
+
+It is not fit to become a default. Cold `=1` removes most missing fragment
+draws and the sky-only rolling start, and it cuts the share of late frames,
+but p99 is still 123 ms, one interpreter PSO took 837 ms, and those PSOs are
+not written to the disk cache. Known `tex_dz` / `tex_mip` draws still keep
+the specialized shader (the 3,141 gaps). Replay vertex omissions were not
+eliminated. The dealership ACURA wordmark is still red 13 on interpreted
+frames and 39 on specialized frames; gamma-read off and an uncommitted MRT
+export-count change did not fix it, and that MRT change was reverted.
+Epilogue pixel equivalence is unproven. Best-lap and last-lap fields are
+dashes in both HSR runs, so that is not an interpreter-only defect.
+
+Switches. Unset leaves the new draw paths off. `EMBED` defaults to the
+embedded bytecode, and gamma decode stays on unless `GAMMA_READ=0`.
+
+| Switch | Effect |
+| --- | --- |
+| `RSX_SHADER_INTERP=0` / `1` / `force` | Fragment interpreter off, pending-only, or every accepted draw |
+| `RSX_SHADER_INTERP_VP=0` / `1` / `force` | Same three modes for the vertex interpreter |
+| `RSX_SHADER_INTERP_PAIR=1` | While either stage or driver pipeline is pending, interpret both. Requires both stage switches |
+| `RSX_SHADER_INTERP_PREWARM=1` | Create the starter native-class pipelines at device init. Requires the embedded class list |
+| `RSX_SHADER_INTERP_EMBED=0` | Compile the generic shaders from the private cache instead of the embedded DXBC |
+| `RSX_SHADER_INTERP_STATS=1` | Print `[interp-pending]` every five seconds |
+| `RSX_SHADER_INTERP_LOG=1` | Log interpreter pipeline keys as they are created |
+| `RSX_SHADER_INTERP_AB=1` | Alternate specialized and interpreted frames for captures |
+| `RSX_SHADER_INTERP_GAMMA_READ=0` | Diagnostic: skip interpreter texture gamma decode. Does not restore the wordmark |
+| `RSX_SHADER_INTERP_ARENA_KB`, `RSX_SHADER_INTERP_VP_ARENA_KB` | Raise the program arena (256..16384) |
+| `RSX_SHADER_INTERP_OPT`, `RSX_SHADER_INTERP_VP_OPT` | D3DCompile optimization level for a non-embedded build |
+| `RSX_SHADER_INTERP_VP_BASE=1` | Subtract the vertex program's start slot. Default matches the specialized shader |
+
+Build-only: `INTERP_EMBED_DXBC=0` links without the embedded payload.
+`INTERP_SKIP_PRECOMPILE=1` reuses generic bytecode whose source key still matches.
+
 Stage 1 offline status (2026-11-03): the fragment encoder and the ps_5_1
 interpreter match `rsx_fp_decompile_buffered` on WARP. Three synthetic
 programs and 80 catalogue programs (30 ALU, 20 branch, 20 textured, 10
@@ -841,14 +912,31 @@ absolute differences are 0.91-1.20 / 255 (motion included), maximum 184; the
 fixed title crop differs by at most 2 / 255. These numbers do not establish
 pixel equivalence. `interp_compare_frames.py` uses only the standard library
 to read the renderer's 24-bit BMPs. The first analysis attempt failed because
-Pillow was unavailable; the dependency is removed. Gamma-read isolation is
-pending under `RSX_SHADER_INTERP_GAMMA_READ=0` (diagnostic only).
+Pillow was unavailable; the dependency is removed.
 
-The first cold HSR FrameTest was rejected at the grid because foreground
-activation failed. It supplies no accepted timing result. The test script now
-attaches native input queues only while activating its owned game window;
-the foreground-loss guard remains strict. HSR baseline/fallback FrameTests,
-exact epilogue equivalence and the wordmark correction remain pending here.
+Locked `interp-fp-gamma-isolate-ab` repeats the fragment-force alternating
+capture with `RSX_SHADER_INTERP_GAMMA_READ=0`. The specialized wordmark stays
+at red 39. Interpreted text-like pixels in the same crop stay near red 12-14.
+Other pixels in that crop reach the 70s, so the bypass changes colour and
+does not close the gap. The switch stays a default-on decode with an off
+diagnostic.
+
+An uncommitted follow-up compiled the interpreter pixel shader for the
+program's exported colour-target count instead of the bound attachment count,
+and pre-created one pipeline per smaller count. `RSX_SHADER_INTERP_MRT_OUTPUTS=0`
+would have restored the attachment count. Locked `interp-fp-mrt-exports-ab`
+rebuilt that binary and repeated the fragment-force capture. It logged no
+`[interp-mrt]` line, so the export count never differed from the attachment
+count in that scene, and the wordmark stayed at red 13 against 39. That edit
+was reverted. It is not a validated fix.
+
+The first cold HSR FrameTest, and two launches at the start of this session,
+were rejected at the grid because another window stayed in front. They supply
+no timing result. `scripts/test/race.ps1 -RequireForeground` now resolves the
+titled game window again at the grid and joins only the current foreground
+input queue while calling `SetForegroundWindow`. A console or IME owned by
+the same process does not pass. The accepted pair is the status section
+above. Exact epilogue equivalence and the wordmark correction remain open.
 
 ## What stays out
 
@@ -863,5 +951,7 @@ exact epilogue equivalence and the wordmark correction remain pending here.
   that they can draw, at a higher GPU cost, while the specialized shader
   compiles. In `force` that cost is the whole frame: about 77 ms GPU on the
   dealership and about 45-88 ms on High Speed Ring, against about 3.3 ms and
-  8-14 ms with the switch unset (`RSX_SSAA=0`). `=1` is implemented in the
-  replay hook and is not measured.
+  8-14 ms with the switch unset (`RSX_SSAA=0`). `=1` is the pending-only path
+  measured in the status section. Settled frames there are back in the
+  specialized GPU band; the remaining stalls are first-use interpreter PSOs,
+  which are not stored in the disk cache.
