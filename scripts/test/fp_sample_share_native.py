@@ -86,7 +86,7 @@ int main(void) {
         quals = {int(parts[1], 16): int(parts[2]) for parts in (line.split() for line in lines[2:])}
         return dual, units, quals
 
-    cases = (('unset', None, 0), ('zero', '0', 0), ('one', '1', 1), ('two', '2', 0), ('empty', '', 0))
+    cases = (('unset', None, 1), ('zero', '0', 0), ('one', '1', 1), ('two', '2', 1), ('empty', '', 1), ('zero-prefix', '00', 1))
     for name, value, enabled in cases:
         dual, units, quals = run(value)
         if dual != enabled:
@@ -98,7 +98,7 @@ int main(void) {
             want = expect_qualifier(enabled, mask)
             if got != want:
                 raise SystemExit(f'{name}: mask 0x{mask:x} qualifier {got}, expected {want}')
-    print('sample qualifier matches bits 16-19 unless RSX_FP_SAMPLE_SHARE=1; cube units 17/18 unpack to none')
+    print('sample qualifier matches bits 16-19 only with RSX_FP_SAMPLE_SHARE=0; cube units 17/18 unpack to none')
 
 
 if __name__ == '__main__':

@@ -35,8 +35,8 @@ def install_mode(mode):
     def offline_env(game_root, cache):
         env = original_env(game_root, cache)
         env.pop('RSX_FP_SAMPLE_SHARE', None)
-        if mode == 'on':
-            env['RSX_FP_SAMPLE_SHARE'] = '1'
+        if mode == 'off':
+            env['RSX_FP_SAMPLE_SHARE'] = '0'
         return env
 
     def run_offline(engine, game_root, env, log, timeout=180):
