@@ -158,6 +158,7 @@ def offline_warmup(environ=None):
 
 
 def offline_env(game_root, cache):
+    from preparation_workers import compiler_workers
     env = {k: v for k, v in os.environ.items()
            if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
            and k.upper() != 'PS3_HEADLESS'}
@@ -165,7 +166,7 @@ def offline_env(game_root, cache):
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',
                GT5P_PREPARE_OFFLINE_WARMUP=offline_warmup(),
-               RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS='2', RSX_PSO_PROVENANCE='0')
+               RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS=str(compiler_workers()), RSX_PSO_PROVENANCE='0')
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'
     return env

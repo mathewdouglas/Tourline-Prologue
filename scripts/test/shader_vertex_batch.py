@@ -7,12 +7,14 @@ from io import BytesIO, StringIO
 from pathlib import Path
 import struct
 import sys
+import os
 import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import pipeline_template
 import shader_vertex_batch as batch
+os.environ['GT5P_PREPARE_COMPILER_WORKERS'] = '2'  # Existing protocol fixtures deliberately use two workers.
 from prepare_material_shaders import source_key
 from shader_coverage import fnv64
 
@@ -143,7 +145,7 @@ class ScriptWorker:
 
 def opener_for(handler, launches):
     def open_workers(count, decoder, work):
-        assert 1 <= count <= 2
+        assert 1 <= count <= 4
         launches.append(count)
         workers = [ScriptWorker(handler) for _ in range(count)]
         return Pool(workers), workers
@@ -321,9 +323,20 @@ assert not failures and set(compiled) == {(digest, 1), (other_digest, 0), (diges
 assert compiled[(digest, 1)][2] == dxbc and compiled[(digest, 0)][2] == dxbc
 assert report['launches'] == 2 and report['workers'] == 2 and launches == [2]
 assert report['inflight_jobs_max'] <= 2 and report['compiled_variants'] == 3
-assert report['limits']['workers'] == 2
+assert report['limits']['workers'] == 4
+assert report['limits']['worker_job_commit_bytes'] == 1024**3
 assert seen_kinds == ['exact', 'exact', 'exact']
 assert report['translation'] == 'default' and report['derive'] is False and report['duplicate_variants'] == 0
+
+four_requests = requests + [dict(requests[1], gpu=1)]
+for count in (3,4):
+    launches = []
+    with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'GT5P_PREPARE_COMPILER_WORKERS':str(count)}):
+        more, errors, stats = batch.compile_jobs(four_requests, 'decoder.dll', Path(folder),
+            opener=opener_for(answer, launches), monotonic=monotonic, sleep=sleep)
+    assert len(more) == 4 and not errors and launches == [count]
+    assert stats['inflight_jobs_max'] <= count and stats['workers'] == count
+    assert stats['limits']['worker_job_commit_bytes'] == 1024**3
 
 # Delay complete replies independently of the scheduler. Both intervals must
 # return identical verified results, with unchanged two-worker ownership/caps.
@@ -502,7 +515,7 @@ assert_raises(lambda: batch.compile_jobs(
     'decoder.dll', Path('unused'), derive=True, workers=1))
 assert_raises(lambda: batch.compile_jobs(
     [dict(sha256=digest, gpu=1, program=program)], 'decoder.dll', Path('unused')))
-for bad_workers in (0, 3, True):
+for bad_workers in (0, 5, True):
     assert_raises(lambda: batch.compile_jobs([derive_one], 'decoder.dll', Path('unused'), derive=True, workers=bad_workers))
 assert_raises(lambda: batch.compile_jobs(
     [derive_one], 'decoder.dll', Path('unused'), translation='1440p', derive=True, workers=1))

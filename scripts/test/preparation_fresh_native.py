@@ -15,6 +15,8 @@ import re
 import sys
 import tempfile
 import time
+import subprocess
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'scripts'))
@@ -26,8 +28,10 @@ def main():
         ap.add_argument('--'+name, type=Path, required=True)
     ap.add_argument('--limit', type=int, default=0, help='Distinct vertex sample; 0 means the entire starter')
     ap.add_argument('--profile', action='store_true')
+    ap.add_argument('--compare-verification', action='store_true', help='Read-only same-cache 1/32/32/1 verification pair')
     args = ap.parse_args()
     from pipeline_template import prepare, read, bundle
+    from preparation_workers import compiler_workers
     from shader_reconstruct import run_offline
     import pipeline_template
     import shader_fragment_batch
@@ -40,12 +44,42 @@ def main():
     template = ROOT/'assets/pipeline-templates/gt5p-disc-v2'
     plan = ROOT/'config/pipeline-warmup/gt5p-disc-v2.json'
     document = read(template)
+    if args.compare_verification:
+        # Sequential proof before this operation starts any compiler children.
+        subprocess.run([sys.executable, str(ROOT/'scripts/test/train_pipeline_cache.py')], check=True)
     if not 0 <= args.limit <= len(document['records']):
         raise ValueError('Invalid subset size')
     stages = []
     current = [None, time.perf_counter()]
     last_status = [0.0]
     native_calls = []
+    process_resources = []
+
+    # Process lifetime peak counters include short spikes between observations.
+    # The existing production runner still owns timeout/exit and guest guards.
+    import ctypes
+    from ctypes import wintypes
+    class Counters(ctypes.Structure):
+        _fields_ = [('cb',wintypes.DWORD),('PageFaultCount',wintypes.DWORD)] + [
+            (name,ctypes.c_size_t) for name in ('PeakWorkingSetSize','WorkingSetSize',
+            'QuotaPeakPagedPoolUsage','QuotaPagedPoolUsage','QuotaPeakNonPagedPoolUsage',
+            'QuotaNonPagedPoolUsage','PagefileUsage','PeakPagefileUsage','PrivateUsage')]
+    memory = ctypes.WinDLL('psapi',use_last_error=True).GetProcessMemoryInfo
+    memory.argtypes = [wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD]
+    memory.restype = wintypes.BOOL
+    original_popen = subprocess.Popen
+    class MeasuredProcess(original_popen):
+        def __exit__(self, *exc):
+            try:
+                command = self.args[0] if isinstance(self.args,(list,tuple)) else ''
+                if str(command) == str(args.engine):
+                    counters = Counters();counters.cb = ctypes.sizeof(counters)
+                    if not memory(int(self._handle),ctypes.byref(counters),ctypes.sizeof(counters)):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    process_resources.append(dict(peak_commit_bytes=counters.PeakPagefileUsage,
+                        peak_working_set_bytes=counters.PeakWorkingSetSize))
+            finally:
+                super().__exit__(*exc)
 
     def progress(phase, values):
         now = time.perf_counter()
@@ -99,10 +133,11 @@ def main():
         if args.profile:
             profiler.enable()
         try:
-            report = prepare(template, None, args.elf, args.engine, args.decoder, args.game_root,
-                output, asset_map=ROOT/'assets/pipeline-templates/gt5p-disc-v2/player-map.json',
-                volume=args.volume, volume_map=ROOT/'assets/pipeline-templates/gt5p-disc-v2/volume-map.json',
-                progress=progress, warmup_plan=plan, shader_packs=plan is not None)
+            with patch.object(subprocess,'Popen',MeasuredProcess):
+                report = prepare(template, None, args.elf, args.engine, args.decoder, args.game_root,
+                    output, asset_map=ROOT/'assets/pipeline-templates/gt5p-disc-v2/player-map.json',
+                    volume=args.volume, volume_map=ROOT/'assets/pipeline-templates/gt5p-disc-v2/volume-map.json',
+                    progress=progress, warmup_plan=plan, shader_packs=plan is not None)
         finally:
             if args.profile:
                 profiler.disable()
@@ -112,6 +147,17 @@ def main():
         assert report['resume']['vertex_programs_reused'] == report['resume']['fragment_jobs_reused'] == 0
         assert report['resume']['vertex_programs_compiled'] > 0
         assert report['fragment_preparation']['processes'] > 0
+        verification = []
+        if args.compare_verification:
+            from train_pipeline_cache import inventory
+            expected = report['inventory']
+            for choice in ('1','32','32','1'):
+                begin = time.perf_counter()
+                with patch.dict(os.environ,{'GT5P_PREPARE_VERIFY_BATCH':choice}):
+                    checked = inventory(output/'shadercache',True)
+                assert checked == expected, 'Verification rollback differs'
+                verification.append(dict(batch=int(choice),seconds=time.perf_counter()-begin,
+                    recipes=len(checked['recipes']),blobs=len(checked['valid_driver_blobs'])))
         progress('cleanup', {})
         counts = dict(files=sum(1 for p in output.rglob('*') if p.is_file()))
         timings = []
@@ -126,7 +172,12 @@ def main():
             stages=stages, offline_processes=native_calls, profile=timings, temporary_files=counts,
             engine_sha256=hashlib.sha256(args.engine.read_bytes()).hexdigest(),
             shader_packs=report.get('shader_packs'), io_workers=os.environ.get('GT5P_PREPARE_IO_WORKERS', 'default'),
-            offline_warmup=os.environ.get('GT5P_PREPARE_OFFLINE_WARMUP', '0'))
+            offline_warmup=os.environ.get('GT5P_PREPARE_OFFLINE_WARMUP', '0'),
+            compiler_workers=str(compiler_workers()),
+            verification_batch=os.environ.get('GT5P_PREPARE_VERIFY_BATCH','32'),
+            verification_read=('maximum-bound' if os.environ.get('GT5P_PREPARE_VERIFY_BATCH')=='1'
+                else 'opened-handle-size-with-sentinel'),
+            verification_comparison=verification,process_resources=process_resources)
     summary.update(test_cache_removed=not fresh.exists(), total_with_cleanup_seconds=time.perf_counter()-started)
     assert summary['test_cache_removed']
     args.output.write_text(json.dumps(summary, indent=2)+'\n')

@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 208)
+## Start here: state of play (2026-11-03, Phase 209)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 208 is the latest).
+has the evidence, newest phase first (Phase 209 is the latest).
 
 ### What works now
+
+- **Compiler concurrency and cache verification (Phase 209, development):**
+  offline preparation selects four workers on CPUs with at least eight logical
+  processors, otherwise two; explicit 2/3/4 and original verification rollback
+  controls remain. Vertex job memory stays capped at 1 GiB. Three full fresh
+  5,669-record runs pass exact shaders/native keys/persistence with identical
+  packs: 632.74 s (two) / 492.08 s (three) / 457.04 s (four plus final reader).
+  Same-cache verification falls from 30.0-31.4 s to 1.60-1.64 s with identical
+  results, using grouped tasks, shared-code checks and size-aware bounded reads.
+  Cache formats, normal game worker selection and async policy stay unchanged.
+  All new test caches/build outputs are removed. See progress for controls,
+  process memory, frozen acceptance and ordered-series limits; v0.2.3 unchanged.
 
 - **Fresh preparation speed (Phase 208, development):** vertex worker polling
   drops from 100 to 10 ms, and offline batches skip redundant recipe replay

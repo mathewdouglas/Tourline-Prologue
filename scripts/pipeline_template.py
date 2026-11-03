@@ -358,6 +358,10 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     from shader_reconstruct import offline_warmup
     from shader_vertex_batch import poll_seconds
     offline_warmup()
+    from preparation_workers import compiler_workers
+    from train_pipeline_cache import verification_batch
+    compiler_workers()
+    verification_batch()
     if vertex_mode == 'batch':
         poll_seconds()
     from pipeline_translation import MODES, fragment_batch_size

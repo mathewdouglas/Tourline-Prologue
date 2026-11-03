@@ -9,6 +9,20 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
+from preparation_workers import compiler_workers
+
+for cpus, expected in ((None,2),(2,2),(4,2),(7,2),(8,4),(12,4),(64,4)):
+    with patch('preparation_workers.os.cpu_count',return_value=cpus):
+        assert compiler_workers({}) == expected
+os.environ['GT5P_PREPARE_COMPILER_WORKERS'] = '2'  # Controlled fixture for existing environment checks.
+for count in ('2','3','4'):
+    assert compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count}) == int(count)
+    with patch.dict(os.environ, {'GT5P_PREPARE_COMPILER_WORKERS':count, 'RSX_SHADER_WORKERS':'32'}):
+        assert m.offline_env(Path('game'),Path('cache'))['RSX_SHADER_WORKERS'] == count
+for count in ('','1','5','32',True):
+    try:compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count})
+    except ValueError:pass
+    else:raise AssertionError('Unbounded compiler count accepted')
 
 assert m.offline_warmup({}) == m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'0'}) == '0'
 assert m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'1'}) == '1'

@@ -6,7 +6,7 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 ## Road to the finished precompiler
 
 Development after v0.2.3 reduces vertex pipe polling from 100 ms to 10 ms,
-keeping the two-worker/job/memory limits. `GT5P_PREPARE_VERTEX_POLL_MS=100`
+keeping the worker job/memory limits. `GT5P_PREPARE_VERTEX_POLL_MS=100`
 restores the old interval. A matching development engine also skips replaying
 warmup recipes immediately after an offline batch, before that process exits.
 The startup barrier, exact batch creation, recipe recording and persisted-cache
@@ -14,6 +14,25 @@ checks stay enabled. `GT5P_PREPARE_OFFLINE_WARMUP=1` restores the exit replay.
 Normal gameplay startup warmup is unchanged; both engine and helper updates are
 needed for the combined improvement. See Phase 208 in the progress log for
 fresh-compilation evidence and its limits. This is not in published v0.2.3.
+
+Development Phase 209 adds bounded offline compiler tuning:
+`GT5P_PREPARE_COMPILER_WORKERS=2|3|4` controls both vertex processes and fragment
+compiler threads. Unset selects four on CPUs reporting at least eight logical
+processors, otherwise two; `=2` restores the previous count. Shader stages run
+sequentially, so this does not start eight compiler workers together. Vertex
+workers retain their 512 MiB per-process and 1 GiB aggregate job caps, private
+kill-on-close jobs, queue ownership and existing timeouts. Normal game shader
+worker selection and async draw policy are unchanged.
+
+Final cache verification groups metadata reads in batches of 32, checks shared
+bytecode dependencies once per identity, and sizes read requests from the opened
+file handle rather than the maximum permitted payload. Oversize, short, growing
+or resized files reject; recipe, DXBC and driver checksums still cover complete
+payloads. Four readers still open one payload each at a time, with no retained
+bytecode pool. `GT5P_PREPARE_VERIFY_BATCH=1` restores the old reader/task path.
+Progress and publication remain on the owner; cancellation joins pending reads.
+See Phase 209 in [progress](progress.md) for full fresh and same-cache comparisons,
+memory use, frozen-helper acceptance and the limits of these local measurements.
 
 Preparation uses up to four bounded readers for cache reuse, persisted-cache
 validation and shader-pack dependencies (Phase 205). Publication and cancellation

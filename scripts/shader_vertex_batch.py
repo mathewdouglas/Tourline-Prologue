@@ -20,6 +20,7 @@ import sys
 import time
 
 import shader_translation
+from preparation_workers import compiler_workers
 from shader_coverage import MAX_FP, fnv64
 
 
@@ -36,7 +37,7 @@ MAX_PROGRAM = MAX_FP
 MAX_SOURCE = 262144  # NativeCompiler decoder output buffer
 MAX_BYTECODE = 4 * 1024 * 1024
 MAX_TOTAL = 128 * 1024 * 1024
-MAX_WORKERS = 2
+MAX_WORKERS = 4
 MAX_JOBS = 4096
 JOB_SECONDS = 180
 START_SECONDS = 60
@@ -58,7 +59,7 @@ PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 HEX16 = re.compile(r'[0-9a-f]{16}')
 SHA256 = re.compile(r'[0-9a-f]{64}')
 LIMITS = dict(workers=MAX_WORKERS, program_bytes=MAX_PROGRAM, source_bytes=MAX_SOURCE,
-              worker_commit_bytes=WORKER_MEMORY, worker_job_commit_bytes=MAX_WORKERS * WORKER_MEMORY,
+              worker_commit_bytes=WORKER_MEMORY, worker_job_commit_bytes=2 * WORKER_MEMORY,
               bytecode_bytes=MAX_BYTECODE, total_bytecode_bytes=MAX_TOTAL, job_seconds=JOB_SECONDS,
               startup_seconds=START_SECONDS, inflight_jobs=MAX_WORKERS,
               inflight_bytes=MAX_WORKERS * (MAX_PROGRAM + MAX_SOURCE + MAX_BYTECODE))
@@ -478,14 +479,14 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
 
     derive=False keeps the exact expected-id contract. derive=True never calls
     the decoder in this process: even one job uses a fresh worker, because the
-    ultrawide latch is process-wide. workers is 1 or 2 when the caller sets it.
+    ultrawide latch is process-wide. Explicit worker counts are bounded to 1..4.
     """
     if derive is not True and derive is not False:
         raise ValueError('Vertex derive mode is not explicit')
-    if workers is not None and (type(workers) is not int or workers not in (1, 2)):
+    if workers is not None and (type(workers) is not int or not 1 <= workers <= MAX_WORKERS):
         raise ValueError('Vertex compiler worker cap exceeded')
     shader_translation.overlay(translation)
-    worker_limit = MAX_WORKERS if workers is None else workers
+    worker_limit = compiler_workers() if workers is None else workers
     interval = poll_seconds()
     monotonic = monotonic or time.monotonic
     sleep = sleep or time.sleep
@@ -508,7 +509,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
             return open_workers(count, decoder_path, workspace, translation=translation)
         pool, workers = (opener or launch)(min(worker_limit, len(selected)), decoder, work)
         report.update(workers=len(workers), launches=len(workers), ownership=getattr(pool, 'ownership', None))
-        if len(workers) > MAX_WORKERS:
+        if len(workers) > worker_limit:
             raise ValueError('Vertex compiler worker cap exceeded')
         for worker in workers:
             deadline = monotonic() + startup_seconds
@@ -768,7 +769,7 @@ class _WinPool:
         info.BasicLimitInformation.LimitFlags = (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
             JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY)
         info.ProcessMemoryLimit = WORKER_MEMORY
-        info.JobMemoryLimit = MAX_WORKERS * WORKER_MEMORY
+        info.JobMemoryLimit = LIMITS['worker_job_commit_bytes']
         if not self.kernel.SetInformationJobObject(self.job, JOB_OBJECT_EXTENDED_LIMIT, ctypes.byref(info), ctypes.sizeof(info)):
             self.kernel.CloseHandle(self.job)
             raise ValueError('Could not own vertex compiler workers')

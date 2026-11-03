@@ -9,6 +9,107 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 209 - Compiler concurrency and size-aware cache verification (2026-11-03)
+
+Offline preparation now selects four compiler workers on CPUs reporting at
+least eight logical processors, otherwise two. Explicit
+`GT5P_PREPARE_COMPILER_WORKERS=2|3|4` overrides the selection; `=2` restores
+the previous count. This controls vertex processes and the existing fragment
+compiler threads in sequential stages, not eight simultaneous compiler jobs.
+Vertex workers retain private kill-on-close ownership, 512 MiB per-process and
+1 GiB aggregate job memory limits, existing timeouts and bytecode budgets.
+At most four requests are in flight. The runtime patch, normal game worker
+selection and async draw/queue policy are unchanged.
+
+Cache verification now separates recipe metadata, unique bytecode dependencies
+and persisted driver blobs. Four read-only workers each process at most 32
+metadata results per scheduled task, retaining only one payload at a time.
+Shared bytecode identities are checked once per scan, with errors attributed to
+every referencing recipe. Reads use the opened file's size plus a sentinel byte
+instead of speculative 4/32 MiB requests for small files. Oversize files reject
+before allocation; short reads, growth or changed size reject. Every complete
+recipe, bytecode identity and driver envelope/checksum still verifies.
+`GT5P_PREPARE_VERIFY_BATCH=1` restores the previous task/read path. Callbacks and
+publication remain on the owner; cancellation joins outstanding reads before
+returning. Neither change requires a new cache format or invalidates resumable
+work. Invalid tuning settings reject before preparation output creation.
+
+Three ordered, profiled full runs start in separate empty application caches,
+using the same private engine, original packed inputs, default translation,
+5,669-record starter, observed plan/packs and four I/O readers. Every run compiles
+all 482 vertex variants and 3,696 exact fragment requests (3,609 canonical
+compiler jobs), prepares every native key in 4,096/1,573 chunks with zero cached
+driver-blob calls, and verifies all persisted blobs. No prior application shaders
+are imported. Both shader packs have identical counts, bytes and SHA256 across
+all three runs. The two-worker control reproduces Phase 208's 631.59-second
+result within about 1.2 seconds.
+
+| Run | Full preparation | Vertex compiler | Fragment preparation | Native stage |
+| --- | ---: | ---: | ---: | ---: |
+| Two workers, original verification | 632.74 s | 181.76 s | 200.04 s | 158.97 s |
+| Three workers, batched verification prototype | 492.08 s | 138.99 s | 148.98 s | 129.62 s |
+| Four workers, final size-aware verification | 457.04 s | 117.25 s | 124.97 s | 152.70 s |
+
+The final run takes 175.69 seconds / 27.77% less preparation time than the
+two-worker control; compiler reports together fall 381.80 -> 242.22 seconds
+(36.56%). Report scopes differ and are not an additive wall-time breakdown.
+Native creation also varies despite no native scheduling change, so the whole
+gain must not be attributed solely to worker count. Three-worker verification
+used batching before the size-aware read refinement; the final four-worker run
+includes both changes. Hardware remains i5-12400F, 16 GB RAM, RTX 4060,
+driver 32.0.16.1088, `PS3_VERBOSE=0`. This is one ordered 2/3/4 local series,
+not an ABBA compiler trial or a universal CPU/GPU/storage guarantee. OS/driver
+caches remain intact. Application-cache-cold is not OS/driver-cold. No live
+rendering, hitch, whole-game or all-settings claim follows.
+
+After the final run, an unprofiled read-only same-cache original/new/new/original
+verification comparison returns exactly the same 5,669 recipes, 5,669 valid
+driver blobs and empty rejection list each time. Original scans take
+31.366 / 30.039 seconds; new scans take 1.638 / 1.596 seconds, about 94.7% less
+elapsed scan time by pair means. This comparison excludes compilation, native
+creation, report serialization and UI callbacks; it is a warm same-cache scan,
+not a fresh-storage benchmark. Final whole-stage verification timing also
+includes report/checkpoint work and must not be substituted for this scan result.
+The opened-handle size optimization avoids large read requests without skipping
+integrity checks. Synthetic shared/corrupt-code, conflicting-length, oversized,
+short/growing-file and cancellation checks pass.
+
+Observed vertex worker-job peak commit is 115.60 / 170.09 / 223.79 MiB for
+two/three/four workers, below the unchanged 1 GiB cap. Offline engine lifetime
+peak commit counters are about 2,179 / 2,198 / 2,219 MiB respectively (maximum
+across each run's engine processes). These are process/job measurements, not
+whole-machine or simultaneous process-tree peaks. The final engine-process
+maximum is about 40 MiB above the control. Parent memory and other hardware
+remain separate acceptance limits.
+
+Final source scheduler/environment, recipe/dependency, size-aware reader and
+bounded I/O cancellation regressions pass. A fresh 32-record rollback restores
+two workers, 100 ms polling, exit replay and original verification successfully.
+The private frozen helper passes a clean-PATH 32-record default/ultrawide
+checkpoint proof with four workers: cancel after eight saved fragment results,
+reuse all eight on resume, verify 32 fresh native calls and zero cached blobs,
+then reuse every fragment on the 4,096-chunk rollback. Invalid chunk, worker
+and verification settings reject while preserving source cache, selection and
+translated work. Separately, the new parent pool launches four protocol-compatible
+frozen release workers; killing its owner retires all four while the outer job
+remains open. This tests OS job ownership without starting a game. The probe uses
+the read-only release worker binary; new-helper cancellation/resume is covered
+by the separate frozen proof. All owned children exit before cleanup/release.
+
+The harness retains timing/count/hash/resource metadata under
+`scratch/preparation-speed-209/`: `workers-{2,3,4}.json`, `worker-study.json`,
+`fresh-rollback-32.json`, `frozen-validation.json` and `acceptance.json`, plus small
+controller logs. `preparation_speed_acceptance.py --worker-study` reproduces the
+owned sequential comparison using read-only CI objects and a private engine/helper
+build. The fresh harness records Windows lifetime peak process counters and
+optionally compares verification implementations on its own cache. Every full
+test cache is removed after its verification comparison. The private engine,
+helper, build outputs and PyInstaller caches are also removed after acceptance;
+existing player generations, driver caches and original files remain untouched.
+All build/compiler/test operations own the shared validation mutex and complete
+child cleanup before releasing it. Published v0.2.3, main, tags, starter/maps
+and release workflows remain unchanged. Development pushes use `[skip ci]`.
+
 ## Phase 208 - Fresh preparation speed and disposable validation (2026-11-03)
 
 The fresh path now polls the existing two vertex workers every 10 ms instead

@@ -141,28 +141,136 @@ def writable_tree(path, output):
                 raise ValueError('Writable run directories must not contain links: ' + str(item))
 
 
-def validate_recipe(path, codes=None):
-    data = bounded_read(path, 16384)
+def bounded_cache_read(path, maximum):
+    """Avoid maximum-sized speculative buffers for small, immutable cache files.
+
+    Stat the opened handle, then request one sentinel byte past that size. A
+    short read, growth or size change rejects instead of accepting a prefix.
+    The caller still validates the complete envelope/checksum independently.
+    """
+    with path.open('rb') as stream:
+        size = os.fstat(stream.fileno()).st_size
+        if size > maximum:
+            raise ValueError('oversized input')
+        data = stream.read(size + 1)
+        if len(data) != size or os.fstat(stream.fileno()).st_size != size:
+            raise ValueError('Cache file changed during read')
+    return data
+
+
+def recipe_metadata(path, reader=None):
+    data = (reader or bounded_read)(path, 16384)
     if (len(data) != 2760 or struct.unpack_from('<QII', data) != (0x31574d5241503547, 1, 2760) or
             struct.unpack_from('<Q', data, 2752)[0] != fnv64(data[:-8])):
         raise ValueError('Invalid pinned Windows x64 recipe envelope/checksum')
     key, vs, ps, vlen, plen = struct.unpack_from('<QQQII', data, 16)
     if not key or path.name != f'pso_{key:016x}.recipe':
         raise ValueError('Recipe filename/key mismatch')
-    for code, length in ((vs, vlen), (ps, plen)):
+    dependencies = ((vs, vlen), (ps, plen))
+    for code, length in dependencies:
         if not 0 < length <= 4 * 1024 * 1024:
             raise ValueError('Invalid bytecode length')
+    return f'{key:016x}', dependencies
+
+
+def validate_code(directory, code, length, reader=None):
+    payload = (reader or bounded_read)(directory / f'code_{code:016x}.dxbc', 4 * 1024 * 1024)
+    if len(payload) != length or not payload.startswith(b'DXBC') or fnv64(payload) != code:
+        raise ValueError('Missing or mismatched recipe bytecode')
+
+
+def validate_recipe(path, codes=None):
+    key, dependencies = recipe_metadata(path)
+    for code, length in dependencies:
         if codes is not None and (code, length) in codes:
             continue
-        payload = bounded_read(path.parent / f'code_{code:016x}.dxbc', 4 * 1024 * 1024)
-        if len(payload) != length or not payload.startswith(b'DXBC') or fnv64(payload) != code:
-            raise ValueError('Missing or mismatched recipe bytecode')
+        validate_code(path.parent, code, length)
         if codes is not None:
             codes.add((code, length))
-    return f'{key:016x}'
+    return key
+
+
+def verification_batch(environ=None):
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_VERIFY_BATCH', '32')
+    if value not in ('1', '32'):
+        raise ValueError('GT5P_PREPARE_VERIFY_BATCH must be unset, 1, or 32')
+    return int(value)
 
 
 def inventory(cache, validate_blobs=False, progress=None):
+    if verification_batch() == 32:
+        return inventory_batched(cache, validate_blobs, progress)
+    return inventory_legacy(cache, validate_blobs, progress)
+
+
+def inventory_batched(cache, validate_blobs=False, progress=None):
+    """Four bounded readers; unique code validation, metadata-only batch results.
+
+    No bytecode is retained between reads. A batch holds at most 32 metadata
+    results; each reader still opens only one payload at a time. All publication
+    and progress/cancellation callbacks remain on the owner, after joined reads.
+    """
+    from preparation_io import read_pool
+    paths = sorted((cache/'warmup-v1').glob('*.recipe'))
+    def reads(function, items):
+        chunks = (items[i:i+32] for i in range(0, len(items), 32))
+        def chunk(values):
+            return [function(value) for value in values]
+        with read_pool(chunk, chunks) as results:
+            for values in results:
+                yield from values
+    def metadata(path):
+        try:
+            key, dependencies = recipe_metadata(path, bounded_cache_read)
+            return path.name, key, dependencies, None
+        except (ValueError, OSError) as exc:
+            return path.name, None, (), str(exc)
+    # Explicit close joins pending readers if a callback cancels the owner.
+    from contextlib import closing
+    records = []
+    with closing(reads(metadata, paths)) as results:
+        for number, record in enumerate(results, 1):
+            records.append(record)
+            if progress:progress('verifying-cache',dict(completed=number,total=len(paths),detail='recipe headers'))
+    dependencies = sorted({entry for _,key,deps,error in records if key for entry in deps})
+    errors = {}
+    def code(entry):
+        try:
+            validate_code(cache/'warmup-v1', *entry, reader=bounded_cache_read)
+            return entry, None
+        except (ValueError, OSError) as exc:
+            return entry, str(exc)
+    with closing(reads(code, dependencies)) as results:
+        for number, (entry,error) in enumerate(results, 1):
+            if error is not None:errors[entry] = error
+            if progress:progress('verifying-cache',dict(completed=number,total=len(dependencies),detail='shared bytecode'))
+    keys, rejected = [], []
+    for name, key, deps, error in records:
+        if error is None:error = next((errors[entry] for entry in deps if entry in errors), None)
+        if error is None:keys.append(key)
+        else:rejected.append(dict(file=name,reason=error))
+    blobs = []
+    if validate_blobs:
+        with closing(reads(lambda key: valid_blob(cache, key, bounded_cache_read), keys)) as results:
+            for number, key in enumerate(results, 1):
+                if key is not None:blobs.append(key)
+                if progress:progress('verifying-cache',dict(completed=number,total=len(keys),detail='driver blobs'))
+    return dict(recipes=keys,valid_driver_blobs=blobs,rejected=rejected)
+
+
+def valid_blob(cache, key, reader=None):
+    try:
+        data = (reader or bounded_read)(cache / f'pso_{key}.bin', 32 * 1024 * 1024)
+        if len(data) > 24:
+            magic, size, checksum = struct.unpack_from('<QQQ', data)
+            if magic == 0x31534f5035505447 and size == len(data) - 24 and fnv64(data[24:]) == checksum:
+                return key
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def inventory_legacy(cache, validate_blobs=False, progress=None):
     from preparation_io import read_pool
     keys, rejected, codes = [], [], set()
     paths=sorted((cache/'warmup-v1').glob('*.recipe'))
@@ -177,19 +285,8 @@ def inventory(cache, validate_blobs=False, progress=None):
             else:rejected.append(error)
             if progress:progress('verifying-cache',dict(completed=number,total=len(paths),detail='recipes'))
     blobs = []
-    def blob(key):
-        path = cache / f'pso_{key}.bin'
-        try:
-            data = bounded_read(path, 32 * 1024 * 1024)
-            if len(data) > 24:
-                magic, size, checksum = struct.unpack_from('<QQQ', data)
-                if magic == 0x31534f5035505447 and size == len(data) - 24 and fnv64(data[24:]) == checksum:
-                    return key
-        except (ValueError, OSError):
-            pass
-        return None
     if validate_blobs:
-        with read_pool(blob,keys) as results:
+        with read_pool(lambda key: valid_blob(cache,key),keys) as results:
             for number,key in enumerate(results,1):
                 if key is not None:blobs.append(key)
                 if progress:progress('verifying-cache',dict(completed=number,total=len(keys),detail='driver blobs'))

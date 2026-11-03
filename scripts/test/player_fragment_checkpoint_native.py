@@ -120,10 +120,17 @@ def main():
     assert pointer.read_text()==selected_pointer and snapshot(source)==before
     # Parent report/checkpoint can report rejection; all derived work stays intact.
     assert snapshot(state.parent)==preserved
+    for name, overrides in (
+            ('invalid-workers',{'GT5P_PREPARE_COMPILER_WORKERS':'5'}),
+            ('invalid-verification',{'GT5P_PREPARE_VERIFY_BATCH':'0'})):
+        run(name,overrides,False)
+        assert pointer.read_text()==selected_pointer and snapshot(source)==before
+        assert snapshot(state.parent)==preserved
     (out/'validation.json').write_text(json.dumps(dict(records=a.count,checkpointed_fragments=len(kept),
         resumed_fragments=extra['fragment_jobs_reused'],native_counts=extra['native_counts'],
         clean_path=True,old_selection_preserved_on_cancel=True,source_unchanged=True,
         chunk_rollback_reused_all=True,invalid_chunk_preserved_selection=True,
+        invalid_worker_and_verification_preserved_selection=True,
         seconds=time.perf_counter()-started,
         limitation='Frozen offline subset on one GPU; no live rendering or stutter measurement.'),indent=2)+'\n')
     print('Frozen fragment checkpoint, resume, rollback and selection/source preservation passed:',out)
