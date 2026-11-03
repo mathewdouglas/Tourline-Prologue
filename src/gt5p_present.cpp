@@ -683,6 +683,20 @@ extern "C" void rsx_d3d12_backend_prewarm(void);
 extern "C" void rsx_d3d12_backend_prepare_library(void);
 static HANDLE s_startup_ready;
 
+/* Offline callers authorize a batch from its completion log as well as its
+ * persisted results. Flush before handing startup back to main, which exits
+ * without joining the ordinary presentation loop. Normal play stays buffered.
+ * GT5P_OFFLINE_FLUSH=0 restores the historical exit-only flushing. */
+extern "C" void gt5p_flush_offline_output(void)
+{
+    const char* only = getenv("GT5P_SHADER_PRECOMPILE_ONLY");
+    const char* rollback = getenv("GT5P_OFFLINE_FLUSH");
+    if (only && !strcmp(only, "1") && !(rollback && !strcmp(rollback, "0"))) {
+        fflush(stderr);
+        fflush(stdout);
+    }
+}
+
 /* GT5P_VBLANK_THREAD (on; =0 off): the vblank and flip clock on its own
  * thread. It used to share the present thread with the FIFO walk, so no
  * vblank could fire while a walk ran -- and a race frame's walk is 13-17 ms in
@@ -821,6 +835,7 @@ static DWORD WINAPI present_thread(LPVOID)
             rsx_d3d12_backend_prewarm();
         }
         else fprintf(stderr, "[shader-warmup] skipped: standard windowed D3D12 backend required\n");
+        gt5p_flush_offline_output();
         SetEvent(s_startup_ready);
     }
 

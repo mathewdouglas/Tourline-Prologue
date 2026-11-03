@@ -13,6 +13,9 @@ learning and verifying pipelines from your own play sessions.
 - Retained preparation generations no longer hit the old fixed 100,000-entry
   scan limit. The bounded scan allowance now follows catalogue capacity and
   retained generations, keeping link and ownership checks in place.
+- Offline preparation explicitly flushes batch-completion output before the
+  engine exits. Completion/native-key checks remain strict; incomplete runs
+  retain their work and do not select an unverified cache.
 - Bounded parallel reads reduce cached preparation overhead. One local full
   4,450-record pair measured 261.34 seconds with serial reads and 202.52 seconds
   with four readers. This is a cached preparation result on one machine, not a
@@ -48,6 +51,7 @@ does not guarantee first-draw readiness or zero stutter.
 
 For troubleshooting, `GT5P_PREPARE_IO_WORKERS=1` restores serial preparation reads,
 `GT5P_PREPARE_FRAGMENT_CHUNK=4096` restores larger additional-translation chunks,
+`GT5P_OFFLINE_FLUSH=0` restores historical offline exit flushing,
 `GT5P_PIPELINE_TOOLS=0` disables F1 tool handoffs, and
 `GT5P_COLLECT_VERIFY_UI=0` uses console verification. These controls preserve
 existing caches. `tourline-prologue.exe --no-prepared` bypasses selected preparation.

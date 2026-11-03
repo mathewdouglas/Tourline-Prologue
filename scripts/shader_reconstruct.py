@@ -157,6 +157,8 @@ def offline_env(game_root, cache):
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',
                RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS='2', RSX_PSO_PROVENANCE='0')
+    if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
+        env['GT5P_OFFLINE_FLUSH'] = '0'
     return env
 
 

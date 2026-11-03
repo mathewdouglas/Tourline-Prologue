@@ -83,6 +83,7 @@ extern const char* g_hle_inflight[64];    /* per-thread: HLE currently executing
 void gt5p_spu_register_all(void);         /* generated: src/gen/spu_workloads.c */
 void gt5p_audio_select_native(void);      /* CPU-dispatched audio images */
 void gt5p_start_present_thread(void);     /* src/gt5p_present.cpp */
+void gt5p_flush_offline_output(void);
 void gt5p_install_window_icon(void);      /* src/gt5p_icon.cpp */
 }
 
@@ -1082,6 +1083,7 @@ int main(int argc, char* argv[])
 
     if (const char* only = getenv("GT5P_SHADER_PRECOMPILE_ONLY"); only && !strcmp(only, "1")) {
         printf("[shader-library] offline preparation returned; guest entry was not executed\n");
+        gt5p_flush_offline_output();
         return 0;
     }
 

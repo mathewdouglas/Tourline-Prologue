@@ -4,9 +4,18 @@ import struct
 import subprocess
 import sys
 import tempfile
+import os
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
+
+with patch.dict(os.environ, {'GT5P_OFFLINE_FLUSH':'0', 'GT5P_NO_PRESENT':'1', 'RSX_PSO_ASYNC':'1'}):
+    env = m.offline_env(Path('private-game'), Path('private-cache'))
+    assert env['GT5P_OFFLINE_FLUSH']=='0' and env['RSX_PSO_ASYNC']=='0'
+    assert 'GT5P_NO_PRESENT' not in env
+with patch.dict(os.environ, {'GT5P_OFFLINE_FLUSH':'1'}):
+    assert 'GT5P_OFFLINE_FLUSH' not in m.offline_env(Path('private-game'), Path('private-cache'))
 
 
 def bundle(base=0, header=0):
