@@ -14,6 +14,7 @@ and numeric state reach a template, and nothing here edits assets/.
   python scripts/content_sweep.py plan-update --out O --plan P --output P2     (fold survey results into the plan)
   python scripts/content_sweep.py report  --out O --baseline assets/pipeline-templates/gt5p-disc-v2 --engine E --decoder D
   python scripts/content_sweep.py probe   --root R --out O --hold "<PAD_HOLD>"   (ad-hoc menu-flow discovery)
+  python scripts/content_sweep.py contact --output O/sheet.png --columns 4 "O/chunks/*/attempt-1/*.studio.png"
 
 Every external effect is bounded: one game at a time, a private RSX_SHADER_CACHE,
 a private copy of gamedata, per-chunk timeouts and a kill in a finally block.
@@ -79,6 +80,11 @@ TIMING_LIMITS = (0, 600000)
 # Reference-resolution (1920x1080) regions for carousel text/arrow probes.
 CAROUSEL_CROP = (100, 280, 900, 760)
 CAR_NAME_BOX = (200, 640, 800, 710)
+# The "Enter" label of the top-right button prompt is on every dealership page (manufacturer page, carousel,
+# studio) whether the glyph is a keyboard key or a gamepad button. Dark paint on a dark studio makes
+# luminance an unreliable "page reached" test; a black splash or movie has no such label (0 px).
+ENTER_LABEL_BOX = (1700, 40, 1830, 95)
+ENTER_TEXT_MIN = 60
 
 
 # --------------------------------------------------------------------------
@@ -332,9 +338,10 @@ def compile_dealer_chunk(plan, chunk, retry=True):
         enter = t
         presses.append(Press(A, t, t + tm['press_len'], 'CROSS'))
         t += tm['maker_load'] + tm['maker_dwell']
-        shots = [dict(name='maker', anchor=A, ms=t - 400, scale=2)]
+        shots = [dict(name='maker', anchor=A, ms=t - 400, scale=2, regions=dict(enter=list(ENTER_LABEL_BOX)))]
         units.append(Unit(f"{m['id']}/maker", 'maker-page', f"{m['label']}: manufacturer page", (A, enter), shots,
-                          dict(milestone='DealerTopRoot' if mi == 0 else None, mean=(5, 90)), dict(maker=m['id'])))
+                          dict(milestone='DealerTopRoot' if mi == 0 else None, mean=(5, 90),
+                               text=['enter', ENTER_TEXT_MIN]), dict(maker=m['id'])))
         presses.append(Press(A, t, t + tm['press_len'], 'CROSS'))          # Showroom
         t += tm['showroom_open']
         if m['cars'] is None:                                              # survey: scan the carousel
@@ -361,14 +368,15 @@ def compile_dealer_chunk(plan, chunk, retry=True):
                     presses.append(Press(A, t + tm['enter_retry'], t + tm['enter_retry'] + tm['press_len'],
                                          'CROSS', 'CarColorSelectRoot'))
                 t += tm['car_dwell']
-                shots = [dict(name='studio', anchor=A, ms=t - 500, scale=2)]
+                shots = [dict(name='studio', anchor=A, ms=t - 500, scale=2, regions=dict(enter=list(ENTER_LABEL_BOX)))]
                 for c in range(m['colors']):             # RIGHT on the studio page steps the paint swatch
                     presses.append(Press(A, t, t + tm['tap_len'], 'RIGHT'))
                     t += tm['color_gap']
                     shots.append(dict(name=f'color{c + 1}', anchor=A, ms=t - 300, scale=2))
                 presses.append(Press(A, t, t + tm['press_len'], 'CIRCLE'))
                 units.append(Unit(f"{m['id']}/car{i}", 'car-studio', f"{m['label']}: car {i + 1} studio page", (A, start), shots,
-                                  dict(milestone='CarColorSelectRoot' if (mi == 0 and i == 0) else None, mean=(45, 255)),
+                                  dict(milestone='CarColorSelectRoot' if (mi == 0 and i == 0) else None, mean=(3, 255),
+                                       text=['enter', ENTER_TEXT_MIN]),
                                   dict(maker=m['id'], car=i)))
                 t += tm['car_back']
         if mi + 1 < len(makers):                                           # back to the manufacturer grid
@@ -674,17 +682,79 @@ def capture(hwnd, path, crop=None, regions=None, scale=2):
         for y in range(y0, y1):
             out += rgb[(y * width + x0) * 3:(y * width + x1) * 3]
     if scale and scale > 1:
-        sw, sh = out_w // scale, out_h // scale
-        scaled = bytearray()
-        for y in range(sh):
-            row = out[y * scale * out_w * 3:(y * scale + 1) * out_w * 3]
-            r, g, b = row[0::3 * scale], row[1::3 * scale], row[2::3 * scale]
-            line = bytearray(sw * 3)
-            line[0::3], line[1::3], line[2::3] = r[:sw], g[:sw], b[:sw]
-            scaled += line
-        out_w, out_h, out = sw, sh, scaled
+        out_w, out_h, out = downscale(out_w, out_h, out, scale)
     Path(path).write_bytes(png_bytes(out_w, out_h, out))
     return info
+
+
+def downscale(width, height, rgb, factor):
+    """Nearest-neighbour 1/factor reduction of a top-down RGB buffer. Returns (width, height, rgb)."""
+    sw, sh = width // factor, height // factor
+    scaled = bytearray()
+    for y in range(sh):
+        row = rgb[y * factor * width * 3:(y * factor + 1) * width * 3]
+        r, g, b = row[0::3 * factor], row[1::3 * factor], row[2::3 * factor]
+        line = bytearray(sw * 3)
+        line[0::3], line[1::3], line[2::3] = r[:sw], g[:sw], b[:sw]
+        scaled += line
+    return sw, sh, scaled
+
+
+PNG_SIGNATURE = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+
+
+def read_png(path):
+    """Decode a PNG written by png_bytes (8-bit RGB, filter 0). Returns (width, height, rgb)."""
+    data = Path(path).read_bytes()
+    if data[:8] != PNG_SIGNATURE:
+        raise ValueError(f'{path} is not a PNG')
+    pos, idat, header = 8, [], None
+    while pos < len(data):
+        length, tag = struct.unpack('>I4s', data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + length]
+        if tag == b'IHDR':
+            header = struct.unpack('>IIBBBBB', body)
+        elif tag == b'IDAT':
+            idat.append(body)
+        pos += 12 + length
+    if header is None or header[2:] != (8, 2, 0, 0, 0):
+        raise ValueError(f'{path} is not an 8-bit RGB PNG written by this tool')
+    width, height = header[0], header[1]
+    raw = zlib.decompress(b''.join(idat))
+    stride = width * 3
+    if len(raw) != height * (stride + 1) or any(raw[y * (stride + 1)] for y in range(height)):
+        raise ValueError(f'{path} uses PNG filters this reader does not support')
+    return width, height, bytearray(b''.join(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)] for y in range(height)))
+
+
+def contact_sheet(files, columns=3, tile_width=640, gap=4):
+    """Tile screenshots (reduced by an integer factor to about tile_width) for visual review.
+    Returns (png bytes, [(row, column, file)]). Missing/unreadable files leave a grey tile."""
+    tiles, layout = [], []
+    for i, file in enumerate(files):
+        try:
+            width, height, rgb = read_png(file)
+        except (OSError, ValueError, zlib.error):
+            tiles.append(None)
+        else:
+            factor = max(1, round(width / tile_width))
+            tiles.append(downscale(width, height, rgb, factor))
+        layout.append((i // columns, i % columns, str(file)))
+    sizes = [(t[0], t[1]) for t in tiles if t]
+    cell_w = max([w for w, _ in sizes] or [tile_width])
+    cell_h = max([h for _, h in sizes] or [tile_width * 9 // 16])
+    rows = (len(files) + columns - 1) // columns
+    canvas_w, canvas_h = columns * (cell_w + gap) + gap, rows * (cell_h + gap) + gap
+    canvas = bytearray([0x40]) * (canvas_w * canvas_h * 3)
+    for i, tile in enumerate(tiles):
+        if tile is None:
+            continue
+        w, h, rgb = tile
+        x0, y0 = gap + (i % columns) * (cell_w + gap), gap + (i // columns) * (cell_h + gap)
+        for y in range(h):
+            dest = ((y0 + y) * canvas_w + x0) * 3
+            canvas[dest:dest + w * 3] = rgb[y * w * 3:(y + 1) * w * 3]
+    return png_bytes(canvas_w, canvas_h, canvas), layout
 
 
 # --------------------------------------------------------------------------
@@ -982,6 +1052,11 @@ def build_result(script, session, taken, due, alive_at_end, error, elapsed):
             mean = shots[-1]['mean']
             checks.append(dict(check=f'last-shot mean luminance {mean:.0f} within {mean_range}',
                                ok=mean_range[0] <= mean <= mean_range[1]))
+        text = unit.expect.get('text')
+        if text and shots:
+            region, minimum = text
+            count = shots[0].get('regions', {}).get(region, {}).get('count', 0)
+            checks.append(dict(check=f'{region} label visible ({count} px, need {minimum})', ok=count >= minimum))
         keys = owned.get(unit.id, [])
         key_set = set(keys)
         arrival = [t for t, k in link_rows if k in key_set] if keys else []
@@ -1153,6 +1228,21 @@ def cmd_probe(args):
     print('links:', len(session.links), 'pending recipes at stop:', len(session.pending_recipes()))
 
 
+def cmd_contact(args):
+    import glob
+    files = []
+    for pattern in args.files:
+        found = sorted(glob.glob(pattern))
+        files.extend(found if found else [pattern])
+    output = isolated(args.output.parent) / args.output.name
+    sheet, layout = contact_sheet(files, args.columns, args.tile_width)
+    output.write_bytes(sheet)
+    print('wrote', output)
+    for row, column, file in layout:
+        resolved = Path(file).resolve()
+        print(f'  r{row} c{column}  {resolved.relative_to(ROOT) if ROOT in resolved.parents else file}')
+
+
 # --------------------------------------------------------------------------
 # Report: export per-chunk templates, compare with the starter, saturation per unit
 # --------------------------------------------------------------------------
@@ -1290,6 +1380,11 @@ def main(argv=None):
     p.add_argument('--resolution', default='1080p')
     p.add_argument('--msaa', default='2')
     p.add_argument('--no-foreground', action='store_true')
+    ct = sub.add_parser('contact', help='tile screenshots into one PNG for visual review')
+    ct.add_argument('--output', type=Path, required=True)
+    ct.add_argument('--columns', type=int, default=3)
+    ct.add_argument('--tile-width', type=int, default=640)
+    ct.add_argument('files', nargs='+', help='PNG files or glob patterns (kept in the order given)')
     rp = sub.add_parser('report')
     rp.add_argument('--root', type=Path, default=ROOT / 'scratch/content-sweep')
     rp.add_argument('--out', type=Path, required=True)
@@ -1301,7 +1396,7 @@ def main(argv=None):
                     help='the plan fixes the sweep order used by the saturation table')
     args = ap.parse_args(argv)
     {'setup': cmd_setup, 'check': cmd_check, 'run': cmd_run, 'plan-update': cmd_plan_update,
-     'probe': cmd_probe, 'report': cmd_report}[args.command](args)
+     'probe': cmd_probe, 'contact': cmd_contact, 'report': cmd_report}[args.command](args)
 
 
 if __name__ == '__main__':
