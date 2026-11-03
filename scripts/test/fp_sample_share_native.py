@@ -53,6 +53,7 @@ def main():
     driver = r'''
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 typedef unsigned int u32;
 ''' + snippets + r'''
 int main(void) {
