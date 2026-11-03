@@ -30,3 +30,26 @@ The latest attempts across 37 planned chunks took 3,779.1 seconds in aggregate, 
 In plan order, the 71 automatically passing car-studio units account for 2,189 first-seen candidates; the first 10 account for 198 and the last 10 for 397, with a median of 5 per unit. This does not demonstrate saturation: maker-page arrivals account for much of the discovery, and asynchronous loading can attribute a car's links to another interval. The time-ordered per-unit rows use first-seen exported keys before conflict quarantine; their final cumulative count is 7,794, four more than the quarantined delta. Rows, including failures, are in `scratch/content-sweep/studio/report.md`; chunk exports and the delta stay in scratch. There is no reliable extrapolation from these counts to 1,000 GT5 cars.
 
 An exact filename check against the specified local `library-v1/all` catalogue found no matching `.fp` filename for 7,790 of 7,790 candidate records (2,196 distinct fragment identifiers). However, a control found matching filenames for only 3 of the 5,669 already verified starter records. The directory contained 8,142 `.fp` files, and a sampled filename matched its payload SHA-256. This striking control failure makes the candidate count a statement about this directory snapshot only, not evidence that those programs have no asset payload. Reconcile the catalogue's scope and identifiers with the original-volume map before using this statistic to plan GT5 coverage.
+
+## Catalogue reconciliation (2026-11-04, integration branch)
+
+The filename check above compares template `fp.sha256` with catalogue file
+names. Those are different identities: catalogue files are named by the raw
+payload SHA-256, which includes inline constants, while templates use the
+instruction identity from `shader_coverage.fp_identity` (constants zeroed).
+That explains the 3-of-5,669 control result.
+
+Matching by instruction identity instead, using
+`shader_enumerate.fragment_inventory` over the same `library-v1/all` snapshot:
+
+| set | records | distinct FP | FP in catalogue | FP absent | records with an absent FP |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| starter (control) | 5,669 | 1,404 | 1,189 | 215 | 986 |
+| sweep candidates (37 chunks) | 7,790 | 2,196 | 1,974 | 222 | 935 |
+
+The control now agrees with `docs/coverage-enumeration.md` (1,189 / 215).
+Of the 1,605 candidate fragment programs not already in the starter, 1,420
+are in the catalogue, so shader-first enumeration already compiles their
+bytecode. 185 are absent from the catalogue: only observation (this sweep or
+player collection) can supply those. Candidates remain unverified metadata
+until the usual preparation acceptance.
