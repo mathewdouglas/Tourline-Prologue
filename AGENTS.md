@@ -36,13 +36,22 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 206)
+## Start here: state of play (2026-11-03, Phase 207)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 206 is the latest).
+has the evidence, newest phase first (Phase 207 is the latest).
 
 ### What works now
+
+- **v0.2.3 released (Phase 207):** the user accepted the candidate and authorized
+  integration/publication. Main and the immutable v0.2.3 tag were promoted to
+  451a815. One explicit release workflow passed build, package and publication;
+  the public ZIP/checksum download independently passes integrity, executable
+  hashes, helper manifest and all 5,669 starter records. The release build now
+  owns the shared validation mutex. Published v0.2.2 stays unchanged. Later
+  documentation pushes use [skip ci]; caches/evidence remain preserved. See
+  progress for the workflow link, package digest and measured limits.
 
 - **Collected pipelines in the starter:** the local 1080p/16:9 collection
   reviewed to 1,219 unambiguous additions and 0 conflicts; 149 of 1,368 verified
@@ -58,9 +67,11 @@ has the evidence, newest phase first (Phase 206 is the latest).
   with GT5P_OFFLINE_FLUSH=0 rollback; repeated/native/frozen checks pass. Three
   real settings restarts, all F1 handoffs (six-record startup verification and
   preparation cancellation) and a foreground HSR visual route pass. User local
-  acceptance remains pending; this is not whole-game/settings or hitch acceptance.
+  acceptance was subsequently confirmed for release in Phase 207; this is not
+  whole-game/settings or hitch acceptance.
   The retained-cache scan fix passes the real 194,180-entry read-only fixture
-  with ownership/link checks retained. No main merge, tag, release or CI build.
+  with ownership/link checks retained. Phase 206 itself left main, tags and
+  releases unchanged; publication is recorded separately in Phase 207.
 
 - **Faster preparation reads (Phase 205):** four bounded readers check reusable
   shaders/driver hints, persisted cache and pack dependencies; all writes and

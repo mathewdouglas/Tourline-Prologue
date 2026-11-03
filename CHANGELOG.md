@@ -1,7 +1,18 @@
 # Changelog
 
 All notable changes to this port. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-versions follow [SemVer](https://semver.org/). Nothing is tagged yet.
+versions follow [SemVer](https://semver.org/).
+
+## [0.2.3] - 2026-11-03
+
+- Expanded optional preparation to 5,669 verified observed pipelines.
+- Added F1 collection, verification and preparation controls, with visible
+  resumable post-play verification against the player's own game files.
+- Improved cached preparation reads, fragment checkpoints, retained-cache scan
+  bounds and offline completion flushing. Coverage remains partial; gameplay
+  stutters are not claimed solved.
+- [Release notes](docs/release-v0.2.3.md) and
+  [download](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.3).
 
 ## [Unreleased]
 

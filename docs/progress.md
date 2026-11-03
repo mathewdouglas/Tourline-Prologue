@@ -9,6 +9,45 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 207 - v0.2.3 publication (2026-11-03)
+
+After accepting the candidate, the user explicitly authorized main integration
+and v0.2.3 publication. Merge 451a815fb3ee6ef0af7b66210f7d20c0537896b7
+integrates main's player README, branding and v0.2.2 notes with the tested
+candidate. VERSION resolves to 0.2.3. Gameplay/preparation code is unchanged
+from RC3; player documentation and release links are updated. The Windows
+release build now runs through the existing owned validation-mutex wrapper,
+including process preflight and finally release through joined children.
+Three release-trigger tests pass, and the tracked/history policy scan passes
+513 files / 2,208 historical blobs. Normal commit hooks remain enabled.
+
+Main/tag promotion pushes use [skip ci], followed by exactly one explicit
+[v0.2.3 workflow](https://github.com/mathewdouglas/Tourline-Prologue/actions/runs/41557476751).
+Both player and publish jobs pass. The build/validation step takes 111 seconds;
+the Windows job including checkout/upload takes 145 seconds. This is a cached
+release build, not a first-time preparation or gameplay performance result.
+Tag v0.2.3 dereferences 451a815; published v0.2.2 remains eb49fb8. Later
+documentation commits do not move either release tag.
+
+The [published release](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.3)
+is public, non-prerelease and latest. Its ZIP is 92,972,484 bytes / 241 files:
+`tourline-prologue-v0.2.3-windows-x64-451a815fb3ee6ef0af7b66210f7d20c0537896b7.zip`.
+SHA256: `1a7d3218b65a0c7dfae84a6051dd5ff7580154ba9ef97d15f700c4720ca11fc0`.
+An independent public asset download, under the same mutex, passes the shipped
+checksum, ZIP CRC, release.ini version/target and executable hashes, every file
+in the CI helper's packaging manifest, and byte-identical metadata shards with
+all 5,669 records. The helper manifest is a build-time input, not a shipped file;
+the private post-download harness was corrected to read that input before the
+successful check. Evidence: `scratch/v023/published-release-validation.json`;
+the downloaded ZIP/checksum are also retained outside this worktree in
+`C:/Users/GGPC/Downloads/Tourline-Prologue-v0.2.3-release/`.
+
+Phase 206's offline/native and foreground visual acceptance remain the live-use
+evidence; the public rebuild was checked without launching another game. No
+whole-game/all-settings or solved stutter claim is added. The texture-retention
+experiment remains outside the shipping runtime. No cache/evidence or worktree
+is deleted, and no additional release build is dispatched.
+
 ## Phase 206 - Private v0.2.3 candidate and full starter growth (2026-11-03)
 
 The isolated feature branch integrates Phase 198's translated fragment checkpoints
