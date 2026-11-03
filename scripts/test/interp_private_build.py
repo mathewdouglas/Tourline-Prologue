@@ -20,6 +20,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import interp_embed
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = Path(os.environ.get(
@@ -71,6 +72,8 @@ def compile_backend(backend: Path, objects: Path) -> Path:
     if " -c -- " not in command:
         raise SystemExit("unexpected compile command")
     command = command.replace(" -c -- ", " /D_CRT_SECURE_NO_WARNINGS /W0 -c -- ")
+    if (backend.parent / "rsx_interp_dxbc.inc").is_file():
+        command = command.replace(" -c -- ", " /DRSX_SHADER_INTERP_EMBED_DXBC=1 -c -- ")
     subprocess.run(command, cwd=objects, check=True)
     out = objects / "libs" / "video" / "rsx_d3d12_backend.c.obj"
     if not out.is_file():
@@ -145,11 +148,13 @@ def main() -> None:
         shutil.rmtree(fresh)
     fresh.mkdir(parents=True)
     backend = apply_sources(fresh / "tree")
+    if os.environ.get("INTERP_SKIP_PRECOMPILE") != "1":
+        precompile_interpreters(fresh / "tree", ROOT / "scratch" / "interp-cache")
+    if os.environ.get("INTERP_EMBED_DXBC") != "0":
+        interp_embed.generate(backend.parent, ROOT / "scratch" / "interp-cache")
     obj = compile_backend(backend, fresh / "backend-objects")
     exe = link_engine(fresh, obj)
     installed = install_worktree(exe)
-    if os.environ.get("INTERP_SKIP_PRECOMPILE") != "1":
-        precompile_interpreters(fresh / "tree", ROOT / "scratch" / "interp-cache")
     print(installed)
 
 

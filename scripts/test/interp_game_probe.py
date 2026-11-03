@@ -6,6 +6,7 @@ scratch root; the original disc folder is mapped only as the game's input.
 including generic interpreter DXBC. Results and screenshots stay in scratch.
 """
 import argparse
+import hashlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,6 +26,8 @@ def main() -> None:
     p.add_argument("--frame-test", action="store_true")
     p.add_argument("--ab", action="store_true")
     p.add_argument("--cold", action="store_true", help="require a completely empty cache")
+    p.add_argument("--paired-prewarm", action="store_true", help="interpret both stages together while either is pending; precreate starter native classes")
+    p.add_argument("--gamma-read-off", action="store_true", help="diagnostic: bypass only interpreter texture gamma decoding")
     a = p.parse_args()
     cache = a.cache.resolve()
     if not cache.is_relative_to((ROOT / "scratch").resolve()):
@@ -39,32 +42,47 @@ def main() -> None:
     (game / "input").mkdir(parents=True)
     shutil.copyfile(GAME / "input" / "EMAIN.ELF", game / "input" / "EMAIN.ELF")
     shutil.copytree(GAME / "gamedata", game / "gamedata", ignore=shutil.ignore_patterns("contents"))
+    seed = hashlib.sha256()
+    for path in sorted((game / "gamedata").rglob("*")):
+        if path.is_file():
+            seed.update(path.relative_to(game).as_posix().encode("utf-8") + b"\0")
+            with path.open("rb") as stream:
+                seed.update(hashlib.file_digest(stream, "sha256").digest())
+    (owned / "save-seed.sha256").write_text(seed.hexdigest() + "\n", encoding="ascii")
     cache.mkdir(parents=True, exist_ok=True)
-    print(f"private root={game}; cache entries before launch={sum(1 for _ in cache.iterdir())}", flush=True)
+    print(f"private root={game}; cache entries before launch={sum(1 for _ in cache.iterdir())}; save seed={seed.hexdigest()}", flush=True)
     env = ["PS3_VERBOSE=0", "GT5P_NO_SETTINGS=1", "FS_HIDE=grim/file/contents",
            "GT5P_ROOT=" + str(game), "PS3_VFS_ROOT=" + str(game),
            "GT5P_GAME_DIR=" + str(GAME / "input" / "pkg") + "/",
            "RSX_SHADER_CACHE=" + str(cache), "RSX_SHADER_INTERP=" + a.fp,
            "RSX_SHADER_INTERP_VP=" + a.vp, "RSX_SSAA=0", "GT5P_PRESENT_PROF=1",
            "RSX_SHADER_INTERP_STATS=1"]
+    if a.paired_prewarm:
+        if a.fp == "0" or a.vp == "0":
+            p.error("--paired-prewarm requires both stage switches")
+        env += ["RSX_SHADER_INTERP_PAIR=1", "RSX_SHADER_INTERP_PREWARM=1"]
+    if a.gamma_read_off:
+        env += ["RSX_SHADER_INTERP_GAMMA_READ=0"]
     if a.ab:
         dumps = owned / "dumps"
         dumps.mkdir()
-        env += ["RSX_SHADER_INTERP_AB=1", "CELLMARK_DUMP=12", "CELLMARK_DUMP_SKIP=100",
-                "CELLMARK_DUMP_MINDRAWS=1000", "CELLMARK_DUMP_DIR=" + str(dumps)]
+        env += ["RSX_SHADER_INTERP_AB=1", "CELLMARK_DUMP=12", "CELLMARK_DUMP_SKIP=20",
+                "CELLMARK_DUMP_MINDRAWS=2000" if a.route == "dealer" else "CELLMARK_DUMP_MINDRAWS=1000",
+                "CELLMARK_DUMP_DIR=" + str(dumps)]
     args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
     if a.route == "dealer":
-        args += [str(ROOT / "scripts" / "test" / "winshot.ps1"), "-Tag", a.tag, "-Settle", "15",
+        args += [str(ROOT / "scripts" / "test" / "winshot.ps1"), "-Tag", a.tag,
+                 "-Settle", "0" if a.cold else "15", "-Shots", "12" if a.cold else "1", "-Gap", "1",
                  "-Engine", str(ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe"),
-                 "-GameRoot", str(game), "-TimeoutSec", "900"]
+                 "-GameRoot", str(game), "-TimeoutSec", "180", "-MenuDelaySec", "30" if a.cold else "0"]
     else:
         args += [str(ROOT / "scripts" / "test" / "race.ps1"), "-Track", "HighSpeedRing",
                  "-Tag", a.tag, "-Seconds", str(a.seconds or (60 if a.frame_test else 35)),
                  "-SampleDelay", "12", "-RaceShots", "12",
                  "-Engine", str(ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe"),
-                 "-GameRoot", str(game)]
+                 "-GameRoot", str(game), "-GridTimeoutSec", "240", "-MenuDelaySec", "30" if a.cold else "0"]
         if a.frame_test:
-            args += ["-FrameTest", "-SampleDelay", "45"]
+            args += ["-FrameTest", "-SampleDelay", "45", "-RequireForeground", "-IntroShots"]
             # PowerShell accepts each named parameter only once.
             i = args.index("-SampleDelay")
             del args[i:i + 2]

@@ -5,6 +5,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param([string]$Tag = "win", [int]$Settle = 20, [int]$Shots = 1, [int]$Gap = 2,
       [string]$Engine = "", [string]$GameRoot = "", [int]$TimeoutSec = 90,
+      [ValidateRange(0,120)][int]$MenuDelaySec = 0,
       [Parameter(ValueFromRemainingArguments = $true)] $Vars)
 . "$PSScriptRoot\milestone.ps1"
 Add-Type -AssemblyName System.Drawing
@@ -20,6 +21,12 @@ if (-not $Engine) { $Engine = "$root\build\gt5p.exe" }
 if (-not $GameRoot) { $GameRoot = $root }
 $dir = "$root\scratch\pv"; New-Item -ItemType Directory -Force $dir | Out-Null
 $set = @{ GT5P_NO_SETTINGS = "1"; FS_HIDE = "grim/file/contents"; PS3_VERBOSE = "0"; PAD_HOLD = $DealerHold; GT5P_PROFVIEW = "0" }
+if ($MenuDelaySec) {
+    $set['PAD_HOLD'] = [regex]::Replace($DealerHold, '@TopMenuTemplate\+(\d+)-(\d+)', {
+        param($m)
+        "@TopMenuTemplate+$([int]$m.Groups[1].Value + 1000*$MenuDelaySec)-$([int]$m.Groups[2].Value + 1000*$MenuDelaySec)"
+    })
+}
 foreach ($v in $Vars) { if (-not $v) { continue }; $k, $val = "$v" -split "=", 2; $set[$k] = $val }
 try {
 if (@(Get-Process gt5p -ErrorAction SilentlyContinue).Count) { throw "Another gt5p.exe is running; no process was stopped" }

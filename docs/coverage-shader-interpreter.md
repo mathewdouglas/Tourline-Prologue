@@ -29,8 +29,8 @@ The overlay is `patches/ps3recomp-shader-interp.patch`, applied after
 `scripts/test/interp_private_build.py`. The 16 input/sample/target
 variants are compiled once by `scripts/test/fp_interp_precompile.c`
 (D3DCompile flags 0) into the private shader cache. In-game `force`
-screenshots are below. `RSX_SHADER_INTERP=1` and the vertex interpreter
-are not run yet.
+screenshots are below. Later vertex and pending-only results, including
+failed acceptance checks, are recorded below.
 
 Runtime facts below are from a private copy of ps3recomp `4e8f3ca8` plus
 `patches/ps3recomp-4e8f3ca8-local.patch` (`libs/video/rsx_fp_decompiler.c`,
@@ -602,11 +602,11 @@ and depth-export multiply that by a small factor. The implementation records
 the distinct interpreter keys it actually creates (`RSX_SHADER_INTERP_LOG=1`)
 but does not yet precreate the ones seen.
 
-Current replay pipelines are created on first use. Fragment-only interpretation
+Without opt-in prewarming, replay pipelines are created on first use. Fragment-only interpretation
 also keys on the specialized vertex bytecode; vertex-only interpretation keys
 on the specialized pixel bytecode. Only combined interpretation removes both
-program identities. First-use driver work can still hitch, and there is no
-implemented device-init precreate list. The roughly 4 ms driver cost above is
+program identities. First-use driver work can still hitch. The paired prewarm
+experiment below adds a bounded device-init list. The roughly 4 ms driver cost above is
 earlier preparation evidence, not a bound measured for these generic pipelines.
 Stage 3 must measure it before claiming that compilation stalls are removed.
 
@@ -782,6 +782,73 @@ async policy: missing draws, frame times (`scripts/test/race.ps1 -FrameTest`),
 and F3 logs. Interpreter pipelines for the observed native classes are
 created ahead of that run if the stage 1 log says that is what removes the
 hitch.
+
+### Stage 3 development checkpoint (2026-11-04)
+
+The private builder embeds 18 original generic shaders (1,241,616 bytes), keyed
+by exact HLSL/target/flags, through `scripts/test/interp_embed.py`. The generated
+header and DXBC remain under scratch and are never tracked. This makes an empty
+`RSX_SHADER_CACHE` test genuinely empty, without an eight-minute generic compile
+at each launch. `INTERP_EMBED_DXBC=0` builds without this payload;
+`RSX_SHADER_INTERP_EMBED=0` uses the existing cache/compiler path instead.
+`INTERP_SKIP_PRECOMPILE=1` reuses existing generic build inputs, with mandatory
+source-key/size checks; otherwise the builder compiles them before linking.
+An embedded load's elapsed time is still included in the legacy `compile` log
+field; that field alone does not establish a D3DCompile call.
+
+Locked `interp-cold-dealer-pair-r2`: separate caches initially contain zero
+entries, copied-save hashes match, 720p/default dealership MSAA, SSAA off.
+Both routes delay menu navigation by 30 seconds so first-use hitches do not
+lose short pad taps; first DealerTopRoot is reached in 63.9 / 64.4 seconds.
+Twelve shots follow at nominal one-second gaps. Baseline cumulative omissions:
+837 replay VP, 408,704 replay FP, 788,510 recording-time GPU VP. Independent
+`RSX_SHADER_INTERP=1 RSX_SHADER_INTERP_VP=1`: 42 replay VP, 91 replay FP,
+zero recording VP; 67,196 interpreted FP and 28,404 interpreted VP attempts.
+Reject/arena/PSO-failure counters stay zero; 133 fragment gap attempts retain the
+specialized path. 166 interpreter PSOs take 5,867 ms total / 689 ms maximum in
+driver calls. The first baseline images visibly lack materials; the fallback
+images retain more of the cars/background during their logo transition. Their
+animations and random car colours differ, so these are not equal-input pixel
+comparisons or unique-object counts. The earlier `interp-embedded-cold-dealer-pair`
+is rejected: the fallback lost navigation taps and never reached the dealer.
+
+Opt-in `RSX_SHADER_INTERP_PAIR=1`, requiring both stage switches, interprets both
+stages together while either shader/driver pipeline is pending. It explicitly
+overrides independent-stage selection to permit a program-independent native
+pipeline. Known fragment gaps can still use a specialized fragment stage.
+`RSX_SHADER_INTERP_PREWARM=1` precreates both input signatures for the 133
+native/input classes derived from the verified starter metadata (266 PSOs).
+It requires the private build's embedded metadata; unknown classes retain the
+bounded first-use path. Both options default off; independent `=1` is unchanged.
+
+Locked `interp-paired-prewarm-dealer-ab` compiles the private engine and runs
+a third empty-cache dealership visit with the same save hash. Prewarm creates
+266 pipelines without failure: 31 ms wall, 14 ms aggregate driver, 9 ms maximum
+on this already-warm driver cache. After startup: eight additional PSOs, 1 ms
+aggregate / 1 ms maximum driver work; 155,813 FP and 155,814 VP interpreted
+attempts; recording VP omissions zero, replay VP/FP omissions 53/110, 164 known
+fragment gaps. Encoder/arena/PSO failures stay zero. Shader load fields are zero.
+This removes observed generic PSO calls from these draws by moving known classes
+to startup; it is not a first-ever GPU-driver-cache-cold result or a universal
+frame-time/stutter win. The late GPU window is still 36.85 ms mean / 52.68 ms
+maximum while substantial interpretation remains active.
+
+The subsequent both-force alternating-frame capture exposes an unresolved
+fragment correctness gap: the ACURA wordmark reaches red 13 on interpreted
+frames versus 39 on specialized frames. Fragment-only A/B reproduces it;
+vertex-only A/B holds 39 on both paths. Eleven adjacent-pair whole-frame mean
+absolute differences are 0.91-1.20 / 255 (motion included), maximum 184; the
+fixed title crop differs by at most 2 / 255. These numbers do not establish
+pixel equivalence. `interp_compare_frames.py` uses only the standard library
+to read the renderer's 24-bit BMPs. The first analysis attempt failed because
+Pillow was unavailable; the dependency is removed. Gamma-read isolation is
+pending under `RSX_SHADER_INTERP_GAMMA_READ=0` (diagnostic only).
+
+The first cold HSR FrameTest was rejected at the grid because foreground
+activation failed. It supplies no accepted timing result. The test script now
+attaches native input queues only while activating its owned game window;
+the foreground-loss guard remains strict. HSR baseline/fallback FrameTests,
+exact epilogue equivalence and the wordmark correction remain pending here.
 
 ## What stays out
 

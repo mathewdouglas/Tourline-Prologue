@@ -42,6 +42,8 @@ param([ValidateSet("HighSpeedRing", "Daytona", "FujiSpeedwayF")][string]$Track =
       [ValidateRange(0,3600)][int]$GridIdleSeconds = 0, [switch]$Cpu,
       [ValidateRange(0,3600)][int]$RaceShots = 0, [switch]$FrameTest,
       [ValidateRange(0,3600)][int]$SampleDelay = 25,
+      [ValidateRange(60,1800)][int]$GridTimeoutSec = 240,
+      [ValidateRange(0,120)][int]$MenuDelaySec = 0,
       [string]$Engine = "", [string]$GameRoot = "", [string]$OutputDirectory = "",
       [switch]$PlayerLauncher,
       [switch]$ContributionCollector,
@@ -73,7 +75,22 @@ public class RaceWindowShot {
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h,System.Text.StringBuilder text,int count);
  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int how);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+ [DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr h);
+ [DllImport("user32.dll")] static extern bool AttachThreadInput(uint one,uint two,bool attach);
+ [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ public static bool ActivateOwnedWindow(IntPtr h) {
+  if(GetForegroundWindow()==h)return true;
+  uint unused, current=GetCurrentThreadId();
+  uint foreground=GetWindowThreadProcessId(GetForegroundWindow(),out unused);
+  uint target=GetWindowThreadProcessId(h,out unused);
+  bool a=foreground!=0 && foreground!=current && AttachThreadInput(current,foreground,true);
+  bool b=target!=0 && target!=current && target!=foreground && AttachThreadInput(current,target,true);
+  try { ShowWindow(h,9); BringWindowToTop(h); SetActiveWindow(h); SetForegroundWindow(h); }
+  finally { if(b)AttachThreadInput(current,target,false); if(a)AttachThreadInput(current,foreground,false); }
+  return GetForegroundWindow()==h;
+ }
  public static IntPtr GameWindow(int pid) {
   IntPtr result=IntPtr.Zero;
   EnumWindows((h,data)=>{uint owner;GetWindowThreadProcessId(h,out owner);
@@ -167,6 +184,12 @@ if ($FrameTest) {
     if (-not $PSBoundParameters.ContainsKey("Seconds")) { $Seconds = 60 }
     if (-not $PSBoundParameters.ContainsKey("RaceShots")) { $RaceShots = 20 }
 }
+if ($MenuDelaySec) {
+    $hold = [regex]::Replace($hold, '@TopMenuTemplate\+(\d+)-(\d+)', {
+        param($m)
+        "@TopMenuTemplate+$([int]$m.Groups[1].Value + 1000*$MenuDelaySec)-$([int]$m.Groups[2].Value + 1000*$MenuDelaySec)"
+    })
+}
 $set = @{ GT5P_NO_SETTINGS = "1"; FS_HIDE = "grim/file/contents"; PS3_VERBOSE = "0";
           GT5P_PROFVIEW = "0"; PAD_HOLD = $hold; GT5P_RESOLUTION = "720p";
           RSX_MSAA = "2"; GT5P_PRESENT_PROF = "1"; RSX_PSO_TIMING = "1" }
@@ -243,7 +266,7 @@ try {
     }
     if ($gameWindow -eq [IntPtr]::Zero) { throw "Owned game window was not created" }
     [RaceWindowShot]::ShowWindow($gameWindow,5) | Out-Null
-    [RaceWindowShot]::SetForegroundWindow($gameWindow) | Out-Null
+    [RaceWindowShot]::ActivateOwnedWindow($gameWindow) | Out-Null
     foreach ($k in $set.Keys) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
     $tail = New-LogTail $gameOut
     if ($PlayerLauncher) {
@@ -264,11 +287,11 @@ try {
             Start-Sleep -Milliseconds 500
         }
     }
-    if ((Wait-Milestone $p $tail "QuickArcadeRoot" 240) -lt 0) { throw "Starting grid not reached" }
+    if ((Wait-Milestone $p $tail "QuickArcadeRoot" $GridTimeoutSec) -lt 0) { throw "Starting grid not reached" }
     $gridMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     if ($RequireForeground) {
         [RaceWindowShot]::ShowWindow($gameWindow,5) | Out-Null
-        [RaceWindowShot]::SetForegroundWindow($gameWindow) | Out-Null
+        [RaceWindowShot]::ActivateOwnedWindow($gameWindow) | Out-Null
         Assert-RaceForeground
     }
     if ($GridIdleSeconds -gt 0) { Watch-RaceIdle $p "grid" ($GridIdleSeconds + 4) }
