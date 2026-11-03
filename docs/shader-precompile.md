@@ -5,6 +5,16 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Development after v0.2.3 reduces vertex pipe polling from 100 ms to 10 ms,
+keeping the two-worker/job/memory limits. `GT5P_PREPARE_VERTEX_POLL_MS=100`
+restores the old interval. A matching development engine also skips replaying
+warmup recipes immediately after an offline batch, before that process exits.
+The startup barrier, exact batch creation, recipe recording and persisted-cache
+checks stay enabled. `GT5P_PREPARE_OFFLINE_WARMUP=1` restores the exit replay.
+Normal gameplay startup warmup is unchanged; both engine and helper updates are
+needed for the combined improvement. See Phase 208 in the progress log for
+fresh-compilation evidence and its limits. This is not in published v0.2.3.
+
 Preparation uses up to four bounded readers for cache reuse, persisted-cache
 validation and shader-pack dependencies (Phase 205). Publication and cancellation
 stay on the owner, and every shader/native/persistence check remains enabled.

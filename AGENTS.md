@@ -36,13 +36,24 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 207)
+## Start here: state of play (2026-11-03, Phase 208)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 207 is the latest).
+has the evidence, newest phase first (Phase 208 is the latest).
 
 ### What works now
+
+- **Fresh preparation speed (Phase 208, development):** vertex worker polling
+  drops from 100 to 10 ms, and offline batches skip redundant recipe replay
+  immediately before exit. Normal gameplay warmup and two-worker limits stay
+  unchanged. One ordered application-cache-cold 5,669-record pair measures
+  731.20 -> 631.59 seconds (13.6% less time), with identical shader packs and
+  every fresh native request/persisted blob verified. Frozen subset cancellation,
+  resume and rollback pass. All new test caches, private build/helper outputs
+  and PyInstaller caches are removed; timing metadata remains. Both new engine
+  and helper are needed; rollback switches and limits are documented in progress.
+  Published v0.2.3 stays unchanged; no live stutter or universal speed claim.
 
 - **v0.2.3 released (Phase 207):** the user accepted the candidate and authorized
   integration/publication. Main and the immutable v0.2.3 tag were promoted to

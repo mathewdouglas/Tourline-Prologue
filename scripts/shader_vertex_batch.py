@@ -41,7 +41,7 @@ MAX_JOBS = 4096
 JOB_SECONDS = 180
 START_SECONDS = 60
 SHUTDOWN_SECONDS = 10
-POLL_SECONDS = 0.1
+POLL_SECONDS = 0.01
 CREATE_SUSPENDED = 0x00000004
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_UNICODE_ENVIRONMENT = 0x00000400
@@ -66,6 +66,14 @@ LIMITS = dict(workers=MAX_WORKERS, program_bytes=MAX_PROGRAM, source_bytes=MAX_S
 
 class ProtocolError(ValueError):
     """The worker stream can no longer be attributed to one request."""
+
+
+def poll_seconds(environ=None):
+    """Bounded pipe polling; 100 restores historical scheduling latency."""
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_VERTEX_POLL_MS', '10')
+    if value not in ('10', '100'):
+        raise ValueError('GT5P_PREPARE_VERTEX_POLL_MS must be unset, 10, or 100')
+    return POLL_SECONDS if value == '10' else 0.1
 
 
 def player_mode(environ=None):
@@ -478,13 +486,14 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
         raise ValueError('Vertex compiler worker cap exceeded')
     shader_translation.overlay(translation)
     worker_limit = MAX_WORKERS if workers is None else workers
+    interval = poll_seconds()
     monotonic = monotonic or time.monotonic
     sleep = sleep or time.sleep
     started = time.perf_counter()
     selected, duplicates = _select_jobs(jobs, derive)
     report = dict(mode='batch', translation=translation, derive=derive, requested_variants=len(jobs),
                   duplicate_variants=duplicates, compiled_variants=0, failed_variants=0,
-                  workers=0, launches=0, seconds=0, limits=dict(LIMITS), inflight_jobs_max=0,
+                  workers=0, launches=0, seconds=0, poll_seconds=interval, limits=dict(LIMITS), inflight_jobs_max=0,
                   inflight_bytes_max=0, ownership=None)
     compiled, failures = {}, {}
     pool = None
@@ -516,7 +525,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     break
                 if not READY.startswith(buf) or not worker.alive():
                     raise ProtocolError('Unknown vertex worker preamble')
-                sleep(POLL_SECONDS)
+                sleep(interval)
         pending = list(selected)
         inflight = {}
         buffers = {}
@@ -617,7 +626,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     report['failed_variants'] += 1
                 progressed = True
             if not progressed:
-                sleep(POLL_SECONDS)
+                sleep(interval)
         shutdown = monotonic() + SHUTDOWN_SECONDS
         for worker in workers:
             if worker.alive():
@@ -633,7 +642,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     worker.read_available()
                 except OSError:
                     pass
-            sleep(POLL_SECONDS)
+            sleep(interval)
         return compiled, failures, report
     finally:
         if pool is not None:

@@ -17,6 +17,9 @@ completed build; normal CI continues using its own build/gt5p.exe.
 For a tool-only re-freeze, `build_preparer.py --decoder <verified decoder.dll>`
 reuses the unchanged production decoder rather than needlessly changing its
 checkpoint identity. CI builds it from the pinned runtime by default.
+PyInstaller's configuration/binary cache is confined to the requested helper
+output directory, so a private temporary build can clean up its own cache
+without changing a shared host cache.
 
 The dedicated local runner is provisioned and validated. The first cold build
 took 17m21s; a cached build including checks, packaging and upload took 1m10s.

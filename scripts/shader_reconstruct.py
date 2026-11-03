@@ -149,6 +149,14 @@ class NativeCompiler:
         return source, dxbc
 
 
+def offline_warmup(environ=None):
+    """Native batches already create/persist their PSOs; do not replay on exit."""
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_OFFLINE_WARMUP', '0')
+    if value not in ('0', '1'):
+        raise ValueError('GT5P_PREPARE_OFFLINE_WARMUP must be unset, 0, or 1')
+    return value
+
+
 def offline_env(game_root, cache):
     env = {k: v for k, v in os.environ.items()
            if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
@@ -156,6 +164,7 @@ def offline_env(game_root, cache):
     env.update(GT5P_ROOT=str(game_root), GT5P_NO_SETTINGS='1', PS3_VERBOSE='0',
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',
+               GT5P_PREPARE_OFFLINE_WARMUP=offline_warmup(),
                RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS='2', RSX_PSO_PROVENANCE='0')
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'

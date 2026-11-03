@@ -9,6 +9,75 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 208 - Fresh preparation speed and disposable validation (2026-11-03)
+
+The fresh path now polls the existing two vertex workers every 10 ms instead
+of 100 ms. `GT5P_PREPARE_VERTEX_POLL_MS=100` restores the previous interval.
+Worker count, queue ownership, protocol, cancellation, timeout and memory caps
+are unchanged. Separately, the native startup barrier still executes the exact
+offline preparation batch, but skips its subsequent recipe replay when
+`GT5P_SHADER_PRECOMPILE_ONLY=1`: those pipelines were already created and
+persisted, and the process is about to exit. `GT5P_PREPARE_OFFLINE_WARMUP=1`
+restores replay. Ordinary gameplay retains its existing warmup behavior.
+Disabling `RSX_SHADER_WARMUP` cannot replace this guard: that flag also enables
+the startup barrier which invokes offline preparation. Completion flushing and
+strict native/persisted-blob acceptance remain intact. New engine and helper
+are required for the combined improvement; older engines remain correct.
+
+Two complete profiled runs use the original packed game files, default
+translation, the same 5,669-record starter, observed warmup plan and shader
+packs, four I/O readers and two compiler workers per stage. Both start in fresh
+application-cache directories, import no old shader/driver blobs, compile all
+482 vertex variants and 3,696 exact fragment requests (3,609 canonical compiler
+jobs), and prepare all 5,669 native requests in 4,096/1,573 chunks. Native calls
+use zero cached blobs. Every requested native key and persisted blob passes
+verification. Menu/race pack hashes and byte counts are identical.
+
+| Measured elapsed time | Baseline | Improved |
+| --- | ---: | ---: |
+| Full preparation | 731.20 s | 631.59 s |
+| Vertex compiler report | 198.82 s | 185.37 s |
+| Fragment compiler report | 202.44 s | 204.67 s |
+| Native stage wall time | 250.62 s | 150.47 s |
+
+Total preparation falls 99.60 seconds / 13.62%. Baseline exit replay attempts
+9,765 recipes across the two native chunks and reports 76.110 seconds of replay;
+the improved run performs none. These are overlapping report scopes, not an
+additive time breakdown. Hardware: i5-12400F (6 cores/12 threads), 16 GB RAM,
+RTX 4060, driver 32.0.16.1088, `PS3_VERBOSE=0`. This is one ordered local pair,
+baseline first, with profiling enabled. OS/driver caches were preserved, and
+native engine paths differ; it is not an OS/driver-cold, ABBA or universal speed
+result. Fragment timing does not improve. No live rendering, hitch reduction,
+whole-game or all-settings claim follows.
+
+The fresh native harness and private-build acceptance harness are checked in
+under `scripts/test/preparation_{fresh_native,speed_acceptance}.py`. The latter
+compiles only the changed presentation translation unit into private output,
+links read-only matching CI objects, and builds a private frozen helper. No
+game copy or shared runtime output is written. Native policy tests cover 29
+cases. Source 32-record fresh/rollback proofs pass with the same worker caps.
+Frozen packed-game ultrawide subset acceptance cancels after eight saved
+fragment results, resumes all eight, verifies 32 native calls with zero cached
+blobs, and passes old selection/source preservation, chunk rollback reuse and
+invalid-configuration rejection. Vertex scheduler, reconstruction/environment
+and package rejection regressions pass. Every test/build owns the shared named
+validation mutex through child completion and cleanup.
+
+At the user's request, all newly generated test shader/driver/raw-bytecode
+caches, private engine/object/helper outputs and private PyInstaller caches are
+deleted after validation. Existing player/driver caches and original inputs are
+untouched. Helper builds now place PyInstaller's cache under their selected
+output directory so private builds can clean it too. Both fresh summaries
+assert `test_cache_removed`; the acceptance summary asserts
+`private_build_removed`. Retained ignored evidence in
+`scratch/preparation-speed-208/` consists of timing/count/hash JSON and small
+controller logs, including `fresh-baseline.json`, `fresh-optimized.json`,
+`fresh-rollback-32.json`, `frozen-validation.json` and `acceptance.json`.
+Published v0.2.3, starter/maps, renderer/runtime patches and async draw policy
+stay unchanged. Development commits/pushes use `[skip ci]`; no release or CI
+build is requested. Remaining speed work should profile inventory and fragment
+compilation with the same cache controls rather than increase worker caps blindly.
+
 ## Phase 207 - v0.2.3 publication (2026-11-03)
 
 After accepting the candidate, the user explicitly authorized main integration

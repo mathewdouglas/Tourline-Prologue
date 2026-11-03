@@ -166,6 +166,11 @@ def clock():
 
 
 # Mode, command and ownership flags. No compiler and no process.
+assert batch.poll_seconds({}) == .01
+assert batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': '10'}) == .01
+assert batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': '100'}) == .1
+for invalid_interval in ('', '0', '1', '20', '1000', '010', '10 ', 'auto'):
+    assert_raises(lambda: batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': invalid_interval}), ValueError)
 assert batch.player_mode({}) == 'batch'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '0'}) == 'serial'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '1'}) == 'batch'
@@ -319,6 +324,34 @@ assert report['inflight_jobs_max'] <= 2 and report['compiled_variants'] == 3
 assert report['limits']['workers'] == 2
 assert seen_kinds == ['exact', 'exact', 'exact']
 assert report['translation'] == 'default' and report['derive'] is False and report['duplicate_variants'] == 0
+
+# Delay complete replies independently of the scheduler. Both intervals must
+# return identical verified results, with unchanged two-worker ownership/caps.
+def delayed_replies(interval):
+    now, wait = clock()
+    owned = []
+    class DelayedWorker(ScriptWorker):
+        ready_at = 0
+        def read_available(self):
+            return super().read_available() if now() >= self.ready_at else b''
+    def delayed(echoed, payload, worker):
+        worker.ready_at = now() + .015
+        return answer(echoed, payload, worker)
+    def open_delayed(count, decoder, work):
+        owned.extend(DelayedWorker(delayed) for _ in range(count))
+        return Pool(owned), owned
+    with tempfile.TemporaryDirectory() as folder, patch.dict(batch.os.environ, {'GT5P_PREPARE_VERTEX_POLL_MS': interval}):
+        result = batch.compile_jobs(requests, 'decoder.dll', Path(folder), opener=open_delayed,
+                                    monotonic=now, sleep=wait)
+    assert all(w.retired for w in owned)
+    return result, now()
+
+(quick_codes, quick_errors, quick_report), quick_time = delayed_replies('10')
+(old_codes, old_errors, old_report), old_time = delayed_replies('100')
+assert quick_codes == old_codes and not quick_errors and not old_errors
+assert quick_time < old_time
+assert quick_report['limits'] == old_report['limits'] and quick_report['workers'] == old_report['workers'] == 2
+assert quick_report['poll_seconds'] == .01 and old_report['poll_seconds'] == .1
 
 def garbage(echoed, payload, worker):
     return b'GT5P_VP_UNKNOWN_V1\n'

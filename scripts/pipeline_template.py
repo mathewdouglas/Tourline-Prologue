@@ -355,6 +355,11 @@ def packs_enabled(choice, warmup_plan):
 
 
 def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False):
+    from shader_reconstruct import offline_warmup
+    from shader_vertex_batch import poll_seconds
+    offline_warmup()
+    if vertex_mode == 'batch':
+        poll_seconds()
     from pipeline_translation import MODES, fragment_batch_size
     if translation not in MODES:
         raise ValueError('Unsupported preparation translation')

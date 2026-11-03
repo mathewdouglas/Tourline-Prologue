@@ -10,6 +10,22 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
 
+assert m.offline_warmup({}) == m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'0'}) == '0'
+assert m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'1'}) == '1'
+for warmup in ('','2','auto','1 ','01'):
+    try:
+        m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':warmup})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Invalid offline warmup choice accepted')
+with patch.dict(os.environ, {'GT5P_PREPARE_OFFLINE_WARMUP':'0','RSX_SHADER_WARMUP':'1','RSX_SHADER_WORKERS':'32'}):
+    env = m.offline_env(Path('private-game'), Path('private-cache'))
+    assert env['RSX_SHADER_WARMUP']=='1' and env['GT5P_PREPARE_OFFLINE_WARMUP']=='0'
+    assert env['RSX_SHADER_WORKERS']=='2' and env['RSX_PSO_ASYNC']=='0'
+with patch.dict(os.environ, {'GT5P_PREPARE_OFFLINE_WARMUP':'1'}):
+    assert m.offline_env(Path('private-game'), Path('private-cache'))['GT5P_PREPARE_OFFLINE_WARMUP']=='1'
+
 with patch.dict(os.environ, {'GT5P_OFFLINE_FLUSH':'0', 'GT5P_NO_PRESENT':'1', 'RSX_PSO_ASYNC':'1'}):
     env = m.offline_env(Path('private-game'), Path('private-cache'))
     assert env['GT5P_OFFLINE_FLUSH']=='0' and env['RSX_PSO_ASYNC']=='0'
