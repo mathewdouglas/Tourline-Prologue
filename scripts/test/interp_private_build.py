@@ -8,8 +8,9 @@ includes resolve there. The reference ninja -I paths still supply the rest.
 
 Also builds fp_interp_precompile.c and vp_interp_precompile.c from the patched
 tree and runs them into scratch/interp-cache, so the interpreter's own DXBC is
-in the private shader cache before the first game launch (an unchanged source
-hits the existing entries in about a second).
+in the private shader cache before the first game launch. This helper compiles
+all variants on each invocation; INTERP_SKIP_PRECOMPILE=1 skips that expensive
+step when the private cache already contains bytecode for the same sources.
 
 Run from an x64 VS environment. The engine link is heavy: call this through
 run_locked.py. Prints the exe path on stdout.

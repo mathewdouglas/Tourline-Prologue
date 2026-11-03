@@ -711,6 +711,35 @@ bytecode references in the shared interpreter pipeline cache. A fresh locked
 build and the new synthetic IA/GPU-fetch WARP output comparison are pending.
 The synthetic comparison is not a catalogue or rasterization proof.
 
+### Stage 2 first acceptance (2026-11-04)
+
+Locked `interp-vp-warp-valid-end` passes 108/108 synthetic comparisons over
+all 14 vertex outputs (four invocations per case), using both IA and GPU-fetch
+variants. Worst absolute error is 4.76837158e-7; the acceptance tolerance is
+1e-4 times max(1, abs(reference)). Cases include vector/scalar arithmetic,
+predication, branches/calls, all seven attribute formats, disabled attributes
+and unaligned fetch. Three failures in the first draft were invalid fixtures
+with END before their branch target; the corrected programs pass. No runtime
+shader change was needed for those failures.
+
+The first live force-VP dealership shot was almost black. The new path had
+selected fetch/IA from `dr->gpu_fetch`, a stale byte in reused CPU records.
+Both interpreter combinations now use the renderer's authoritative `gf_slot`
+generation marker. Locked `interp-vp-slotfix` rebuilds and reaches DealerTopRoot
+in 34.5 s; its inspected PrintWindow shot has both NSX cars, reflections,
+manufacturer/title/car text and the blue studio background. Last GPU window:
+8.68 ms mean / 9.18 ms maximum, title 30.00 fps. Final vertex counters:
+1,351,168 draws, fallback/miss/arena/PSO-failure all zero, 74 seen programs,
+183 KiB peak arena, 16 ms cached bytecode loading. These are cumulative attempts,
+not distinct draw or pipeline counts. Specialized fragment work still omitted
+3,061 replay attempts in this warm-cache vertex-only run.
+
+The earlier failed visual run also exposed first-use generic driver PSO cost:
+3,688 ms total, 751 ms maximum. The corrected run's 170 pipelines cost 26 ms
+total / 4 ms maximum with the driver already warmed. This is not evidence that
+cold first-use hitches are gone. HSR, a starter-program WARP comparison and
+pending-only empty-cache runs remain to be validated.
+
 `RSX_SHADER_INTERP_STATS=1` is an independent, default-off diagnostic for the
 async baseline and the interpreter paths. Every five seconds `[interp-pending]`
 reports cumulative replay vertex/fragment omissions, recording-time GPU-fetch

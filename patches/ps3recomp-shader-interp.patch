@@ -1,5 +1,5 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index b0a23fc..4baf481 100644
+index b0a23fc..b58e7dc 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
 @@ -236,8 +236,54 @@ typedef struct {
@@ -49,7 +49,7 @@ index b0a23fc..4baf481 100644
 +static void vp_ps_hold_set(ID3DBlob* pb);
 +static ID3DBlob* vp_ps_hold_ref(void);
 +static int vp_interp_stage(const D3D12DrawRecord* dr, u32* hdr_off);
-+static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
++static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, u32 draw_i, int nrt, DXGI_FORMAT rtfmt,
 +    u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil, ID3DBlob* ps);
 +static void vp_interp_bind(u32 hdr_off, int on_fp_sig);
 +static u32 s_vp_seen_hash;
@@ -271,7 +271,7 @@ index b0a23fc..4baf481 100644
 +                 * when the pixel shader is itself still compiling. */
 +                if (!use_interp && vp_stage) {
 +                    ID3DBlob* hold = vp_ps_hold_ref();
-+                    ID3D12PipelineState* ip = hold ? vp_interp_pso(dr, _nrt, _rtfmt, dr->blend_key,
++                    ID3D12PipelineState* ip = hold ? vp_interp_pso(dr, d, _nrt, _rtfmt, dr->blend_key,
 +                        _cmask, dr->cull, _cube, _sten, hold) : NULL;
 +                    if (hold) hold->lpVtbl->Release(hold);
 +                    if (ip) { dpso = ip; use_vp = 1; s_fp_pending = 0; }
@@ -856,7 +856,7 @@ index 0000000..6011b6f
 +#endif
 diff --git a/libs/video/rsx_fp_interp_backend.inc b/libs/video/rsx_fp_interp_backend.inc
 new file mode 100644
-index 0000000..a3f531a
+index 0000000..e095bd7
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp_backend.inc
 @@ -0,0 +1,727 @@
@@ -1538,7 +1538,7 @@ index 0000000..a3f531a
 +    if (!ps) return NULL;
 +    ID3DBlob* vsb = NULL; int gpu = 0;
 +    if (vp_stage) {
-+        gpu = dr->gpu_fetch ? 1 : 0;
++        gpu = gf_slot(draw_i) ? 1 : 0;
 +        vsb = vp_interp_blob(gpu);
 +    } else {
 +        int vs_idx = dr->vs_idx;
@@ -1634,10 +1634,10 @@ index 0000000..6886810
 +#endif
 diff --git a/libs/video/rsx_vp_interp_backend.inc b/libs/video/rsx_vp_interp_backend.inc
 new file mode 100644
-index 0000000..4e1f0d5
+index 0000000..52b6dc2
 --- /dev/null
 +++ b/libs/video/rsx_vp_interp_backend.inc
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,383 @@
 +/* Vertex-interpreter replay. Included at the bottom of rsx_d3d12_backend.c.
 + * RSX_SHADER_INTERP_VP unset or 0 returns before any allocation, signature,
 + * or binding. Force replaces the vertex stage and keeps the specialized
@@ -1999,10 +1999,12 @@ index 0000000..4e1f0d5
 +}
 +
 +/* Vertex interpreter with the draw's specialized pixel shader (ps). */
-+static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
++static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, u32 draw_i, int nrt, DXGI_FORMAT rtfmt,
 +    u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil, ID3DBlob* ps)
 +{
-+    int gpu = dr->gpu_fetch ? 1 : 0;
++    /* Slot generation is authoritative; reused CPU draw records may carry
++     * a stale gpu_fetch byte from an earlier indexed draw. */
++    int gpu = gf_slot(draw_i) ? 1 : 0;
 +    ID3D12PipelineState* pso = interp_get_pso(2, vp_interp_blob(gpu), ps, gpu, s_pso_vmask, nrt, rtfmt,
 +                                              blend, cmask, cull, cube_mask, stencil);
 +    return pso;
