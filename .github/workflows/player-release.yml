@@ -37,7 +37,7 @@ jobs:
           if not defined GT5P_CI_CONFIG exit /b 1
           call "%GT5P_CI_VCVARS%" >nul
           if errorlevel 1 exit /b 1
-          "%GT5P_CI_PYTHON%" scripts\release\ci_build.py --config "%GT5P_CI_CONFIG%"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\test\isolated_validation.ps1 "%GT5P_CI_PYTHON%" scripts\release\ci_build.py --config "%GT5P_CI_CONFIG%"
       - name: Upload only the finished player ZIP
         id: upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

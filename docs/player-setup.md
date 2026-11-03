@@ -1,20 +1,42 @@
 # Player ZIP and first-run setup
 
-The current port version is **v0.2.1**, recorded in the root `VERSION` file. Player ZIPs
-include `port_version=0.2.1` in `release.ini`; its separate `version=03.00` field
+The current port version is **v0.2.3**, recorded in the root `VERSION` file. Player ZIPs
+include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` field
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
-not the port release version. CI names ZIPs `tourline-prologue-v0.2.1-windows-x64-<commit>.zip`.
+not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
+
+## Pipeline tools in v0.2.3
+
+F1 **PC Settings > Debug** offers **Collect pipelines**, **Verify last collection**
+and **Prepare shaders**. Each closes the game before starting its owned tool.
+Collection verifies against your own original files after play; cancellation
+keeps resumable work. Only verified metadata becomes shareable, and nothing is
+uploaded automatically. The starter contains 5,669 verified observed pipelines;
+coverage remains partial. See [v0.2.3 notes](release-v0.2.3.md) and
+[contribution instructions](pipeline-contributions.md).
+
+## Shader packs in v0.2.2
+
+Default-translation preparation writes local menu and race bytecode packs from
+the bundled observed plan after native preparation. That translation is 720p
+and 1080p at 16:9, including the first-run preset. `native-scaled` and
+`ultrawide-native` do not use the plan. `RSX_SHADER_PACK=0` disables runtime
+pack use and does not delete caches. An older unpacked generation stays on
+disk; the new generation can import it. See [v0.2.2 notes](release-v0.2.2.md).
+
+v0.2.2 offers **Prepare now** or **Skip and play** immediately after successful
+first-run file setup, before starting the game. Closing the offer skips
+preparation. Cancelling preparation waits for the owned helper to finish
+cancelling, then starts the game; completed work remains available for resume.
+A preparation failure is reported and normal play remains available. The offer
+does not repeat on ordinary configured launches. Run **Prepare shaders.cmd**
+any time later to prepare or resume. `GT5P_PREPARE_OFFER=0` disables the offer.
+v0.2.1 kept the manual command only.
 
 ## Optional shader preparation in v0.2
 
-Development launchers after v0.2.1 offer **Prepare now** or **Skip and play**
-immediately after successful first-run file setup, before starting the game.
-Closing the offer skips preparation. Cancelling preparation waits for the owned
-helper to finish cancelling, then starts the game; completed work remains available
-for resume. A preparation failure is reported and normal play remains available.
-The offer does not repeat on ordinary configured launches. Run **Prepare shaders.cmd**
-any time later to prepare/resume. `GT5P_PREPARE_OFFER=0` disables this development
-setup offer. The published v0.2.1 ZIP keeps the manual workflow below.
+The sections below record what v0.2 and v0.2.1 shipped. v0.2.2 keeps those
+paths and adds the behavior in the section above.
 
 Complete ordinary setup, close the game, then run **Prepare shaders.cmd**
 (`tourline-prologue.exe --prepare`). v0.2.1 includes the Phase 178 path reading the
@@ -55,20 +77,20 @@ pipeline. `GT5P_PREPARE_REUSE=0` disables this optimization. Reuse leaves older
 cache generations intact. See
 [incremental preparation](shader-precompile.md#incremental-preparation-across-template-updates-phase-176).
 
-Development helpers after v0.2.1 default to vertex compilation batches inside
-optional preparation: unset or `GT5P_PREPARE_VERTEX_BATCH=1` uses at most two
-owned compiler workers. `GT5P_PREPARE_VERTEX_BATCH=0` restores serial compilation.
-This switch is not in the published v0.2.1 helper; see
+v0.2.2 defaults to vertex compilation batches inside optional preparation:
+unset or `GT5P_PREPARE_VERTEX_BATCH=1` uses at most two owned compiler workers.
+`GT5P_PREPARE_VERTEX_BATCH=0` restores serial compilation. v0.2.1 did not include
+this switch. See
 [vertex batching](shader-precompile.md#exact-vertex-batching-phases-183-184).
 It changes offline preparation speed, not coverage or the game's draw policy.
 
-Development helpers also offer explicit additional translation preparation:
+v0.2.2 also offers explicit additional translation preparation.
 `GT5P_PREPARE_TRANSLATION=ultrawide-native` adds native ultrawide variants;
 `native-scaled` adds the scaled fragment mode used by native 1440p/4K.
 Explicit `default` keeps default-only preparation. These explicit modes do not
-infer settings or generate every MSAA/pass combination. They are absent from published
-v0.2.1. See [translation modes](shader-precompile.md#additional-local-translation-modes).
-From Phase 188, development helpers default an unset `GT5P_PREPARE_TRANSLATION`
+infer settings or generate every MSAA/pass combination. v0.2.1 did not include
+them. See [translation modes](shader-precompile.md#additional-local-translation-modes).
+v0.2.2 defaults an unset `GT5P_PREPARE_TRANSLATION`
 to `auto`, choosing from saved launcher settings: 21:9 adds ultrawide variants,
 while 16:9 native 1440p/4K adds scaled
 fragment variants. Supported file values are checked against the production
@@ -85,23 +107,24 @@ The next launch uses that cache, retaining demand compilation for missing keys.
 `tourline-prologue.exe --no-prepared` uses the ordinary cache for that launch without deleting
 anything. Failure/cancellation leaves any prior selection intact. Logs are
 `logs/prepare.out` and `logs/prepare.err`; phase/checkpoint reports are inside the
-generation directory. Preparation is experimental, partial and optional; no
-consistent stutter benefit or whole-game coverage is claimed.
+generation directory. Preparation is experimental, partial and optional.
+One High Speed Ring comparison had fewer long frames with shader packs. That
+is not whole-game coverage or a guarantee that stutter is gone.
 
 ## Restarting after settings changes
 
-Development launcher/engine pairs after v0.2.1 fix **Restart** in the F1 settings
-page: the old game exits, then the launcher starts its replacement with the saved
-settings. The launcher keeps storage ownership throughout and closes the old
-process group before starting the next one. This avoids the old launcher's
-shutdown also killing a replacement spawned by the game. The fresh child reads
-settings again without inheriting renderer variables derived by the previous
-game process. The fix requires both the updated launcher and engine; replacing
-only the launcher beside an older release engine is insufficient.
+v0.2.2 fixes **Restart** on the F1 settings page: the old game exits, then the
+launcher starts its replacement with the saved settings. The launcher keeps
+storage ownership throughout and closes the old process group before starting
+the next one. This avoids the old launcher's shutdown also killing a replacement
+spawned by the game. The fresh child reads settings again without inheriting
+renderer variables derived by the previous game process. The fix requires both
+the updated launcher and engine; replacing only the launcher beside an older
+release engine is insufficient. v0.2.1 did not include it.
 
 `GT5P_LAUNCHER_RESTART=0` restores the legacy direct-spawn path for diagnosis;
 unset/1 uses managed restart when launched through the updated launcher. Direct
-engine launches retain their existing behavior. Published v0.2.1 is unchanged.
+engine launches retain their existing behavior.
 
 The package also contains `preparation/GT5P-Prepare.exe`, its Python runtime and
 licenses, the production vertex decoder, and validated template/location JSON.

@@ -38,6 +38,10 @@ a numeric version tag matching VERSION and authored release notes; `GH_REPO`
 uses the triggering repository. Tags/releases are not copied by this migration.
 Disable `TOURLINE_LOCAL_RELEASE_ENABLED` to stop future player builds.
 Do not run both repositories' heavyweight builds concurrently on this PC.
+The player build runs through `scripts/test/isolated_validation.ps1`, which
+holds `Local\Tourline-Prologue-Isolated-Validation` through the build and its
+joined child processes. A busy mutex or an active game/helper rejects the build
+before it starts; retry only after that session finishes.
 The older runner's measurements below describe its original provisioning.
 
 ## Branch layout (historical GT5P integration)
