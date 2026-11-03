@@ -585,7 +585,7 @@ return −1.
 
 ## Pipeline identity
 
-An interpreter pipeline key is native state only:
+The target key for a pipeline interpreting both stages is native state only:
 
 - blend state and write mask (`blend`, `cmask`)
 - render-target count and DXGI format
@@ -595,19 +595,20 @@ An interpreter pipeline key is native state only:
 - sample count (the MSAA class already stored in the cube-mask high bits)
 - depth-export on or off (changes `SV_Depth`)
 
-It does not include the fragment program, cube mask, unnormalized mask,
+For the interpreted stages it does not include the program, cube mask, unnormalized mask,
 sampler bank, shadow, gamma, expand, or constant values. The starter
 observation is about 57 distinct blend/RT/cull/stencil classes. Sample count
 and depth-export multiply that by a small factor. The implementation records
 the distinct interpreter keys it actually creates (`RSX_SHADER_INTERP_LOG=1`)
-and precreates the ones seen, rather than the full cartesian product.
+but does not yet precreate the ones seen.
 
-Those pipelines are created at device init for the classes observed on the
-starter, and on first use for any class that was not listed. First use of an
-unlisted class can still hitch once, by about 4 ms, not by a shader compile.
-Stage 3 measures whether that residual hitch shows up. If it does, the
-missing class is added to the precreate list. The list is data in the
-runtime, not a capture.
+Current replay pipelines are created on first use. Fragment-only interpretation
+also keys on the specialized vertex bytecode; vertex-only interpretation keys
+on the specialized pixel bytecode. Only combined interpretation removes both
+program identities. First-use driver work can still hitch, and there is no
+implemented device-init precreate list. The roughly 4 ms driver cost above is
+earlier preparation evidence, not a bound measured for these generic pipelines.
+Stage 3 must measure it before claiming that compilation stalls are removed.
 
 `RSX_SHADER_INTERP=force` uses the interpreter pixel shader for every draw
 that the encoder accepts, with the normal specialized vertex shader.
@@ -709,6 +710,20 @@ this checkpoint. Review added frame-start signature-state reset and retained
 bytecode references in the shared interpreter pipeline cache. A fresh locked
 build and the new synthetic IA/GPU-fetch WARP output comparison are pending.
 The synthetic comparison is not a catalogue or rasterization proof.
+
+`RSX_SHADER_INTERP_STATS=1` is an independent, default-off diagnostic for the
+async baseline and the interpreter paths. Every five seconds `[interp-pending]`
+reports cumulative replay vertex/fragment omissions, recording-time GPU-fetch
+vertex omissions, and interpreter PSO count/creation milliseconds. These are
+draw attempts over time, not distinct pipelines or visible missing objects.
+The recorder/replay sites are separate; their totals must be reported separately.
+`scripts/test/interp_game_probe.py` runs the existing screenshot/race scripts with
+a scratch copy of the ELF/save, an absolute read-only game-folder mapping, and
+an explicit private scratch shader cache. `--cold` rejects nonempty caches,
+including caches containing only the generic interpreter bytecode. `winshot.ps1`
+now accepts an explicit private engine/root/timeout and cleans up only its owned
+process. The original game/save paths are never used as writable storage by this
+probe. These new diagnostics/probes await the validation below.
 
 Stage 3 wires `=1` into the pending-draw path. With an empty private shader
 cache, a first dealership visit and an HSR race are compared with today's

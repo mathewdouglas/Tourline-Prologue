@@ -111,7 +111,7 @@ int main(void)
     int pass=0,fail=0; float worst=0;
     for(int fetch=0;fetch<2;fetch++) {
         ID3D11ComputeShader *interp=compile(rsx_vp_interp_hlsl,fetch);
-        for(unsigned test=0;test<33;test++) {
+        for(unsigned test=0;test<54;test++) {
             unsigned image[64]={0},*w=image+16;
             image[0]=64;image[1]=3;image[5]=0xFFFF;
             /* Initialize temp0 before scalar/ADD/MAD operations. */
@@ -121,12 +121,46 @@ int main(void)
             if(sca>=8)sca+=5;
             ins(w+4,op,sca,1,1,3,0);
             ins(w+8,1,0,0,0,0,1);
+            if(test>=33 && test<42) {
+                ins(w+4,1,0,1,1,3,0);
+                for(int i=0;i<16;i++) {
+                    desc[4*i]=i*16+(test==41?1:0);
+                    desc[4*i+2]=test==40?0:0x140u+((test-33)%7+1);
+                }
+                ctx->lpVtbl->UpdateSubresource(ctx,(ID3D11Resource*)vf,0,NULL,desc,0,0);
+            } else {
+                for(int i=0;i<16;i++){desc[4*i]=i*16;desc[4*i+2]=0x142;}
+                ctx->lpVtbl->UpdateSubresource(ctx,(ID3D11Resource*)vf,0,NULL,desc,0,0);
+            }
+            if(test>=42 && test<49) {
+                /* Predication against initially-zero condition codes. */
+                ins(w+4,1,0,1,1,3,0);
+                w[4]=(w[4]&~(7u<<10))|((test-42)<<10)|(1u<<13);
+            }
+            if(test>=49) {
+                /* Branch over a different colour write, including boolean
+                 * taken/not-taken and one call/return. */
+                unsigned flow=test==49?8:test==50?9:test==51?17:test==52?18:10;
+                image[1]=flow==10 || flow==18 ? 7:5;
+                ins(w+4,1,0,1,1,3,0);
+                ins(w+8,0,flow,0,0,0,0);
+                w[10]&=~63u;
+                w[11]=(w[11]&~((15u<<17)|(7u<<29)))|(4u<<29); /* target slot 4 */
+                ins(w+12,1,0,0,0,0,0);
+                ins(w+16,1,0,1,0,0,flow==10 || flow==18?0:1);
+                if(image[1]==7) {
+                    ins(w+12,0,9,0,0,0,0); w[14]&=~63u;
+                    w[15]=(w[15]&~((15u<<17)|(7u<<29)))|(6u<<29);
+                    ins(w+20,0,12,0,0,0,0); w[23]&=~(15u<<17);
+                    ins(w+24,1,0,0,0,0,1);
+                }
+            }
             ID3D11ShaderResourceView *prog=raw(image,sizeof image);
             ctx->lpVtbl->CSSetShaderResources(ctx,21,1,&prog);
             unsigned head[4]={0}; ID3D11Buffer *hb=buffer(head,sizeof head,D3D11_BIND_CONSTANT_BUFFER,0);
             ctx->lpVtbl->CSSetConstantBuffers(ctx,4,1,&hb);
             static char hlsl[300000];
-            int n=fetch?rsx_vp_decompile_gpufetch((u8*)w,48,hlsl,sizeof hlsl):rsx_vp_decompile((u8*)w,48,hlsl,sizeof hlsl);
+            int n=fetch?rsx_vp_decompile_gpufetch((u8*)w,image[1]*16,hlsl,sizeof hlsl):rsx_vp_decompile((u8*)w,image[1]*16,hlsl,sizeof hlsl);
             if(n<0)return 2;
             ID3D11ComputeShader *spec=compile(hlsl,fetch);
             float a[224],b[224];run(spec,a);run(interp,b);
@@ -138,7 +172,7 @@ int main(void)
                 if(!isfinite(e)||e>0.0001f*fmaxf(1,fabsf(a[i])))bad=1;
                 if(e>worst)worst=e;
             }
-            if(bad){fail++;fprintf(stderr,"FAIL fetch=%d vec=%u sca=%u\n",fetch,op,sca);}else pass++;
+            if(bad){fail++;fprintf(stderr,"FAIL fetch=%d test=%u vec=%u sca=%u\n",fetch,test,op,sca);}else pass++;
             spec->lpVtbl->Release(spec); prog->lpVtbl->Release(prog); hb->lpVtbl->Release(hb);
         }
         interp->lpVtbl->Release(interp);
