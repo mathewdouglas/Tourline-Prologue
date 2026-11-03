@@ -1,9 +1,13 @@
 # Fragment sample-count sharing
 
-`RSX_FP_SAMPLE_SHARE=1` makes a one-sample fragment profile and a multisample
-profile of the same program compile to one pixel shader. Unset, or any value
-other than `1`, leaves the compiled text as it is today. The pipeline sample
-count is unchanged either way.
+**Status (Phase 213): on by default.** A one-sample fragment profile and a
+multisample profile of the same program compile to one pixel shader unless
+`RSX_FP_SAMPLE_SHARE=0` is set (any other value, or unset, shares). The change
+lives in `patches/ps3recomp-4e8f3ca8-local.patch`; the separate experimental
+overlay patch is gone. The pipeline sample count is unchanged either way. The
+shipped starter was re-keyed for it; see "Default and re-key" at the end. The
+sections up to that one record the earlier opt-in (`=1`) investigation and use
+that era's wording.
 
 This is the specialization behind starter `state.cube` bits 17 and 18. Those
 bits are a sample count, not a cube-versus-2D texture shape. A second SRV for
@@ -63,8 +67,8 @@ key is the HLSL source hash (`fp_source`). `ps` is the FNV-1a of the DXBC.
 
 ## What the switch does
 
-`patches/ps3recomp-fp-sample-share.patch` adds `fp_sample_qualifier`. With
-`RSX_FP_SAMPLE_SHARE=1` the `sample` rewrite runs for every count, including
+The (then overlay, now main-patch) function `fp_sample_qualifier` is added. With
+`RSX_FP_SAMPLE_SHARE=1` (opt-in era; now the default) the `sample` rewrite runs for every count, including
 one sample, still gated by `RSX_SSAA`. `SampleDesc.Count` still follows bits
 16–19. The root signature, sampler registers `s0`–`s15`, and texture
 declarations are untouched.
@@ -163,21 +167,7 @@ Sebring Silver, so the frames are not pixel-equal (mean absolute channel sum
 supported by that picture and by the matching draw count. It is not proven by
 a locked pixel diff.
 
-## If this became the default
-
-Do not regenerate `gt5p-disc-v2`. Turning the switch on changes `fp_source`
-and `ps` for the one-sample rows. Multisample rows keep their keys (1,831 of
-3,696 profiles still matched). Any pipeline key that includes the bytecode
-changes with those rows. The sample-count nibble, `SampleDesc.Count`, and
-`root_signature_keyed` stay. The renderer contract hashes
-`patches/ps3recomp-4e8f3ca8-local.patch` only; this overlay is a separate
-file, so the shipped contract does not move until the behaviour is folded
-into that patch.
-
-Preparation would then treat one-sample and multisample profiles of one
-program as one fragment compile. The cube word stored on the template can
-keep the real sample count for the pipeline object.
-
+@@DEFAULT@@
 ## What is left
 
 A dual `Texture2D` / `TextureCube` binding, selected by a root constant, for
