@@ -1,0 +1,260 @@
+{
+  "schema": "gt5p-content-sweep-plan",
+  "version": 1,
+  "title": "BCUS98158 v03.00 content sweep: Car Dealer manufacturer pages and cars, Arcade courses",
+  "settings": {
+    "resolution": "1080p",
+    "msaa": "2"
+  },
+  "timing": {},
+  "dealer": {
+    "columns": 16,
+    "rows": 2,
+    "makers_per_chunk": 1,
+    "survey_makers_per_chunk": 1,
+    "max_cars": 16,
+    "colors_per_car": 0,
+    "makers": [
+      {
+        "id": "acura",
+        "label": "Acura",
+        "col": 0,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "alfa-romeo",
+        "label": "Alfa Romeo",
+        "col": 0,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "aston-martin",
+        "label": "Aston Martin",
+        "col": 1,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "audi",
+        "label": "Audi",
+        "col": 1,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "bmw",
+        "label": "BMW",
+        "col": 2,
+        "row": 0,
+        "cars": 4
+      },
+      {
+        "id": "chevrolet",
+        "label": "Chevrolet",
+        "col": 2,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "citroen",
+        "label": "Citroen",
+        "col": 3,
+        "row": 0,
+        "cars": 2
+      },
+      {
+        "id": "daihatsu",
+        "label": "Daihatsu",
+        "col": 3,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "dodge",
+        "label": "Dodge",
+        "col": 4,
+        "row": 0,
+        "cars": 2
+      },
+      {
+        "id": "ferrari",
+        "label": "Ferrari",
+        "col": 4,
+        "row": 1,
+        "cars": 6
+      },
+      {
+        "id": "ford",
+        "label": "Ford",
+        "col": 5,
+        "row": 0,
+        "cars": 3
+      },
+      {
+        "id": "honda",
+        "label": "Honda",
+        "col": 5,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "jaguar",
+        "label": "Jaguar",
+        "col": 6,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "lancia",
+        "label": "Lancia",
+        "col": 6,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "lexus",
+        "label": "Lexus",
+        "col": 7,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "lotus",
+        "label": "Lotus",
+        "col": 7,
+        "row": 1,
+        "cars": 3
+      },
+      {
+        "id": "mazda",
+        "label": "Mazda",
+        "col": 8,
+        "row": 0,
+        "cars": 3
+      },
+      {
+        "id": "mercedes-benz",
+        "label": "Mercedes-Benz",
+        "col": 8,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "mini",
+        "label": "Mini",
+        "col": 9,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "mitsubishi",
+        "label": "Mitsubishi",
+        "col": 9,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "nissan",
+        "label": "Nissan",
+        "col": 10,
+        "row": 0,
+        "cars": 7
+      },
+      {
+        "id": "renault",
+        "label": "Renault",
+        "col": 10,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "subaru",
+        "label": "Subaru",
+        "col": 11,
+        "row": 0,
+        "cars": 2
+      },
+      {
+        "id": "suzuki",
+        "label": "Suzuki",
+        "col": 11,
+        "row": 1,
+        "cars": 3
+      },
+      {
+        "id": "tvr",
+        "label": "TVR",
+        "col": 12,
+        "row": 0,
+        "cars": 2
+      },
+      {
+        "id": "volkswagen",
+        "label": "Volkswagen",
+        "col": 12,
+        "row": 1,
+        "cars": 2
+      },
+      {
+        "id": "amuse",
+        "label": "amuse",
+        "col": 13,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "morrison",
+        "label": "Morrison",
+        "col": 13,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "blitz",
+        "label": "Blitz",
+        "col": 14,
+        "row": 0,
+        "cars": 1
+      },
+      {
+        "id": "mines",
+        "label": "Mine's",
+        "col": 14,
+        "row": 1,
+        "cars": 1
+      },
+      {
+        "id": "concept-by-gt",
+        "label": "Concept by GT",
+        "col": 15,
+        "row": 0,
+        "cars": 12
+      }
+    ]
+  },
+  "courses": {
+    "cameras": 4,
+    "list": [
+      {
+        "id": "high-speed-ring",
+        "label": "High Speed Ring",
+        "slot": 0,
+        "identity": "measured"
+      },
+      {
+        "id": "daytona",
+        "label": "Daytona",
+        "slot": 1,
+        "identity": "measured"
+      },
+      {
+        "id": "fuji-speedway-f",
+        "label": "Fuji Speedway F",
+        "slot": 2,
+        "identity": "measured"
+      }
+    ]
+  }
+}
