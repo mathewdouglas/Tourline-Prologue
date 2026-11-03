@@ -13,6 +13,7 @@ import preparation_native_handoff as h
 import pipeline_native_batch as b
 
 for value in ('auto','0','1'):assert h.choice({'GT5P_PREPARE_HANDOFF':value})==value
+for value in ('auto','0','1'):assert h.code_choice({'GT5P_PREPARE_CODE_BUNDLE':value})==value
 for value in ('','2',True):
     try:h.choice({'GT5P_PREPARE_HANDOFF':value})
     except ValueError:pass
@@ -52,6 +53,40 @@ with tempfile.TemporaryDirectory() as temporary:
         old=h.NativeRequests(engine,cache);assert not old.enabled
         old.write(root/'old',recipe,vs,ps)
         assert len(list((root/'old').glob('*.dxbc')))==2 and (root/'old/result.json').exists()
+        engine.write_bytes(h.MARKER+h.CODE_MARKER)
+        packed=h.NativeRequests(engine,cache)
+        packed.write(root/('e'*64)/'pipeline',recipe,vs,ps)
+        packed.release(root)
+        payload=packed.bundle.read_bytes()
+        assert struct.unpack_from('<8sII',payload)==(b'GT5PCOD1',2,len(vs)+len(ps))
+        offset=48
+        for i,code in enumerate((vs,ps)):
+            assert struct.unpack_from('<QII',payload,16+16*i)==(h.fnv64(code),len(code),offset)
+            assert payload[offset:offset+len(code)]==code
+            offset+=len(code)
+        assert packed.report['code_bundle'] and not packed.pool
+        packed.finish();assert not (root/'bytecode-bundle.bin').exists()
+        interrupted=h.NativeRequests(engine,cache)
+        interrupted.write(root/('a'*64)/'pipeline',recipe,vs,ps)
+        polls=[]
+        def cancel():
+            polls.append(1)
+            if len(polls)==2:raise InterruptedError('cancel owned transport')
+        try:interrupted.release(root,cancel)
+        except InterruptedError:pass
+        else:raise AssertionError('Bundle write did not poll cancellation')
+        assert (root/'bytecode-bundle.bin').stat().st_size<len(payload)
+        interrupted.release(root);assert interrupted.bundle.read_bytes()==payload
+        interrupted.finish();assert not (root/'bytecode-bundle.bin').exists()
+        with patch.object(h,'MAX_BYTES',1):
+            spill=h.NativeRequests(engine,cache);spill.write(root/('c'*64)/'pipeline',recipe,vs,ps);spill.release(root)
+            assert not spill.bundle and not spill.report['code_bundle']
+        engine.write_bytes(h.MARKER)
+        assert not h.NativeRequests(engine,cache).code_enabled
+        with patch.dict(os.environ,{'GT5P_PREPARE_CODE_BUNDLE':'1'}):
+            try:h.NativeRequests(engine,cache)
+            except ValueError:pass
+            else:raise AssertionError('Forced code bundle accepted an older engine')
     identity='1'*64;key='a'*16;manifest=root/'batch-results.jsonl'
     env={'RSX_PSO_PREPARE_RESULTS':str(manifest)}
     def runner(*args,**kwargs):

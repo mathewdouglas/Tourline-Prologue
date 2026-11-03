@@ -5,6 +5,45 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Development Phase 211 adds opt-in shader-stage profiling with
+`GT5P_PREPARE_SHADER_PROFILE=1` (unset/`=0` is off). Vertex worker summaries
+separate translation and D3DCompile elapsed time; owner summaries separate
+startup, dispatch, result acceptance, checkpoint callbacks, polling and shutdown.
+Fragment batches separate raw reads, translation/queue submission, owner
+throttling/drain, compiler work, bytecode persistence and queue residence. The
+host adds input staging, process wall time and result checks. Worker totals and
+queue residence overlap across workers and are not additive wall/CPU time.
+No per-shader log burst or normal-play profiling is enabled.
+
+The fragment host also defaults to `GT5P_PREPARE_FRAGMENT_IO=1`: each distinct
+raw input is checked/written once per chunk, and closed native compiler outputs
+use the existing opened-handle size/sentinel reader. Complete output bytes are
+retained once per source key within the existing 128 MiB pool, avoiding an
+immediate second read of that same owned output. Expected source/code identities
+and final persisted-cache checks remain mandatory. `=0` restores the previous
+input checks and output rereads. Chunk publication and cancellation ownership
+are unchanged.
+
+Matching engines advertise `GT5P_OFFLINE_CODE_V1` in addition to the previous
+native handoff capability. `GT5P_PREPARE_CODE_BUNDLE=auto` (default) passes one
+private bytecode bundle between stages, avoiding thousands of native input
+opens. `=0` restores individual native reads and repeated code timestamps;
+`=1` requires a matching engine/handoff. Payload is bounded to 128 MiB and
+8,192 entries (plus at most 128 KiB index and a 16-byte header); incomplete
+host pooling or budget overflow falls back to the existing individual path.
+Every entry's exact offset, size, identity/checksum and DXBC marker is checked,
+and every recipe dependency must be present before the first requested driver
+call. Invalid bundles fail closed; they never mix with a disk fallback.
+The native owner frees the arena on completion. Existing durable shader files,
+checkpoints, recipe/driver formats and final persistence verification remain.
+The successful owner removes only its private transient request bundle after
+native children exit; interrupted transports are rebuilt on resume. It never
+removes a shader cache. Within this guarded bundled batch, each shared durable
+code file needs its existing successful timestamp operation only once.
+Native processes remain sequential, with unchanged key/root-signature ABI,
+compiler limits, async draw policy and process ownership. See Phase 211 in
+[progress](progress.md) for measured acceptance and practical limits.
+
 Development Phase 210 profiles and reduces native preparation file traffic.
 `GT5P_PREPARE_NATIVE_PROFILE=1` enables one aggregate timing summary per native
 chunk; unset/`=0` keeps instrumentation off. Reports separate child startup,

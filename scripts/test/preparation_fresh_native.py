@@ -148,6 +148,8 @@ def main():
         assert report['resume']['vertex_programs_reused'] == report['resume']['fragment_jobs_reused'] == 0
         assert report['resume']['vertex_programs_compiled'] > 0
         assert report['fragment_preparation']['processes'] > 0
+        if report.get('native_handoff',{}).get('code_bundle'):
+            assert not (output/'requests/bytecode-bundle.bin').exists(),'Completed transient transport retained'
         verification = []
         if args.compare_verification:
             from train_pipeline_cache import inventory
@@ -227,6 +229,28 @@ def main():
             native_rejection=dict(corrupt_shared_code_rejected=True,previous_result_manifest_preserved=True,
                 failed_batch_driver_calls=0,invalid_pointer_truncation_and_id_rejected=True,
                 cached_comparison_driver_blobs_unchanged=True)
+            if report['native_handoff'].get('code_bundle'):
+                # A valid bundle, then corrupt/truncated/absent-dependency variants.
+                first=document['records'][0]
+                codes=[(warm/('code_'+first[stage]+'.dxbc')).read_bytes() for stage in ('vs','ps')]
+                codes=list(dict.fromkeys(codes))
+                header=bytearray(struct.pack('<8sII',b'GT5PCOD1',len(codes),sum(map(len,codes))))
+                offset=16+16*len(codes)
+                for code in codes:
+                    header.extend(struct.pack('<QII',fnv64(code),len(code),offset));offset+=len(code)
+                payload=bytes(header)+b''.join(codes)
+                unused=b'DXBCunused-code'
+                missing=struct.pack('<8sIIQII',b'GT5PCOD1',1,len(unused),fnv64(unused),len(unused),32)+unused
+                bundle_path=reject/'code.bin'
+                env['RSX_PSO_PREPARE_CODE_BUNDLE']=str(bundle_path)
+                (reject/'batch-requests.bin').write_bytes(prefix+recipe)
+                for label,damaged in (('code-corrupt',payload[:-1]+bytes([payload[-1]^1])),
+                        ('code-truncated',payload[:-1]),('code-missing',missing)):
+                    bundle_path.write_bytes(damaged)
+                    text=run_offline(args.engine,args.game_root,env,reject/(label+'.log'),timeout=60)
+                    assert '[pso-material-batch] valid=0 requests=1 created=0 driver_calls=0 cached_blob_calls=0' in text
+                    assert manifest.read_text()=='previous-result-sentinel\n'
+                native_rejection['code_bundle_corruption_truncation_and_missing_rejected']=True
         timings = []
         if args.profile:
             stats = pstats.Stats(profiler)

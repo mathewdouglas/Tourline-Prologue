@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).parents[1]))
-from shader_fragment_batch import compile_batch
+from shader_fragment_batch import compile_batch,io_mode
 from shader_coverage import fnv64
 
 raw=b'\0'*16
@@ -19,6 +20,11 @@ duplicate=dict(job,id='duplicate')
 other=copy.deepcopy(job);other['id']='other';other['state']['cube']=1
 no_dither=copy.deepcopy(job);no_dither['id']='no-dither';no_dither['state']['rtfmt']=11
 jobs=[job,duplicate,other,no_dither]
+assert io_mode({}) and not io_mode({'GT5P_PREPARE_FRAGMENT_IO':'0'})
+for value in ('','2','true'):
+    try:io_mode({'GT5P_PREPARE_FRAGMENT_IO':value})
+    except ValueError:pass
+    else:raise AssertionError('Invalid fragment I/O accepted')
 
 def fake(engine,game,env,log,timeout):
     work=Path(env['RSX_SHADER_LIBRARY_BATCH']);cache=Path(env['RSX_SHADER_CACHE'])
@@ -46,6 +52,12 @@ with tempfile.TemporaryDirectory() as folder:
     assert compiled['first']==compiled['duplicate'] and compiled['first']!=compiled['other']
     report=json.loads((root/'good/fragment-preparation-report.json').read_text())
     assert report['unique_requests']==3 and report['processes']==2
+    assert report['compact_io'] and report['input_file_checks']==2 and report['code_file_reads']==3
+    with patch.dict(os.environ,{'GT5P_PREPARE_FRAGMENT_IO':'0'}):
+        legacy,legacy_failures=run('io-rollback')
+    assert legacy==compiled and not legacy_failures
+    rollback=json.loads((root/'io-rollback/fragment-preparation-report.json').read_text())
+    assert not rollback['compact_io'] and rollback['input_file_checks']==3
     with patch('shader_fragment_batch.run_offline',side_effect=fake):
         repeated,repeated_failures=compile_batch(jobs,root/'good',root/'good/shadercache',root/'engine',root)
     assert repeated==compiled and not repeated_failures
@@ -93,6 +105,19 @@ with tempfile.TemporaryDirectory() as folder:
     except ValueError as exc:assert str(exc)=='Checkpoint write failed'
     else:raise AssertionError('Publication error swallowed')
     assert len(calls)==1
+    aliases=[]
+    def aliased(*args,**kwargs):
+        text=fake(*args,**kwargs)
+        work=Path(args[2]['RSX_SHADER_LIBRARY_BATCH']);cache=Path(args[2]['RSX_SHADER_CACHE'])
+        rows=(work/'compiled.tsv').read_text().splitlines()
+        key='f'*16
+        (cache/(key+'.dxbc')).write_bytes(b'DXBC shared '+(b'A' if not aliases else aliases[0]))
+        aliases.append(b'B')
+        (work/'compiled.tsv').write_text(rows[0]+'\n'+'\n'.join(' '.join(row.split()[:2]+[key,'1']) for row in rows[1:])+'\n')
+        return text
+    compiled,failures=run('cross-chunk-source-conflict',aliased,batch_size=1)
+    assert failures and all('changed across native chunks' in error for error in failures.values())
+    assert len(compiled)+len(failures)==len(jobs)
     for size in (0,4097,True,'2'):
         with patch('shader_fragment_batch.run_offline',side_effect=AssertionError('Compiler started')):
             try:run('invalid-size-'+str(size),batch_size=size)

@@ -56,6 +56,8 @@ def main():
         ap.add_argument('--'+name,type=Path,required=True)
     ap.add_argument('--full',action='store_true')
     ap.add_argument('--shared-only',action='store_true',help='Final transport proof using a previously measured legacy control')
+    ap.add_argument('--code-study',action='store_true',help='Same engine fresh individual/code-bundle comparison with shader profiles')
+    ap.add_argument('--fragment-io',choices=('0','1'),default='1',help='Explicit fragment host I/O path for controlled trials')
     a=ap.parse_args()
     if os.environ.get('VSCMD_ARG_TGT_ARCH','').lower()!='x64':raise ValueError('Use x64 VS environment')
     out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
@@ -66,7 +68,7 @@ def main():
             subprocess.run([str(arg) for arg in args],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
         results.append(dict(step=name,seconds=time.perf_counter()-begin))
         (out/'status.json').write_text(json.dumps(results,indent=2)+'\n')
-    with tempfile.TemporaryDirectory(prefix='p210-',dir=ROOT/'scratch') as directory:
+    with tempfile.TemporaryDirectory(prefix='p211-',dir=ROOT/'scratch') as directory:
         fresh=Path(directory)
         backend=build_backend(a.reference_build.resolve(),a.runtime.resolve(),fresh)
         engine=build_engine(a.reference_build.resolve(),fresh,backend)
@@ -74,20 +76,28 @@ def main():
             '--decoder',a.reference_helper/'decoder.dll','--hash-library',a.reference_helper/'cache_hash.dll',
             '--volume-library',a.reference_helper/'volume_reader.dll','--game-root',a.game_root,
             '--elf',a.elf,'--volume',a.volume]
-        modes=(('shared','1'),) if a.shared_only else (('legacy','0'),('shared','1'))
+        modes=(('code-control','1'),('shared','1')) if a.code_study else ((('shared','1'),) if a.shared_only else (('legacy','0'),('shared','1')))
         for name,enabled in modes:
             args=base+['--profile','--output',out/(name+'.json')]
             if not a.full:args+=['--limit','32']
-            run(name,args,dict(os.environ,GT5P_PREPARE_HANDOFF=enabled,GT5P_PREPARE_NATIVE_PROFILE='1'))
+            run(name,args,dict(os.environ,GT5P_PREPARE_HANDOFF=enabled,GT5P_PREPARE_NATIVE_PROFILE='1',
+                GT5P_PREPARE_SHADER_PROFILE='1',GT5P_PREPARE_FRAGMENT_IO=a.fragment_io,
+                GT5P_PREPARE_CODE_BUNDLE='0' if name=='code-control' else 'auto'))
         new=json.loads((out/'shared.json').read_text())
-        old=None if a.shared_only else json.loads((out/'legacy.json').read_text())
+        old=None if a.shared_only and not a.code_study else json.loads((out/('code-control.json' if a.code_study else 'legacy.json')).read_text())
         assert new['test_cache_removed']
         if old is not None:assert old['counts']==new['counts'] and old['test_cache_removed']
         if a.full and old is not None:
             ids=lambda report:{phase:row['sha256'] for phase,row in report['shader_packs']['phases'].items()}
             assert ids(old)==ids(new)
         assert new['native_timings'] and new['native_handoff']['enabled']
-        if old is not None:assert old['native_timings'] and not old['native_handoff']['enabled']
+        assert len(new['vertex']['timings']['workers'])==new['vertex']['workers']
+        assert sum(row['calls'] for row in new['vertex']['timings']['workers'])==new['vertex']['compiled_variants']
+        assert all('compiler_us' in row['timings'] for row in new['fragment']['batches'])
+        assert new['native_handoff']['code_bundle']
+        assert all(row['code_reads']==0 for row in new['native_timings'])
+        if a.full:assert sum(row['code_touch_skips'] for row in new['native_timings'])>0
+        if old is not None:assert old['native_timings'] and (a.code_study or not old['native_handoff']['enabled'])
         helper=fresh/'helper'
         run('freeze-helper',[sys.executable,ROOT/'scripts/release/build_preparer.py','--runtime',a.runtime,
             '--decoder',a.reference_helper/'decoder.dll','--output',helper])
