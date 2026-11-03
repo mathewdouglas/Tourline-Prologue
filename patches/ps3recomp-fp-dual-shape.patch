@@ -1,0 +1,57 @@
+diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -3178,16 +3178,32 @@ static u32 rsx_alpha_ctl(const rsx_state* st)
+ /* Which of a draw's texture units are cube textures. Units 0-3 are bits 0-3
+  * of the key word; units 4-15 are bits 20-31 (bits 16-19 carry the target's
+  * sample count, added by the caller). cube_units16() unpacks the 16-unit mask.
+  * GT5 Prologue's car paint and glass sample their environment cube on unit
+  * 14: with only units 0-3 handled it was read as a 2D texture with the
+  * reflection vector's x and y, which painted the silver car black and smeared
+  * the glass (Phase 46). RSX_CUBE_HI=0 goes back to units 0-3 only. */
+ static u32 cube_units16(u32 key) { return (key & 0xFu) | ((key >> 16) & 0xFFF0u); }
++/* RSX_FP_DUAL_SHAPE=1 compiles the per-sample interpolant qualifier for every
++ * sample count in bits 16-19, including one sample. Counts above one already
++ * share that text; emitting it for one sample as well lets both profiles hash
++ * to one shader. Any other value keeps the qualifier on multisample targets
++ * only. The pipeline sample count is unchanged. RSX_SSAA=0 still forces
++ * once-per-pixel shading. */
++static int fp_dual_shape_on(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("RSX_FP_DUAL_SHAPE"); on = e && e[0] == '1'; }
++    return on;
++}
++static int fp_sample_qualifier(u32 cube_mask)
++{
++    return fp_dual_shape_on() || (((cube_mask >> 16) & 0xFu) > 1u);
++}
+ /* The upper half of the existing ghi shader/profile key records volume
+  * units. Older library profiles leave it zero and remain readable. */
+ static int texture_volume_on(void)
+ {
+     static int on = -1;
+     if (on < 0) { const char* e = getenv("RSX_TEX3D"); on = !e || strcmp(e, "0"); }
+     return on;
+ }
+@@ -5889,17 +5905,19 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+       } }
+     /* On a multisampled target, run the fragment program once per sample
+      * rather than once per pixel. Multisampling alone smooths only the edges
+      * of triangles; a highlight that turns on and off inside one (the bevels
+      * of Gran Turismo 5 Prologue's dealership floor) stays stepped.
+      * RSX_SSAA=0: once per pixel. */
+     { static int ss = -1;
+       if (ss < 0) { const char* e = getenv("RSX_SSAA"); ss = (e && *e == '0') ? 0 : 1; }
+-      if (ss && ((cube_mask >> 16) & 0xFu) > 1) {
++      /* RSX_FP_DUAL_SHAPE=1 emits that qualifier for one sample too.
++       * fp_sample_qualifier owns the choice. Unset keeps this test. */
++      if (ss && fp_sample_qualifier(cube_mask)) {
+           hlsl_replace_all(hlsl, sizeof hlsl, "float4 col0 : COLOR0;", "sample float4 col0 : COLOR0;");
+           hlsl_replace_all(hlsl, sizeof hlsl, "float4 col1 : COLOR1;", "sample float4 col1 : COLOR1;");
+           hlsl_replace_all(hlsl, sizeof hlsl, "    float4 fog : FOG;", "    sample float4 fog : FOG;");
+           hlsl_replace_all(hlsl, sizeof hlsl, "float4 tc", "sample float4 tc");
+       } }
+     /* sRGB decode on read and encode on write (see dr_note_surface). The
+      * decode is applied to the filtered sample, not to each texel; a unit
+      * reading the depth copy is left alone. */
