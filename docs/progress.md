@@ -9,6 +9,145 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 206 - Private v0.2.3 candidate and full starter growth (2026-11-03)
+
+The isolated feature branch integrates Phase 198's translated fragment checkpoints
+as cf28f06, sets VERSION to 0.2.3 with authored release notes (063b20c), and builds
+a private candidate without main/tag/release/CI changes. A fresh CMake/Ninja
+Release build compiles the runtime and all native/generated game translation
+units into scratch/v023/engine (846.73 s, two build workers). Existing private
+generated source and dependency inputs are read-only; this is not a fresh lift.
+The runtime is the pinned d2be355a7fe73c59750f compatibility-patch identity, with
+build outputs only in this worktree. Phase 199 diagnostic/texture-retention
+overlays are excluded. Launcher, production decoder, checksum/volume DLLs and
+frozen helper build successfully; icon, setup/storage, managed restart,
+first-run choices and all three tool-handoff regressions pass sequentially.
+
+The user's later collection is incorporated from the separate review/proof:
+1,368 shared records contain 149 existing records and 1,219 additions, with no
+conflicts. Three branching contexts were excluded before export. Original-volume
+search locates all 300 new program identities across 353 searched containers
+(69.19 s). Independent candidate preparation verifies all 1,219 native keys and
+persistence, reusing shaders independently checked after collection. Private
+evidence is scratch/contribution-review-84569c82,
+new-program-locations-84569c82 and candidate-proof-84569c82/out. Commit 9254369
+preserves all 4,450 earlier records and issues the 5,669-record starter / 1,881
+programs (477 VP, 1,404 FP), player map and 201-member volume map coherently.
+The additional 36 containers were already verified in the search map. Observed
+menu/race membership is unchanged and re-pinned; new keys without observed phase
+membership stay on demand. No whole-game, all-settings or first-draw readiness
+claim follows from this growth.
+
+Commit 8e9f601 incorporates and reviews the user's retained-cache scan fix. A
+read-only scan of the actual reported storage now encounters 194,180 entries:
+the old 100,000-entry guard rejects it; the revised bounded allowance passes in
+16.62 s. Per-output allowance is 1,196,288 entries, derived from the metadata
+catalogue ceiling, request/translation/cache layout and warmup allowance; the
+parent scan allows 64 such budgets. Existing generation search, every link and
+hard-link rejection, checkpoint identity/ownership and cache preservation remain.
+The checkpoint/reuse/translation/collection/package regressions pass. These are
+safety ceilings, not proof that a ceiling-sized catalogue or tree is practical.
+No retained cache or user storage file is deleted, repaired or rewritten.
+
+The initial 4,450-record frozen candidate passes template rejection,
+cancellation/resume, every native key and persisted blob, and unchanged source
+cache. The final 5,669-record frozen candidate then grows a separate cache from
+that verified generation, retaining all 3,493 available shader files and a bounded
+2,000-driver seed. It passes the same rejection/cancellation/source-preservation
+checks and all 5,669 exact native requests in 4,096/1,573 chunks. It reuses 447
+vertex variants and compiles 35 new ones; 1,004 missing fragment jobs deduplicate
+to 563 exact requests in one batch. Every native pipeline is created/persisted,
+with 2,000 cached-blob calls. Measured preparation is 253.91 s; the lifecycle
+harness includes copying, cancellation and rejection and takes longer. This is
+one local growth proof with OS/driver caches preserved, not a speed comparison
+or an empty-cache/driver-cold/other-GPU acceptance claim. Evidence:
+scratch/v23full/validation.json and scratch/v23fullfinal/validation.json.
+
+The superseded RC2 ZIP is assembled with strict allowlists and verified dependency
+manifests: 240 selected files, 91,986,089 bytes, SHA256
+9ea3dd344980b740865ded72321210dc49d710a316a5428dd2076fd33b6b5924.
+ZIP integrity, version metadata, template/map/plan coherence and exclusion of
+game/cache inputs pass. Helper/metadata source is 9254369; the unchanged C++
+engine/launcher were compiled at 063b20c. Private build/package evidence is
+scratch/v023; all caches, failed harness evidence and original inputs remain.
+An initial source-only translation harness omitted its explicit volume DLL path
+and rejected before native work; the corrected harness supplies the bundled
+library. This did not change the product or relax its guard.
+
+The source translation check subsequently reproduces Phase 188's intermittent
+missing native-completion output: partial logging with exit code zero is safely
+rejected. An eight-run cached 32-request probe loses completion/guard output once;
+the same engine with explicit-flush rollback also loses it once in eight. The
+default explicit-flush probe completes all eight, and the separate 32-record
+default/ultrawide/scaled cancellation/resume/persistence/default-rollback proof
+passes. This is bounded local acceptance, not a universal absence-of-failure claim.
+Commit 41b92c8 flushes offline stdout/stderr before releasing the startup barrier
+and before the guarded offline main return. Normal play remains buffered. The
+helper forwards GT5P_OFFLINE_FLUSH=0 to restore historical exit-only flushing;
+unrelated inherited overrides remain filtered. The completion guard stays strict.
+No renderer/runtime source, queue policy or draw ownership changes. Repeated
+probe evidence is scratch/v023/native-log-{baseline,flush,rollback}.json;
+both-translation proof is scratch/v23flushnative/validation.json.
+
+RC3 rebuilds the affected native translation units and the helper from 41b92c8,
+retaining the unchanged launcher and starter/maps/plan. Its 240-file ZIP is
+91,961,439 bytes, SHA256
+6e21d4f19220767195d0d157195f937c58685eb1f19cd293832bf1b4fbf4a00b.
+The checksum sidecar and build/package evidence are in scratch/v023. RC1/RC2 and
+failed-run caches/logs remain preserved; they are superseded for user acceptance.
+
+Final RC3 acceptance passes all 5,669 frozen-helper requests again, with all 482
+vertex variants and 5,669 fragment jobs reused, zero compiler workers, both
+native chunks, persisted blobs and unchanged source-cache hashes. Its frozen
+32-record fragment cancellation/resume/rollback and separate source 32-record
+default/scaled/ultrawide proof pass. A frozen retained 121-record collection
+verification passes cancellation/resume without resumed shader compilation,
+exact native persistence, incompatible-volume rejection and preserved share/
+ordinary cache selection. See scratch/v023/accept-rc3-validation.json,
+scratch/v23f3, v23c3, v23t3 and v23v3. These are final-bit checks; the earlier
+RC2 growth run provides the missing-shader compilation evidence.
+
+Three real saved-resolution/aspect restarts pass with distinct replacement
+game PIDs and old-process retirement. The actual RC3 F1 Debug actions also pass:
+Collect replaces the game, startup/movie play exports and verifies six records
+(zero pending), Verify revalidates that session, and Prepare opens the matched
+precompiler and cancels during reuse without changing the selected cache.
+All owned game/helper children exit. This collection is a small startup check,
+not menu/race coverage, and F1 preparation is a cancellation check; full completion
+is proven separately by the frozen helper. Debug, verification/result and
+preparation window-only captures are visually inspected. Both interactive
+Windows REPL tools fail initialization with "failed to write kernel assets"
+after reset/retry, so existing owned-process native harness messages and the
+existing PrintWindow approach perform these checks. A private controller first
+expects the helper to own preparation's window; it safely rejects that target,
+then is corrected to the actual launcher owner before cancellation. No product
+change or guard relaxation follows. Evidence: scratch/v23restart and v23ui.
+
+A final launcher-owned High Speed Ring route completes at 1920x1080, 16:9,
+2x MSAA, anisotropy 16, smooth colour, PS3_VERBOSE=0 and ordinary async policy.
+The starting grid highlights Honda Integra Type R '04 at row 8. The existing
+private save/cache fixture is retained (selection cccc.../shadercache); packs
+are enabled and local learned indices are used. Neither application, OS nor
+driver caches are cleared. The owned window is shown and foreground is required
+through intro/sampling; present counters and advancing race-clock images confirm
+live frames. Menu/loading/grid, rolling intro and gameplay at race-clock 19.550
+and 34.116 s, including nearby cars and the rear-view mirror, look correct in
+inspected samples. This single 30-second gameplay sampling run uses screenshots
+and variable AI/draw workloads; it is not a controlled hitch comparison or a
+claim that either reported hitch is solved. A native CLI argument-forwarding
+attempt fails before launch; an explicit PowerShell parameter wrapper runs the
+same harness successfully. Evidence: scratch/v23route. Save/settings, selected
+cache and post-play pack/index hashes are retained privately in
+scratch/v023/candidate-validation.json along with all final acceptance results.
+
+All build/compiler/native/game operations hold the shared
+Local\Tourline-Prologue-Isolated-Validation mutex with process preflight and owned
+cleanup; validation is sequential. No full game-data copy, cache deletion, shared
+runtime edit, main merge, tag, publication or CI build is performed. The RC3 ZIP
+and checksum are ready for the user's local acceptance using
+docs/release-v0.2.3-testing.md. Whole-game/settings/GPU breadth and controlled
+hitch acceptance remain separate work; only feature commits are pushed [skip ci].
+
 ## Phase 205 - Bounded parallel preparation reads (2026-11-03)
 
 Preparation now defaults to four bounded read workers for verified cache reuse,

@@ -1,5 +1,13 @@
 # Shader and pipeline coverage audit
 
+Phase 206's development starter contains 5,669 verified observed pipelines /
+1,881 original programs (477 VP, 1,404 FP). The later player collection adds
+1,219 unambiguous records; the final frozen helper grows the earlier cache and
+verifies every native key/persisted blob in 4,096/1,573 chunks. Maps cover all
+starter programs. Observed warmup membership is preserved; additions without
+phase membership stay on demand. These are partial observed-state records,
+not whole-game coverage or first-draw readiness. See [progress](progress.md).
+
 Phase 201 adds 1,348 verified dealership records to the development starter:
 4,450 observed pipelines / 1,581 original programs (443 VP, 1,138 FP). Original
 packed slices, both reconstructed stages, exact native keys and persisted blobs

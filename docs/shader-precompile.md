@@ -39,6 +39,13 @@ cancellation/resume and both bounded native chunks. The expanded lookup maps and
 observed warmup plan are issued together. This remains default-context observed
 coverage; it does not establish whole-game, all-settings or GT5 support.
 
+Phase 206's final frozen candidate also grows the full 5,669-record starter from
+the older cache, passing cancellation/resume, source preservation and all native
+keys/persisted blobs in 4,096/1,573 chunks. The retained-generation scan allowance
+now follows bounded catalogue/layout capacity, avoiding the old 100,000-entry
+rejection of valid retained storage. Link/ownership checks and cache retention
+remain in force. See [private candidate evidence](progress.md).
+
 Catalogue growth (Phase 200) supports up to 65,536 metadata records, 512 shards
 of 128 records, and 128 MiB total payload. These are safety ceilings, not a
 coverage target or a measured full-catalogue preparation capacity. Native jobs

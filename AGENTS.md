@@ -36,11 +36,11 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 205)
+## Start here: state of play (2026-11-03, Phase 206)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 205 is the latest).
+has the evidence, newest phase first (Phase 206 is the latest).
 
 ### What works now
 
@@ -51,7 +51,16 @@ has the evidence, newest phase first (Phase 205 is the latest).
   shaders and creating the native keys again. The source starter is 5,669 records
   / 1,881 programs (477 VP, 1,404 FP). The volume map adds 36 search-map members
   (201 total). Warmup membership is unchanged and re-pinned; the new keys stay on
-  the demand path. No commit, release, or full 5,669-record generation.
+  the demand path. Phase 206's final frozen candidate grows the old cache and
+  verifies all 5,669 native requests/persisted blobs in 4,096/1,573 chunks,
+  preserving its source through cancellation/rejection. A fresh private native
+  build and strict RC3 ZIP are complete. Offline completion flushing is explicit
+  with GT5P_OFFLINE_FLUSH=0 rollback; repeated/native/frozen checks pass. Three
+  real settings restarts, all F1 handoffs (six-record startup verification and
+  preparation cancellation) and a foreground HSR visual route pass. User local
+  acceptance remains pending; this is not whole-game/settings or hitch acceptance.
+  The retained-cache scan fix passes the real 194,180-entry read-only fixture
+  with ownership/link checks retained. No main merge, tag, release or CI build.
 
 - **Faster preparation reads (Phase 205):** four bounded readers check reusable
   shaders/driver hints, persisted cache and pack dependencies; all writes and
