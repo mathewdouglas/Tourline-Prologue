@@ -14,9 +14,24 @@ import pipeline_template
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    for name in ('catalog', 'template', 'volume-map', 'volume', 'elf', 'output'):
+    root = Path(__file__).resolve().parents[2]
+    template = root / 'assets/pipeline-templates/gt5p-disc-v2'
+    for name in ('catalog', 'volume', 'elf'):
         ap.add_argument('--'+name, type=Path, required=True)
+    ap.add_argument('--template', type=Path, default=template, help='starter folder (default: the shipped one)')
+    ap.add_argument('--volume-map', type=Path, default=None, help='default: <template>/search-map.json')
+    ap.add_argument('--output', type=Path, default=None,
+                    help='fresh folder; default is a private scratch folder whose result replaces '
+                         'assets/shader-enumeration/gt5p-disc-v1 after the player loader accepts it')
     a = ap.parse_args()
+    a.volume_map = a.volume_map or a.template / 'search-map.json'
+    final = root / 'assets/shader-enumeration/gt5p-disc-v1'
+    replace = a.output is None
+    if replace:
+        a.output = root / 'scratch' / 'enumeration-repin'
+        if a.output.exists():
+            raise ValueError('Remove scratch/enumeration-repin first')
+        a.output.parent.mkdir(exist_ok=True)
     a.output.mkdir(parents=True, exist_ok=False)
     fragments, rejected = enum.fragment_inventory(a.catalog, print)
     files = enum.container_files(a.catalog)
@@ -87,10 +102,20 @@ def main():
                 fragment_jobs=[[id_index[i], profile_index[tuple(p)]] for i, _, p in jobs],
                 vertex_jobs=[[i,g] for i in sorted(vertices) for g in (0,1)])
     write('plan.json', plan)
-    print(json.dumps(dict(fragments=len(fragments), vertices=len(vertices), fragment_jobs=len(jobs),
+    summary = dict(fragments=len(fragments), vertices=len(vertices), fragment_jobs=len(jobs),
                           vertex_jobs=len(vertices)*2, profiles=len(profiles), containers=len(archive['records']),
                           rejected_payloads=len(rejected), lookup=lookup,
-                          sizes={p.name:p.stat().st_size for p in a.output.iterdir()})))
+                          sizes={p.name:p.stat().st_size for p in a.output.iterdir()})
+    if replace:
+        from preparation_enumeration import load
+        load(a.output, a.template)
+        for old in final.glob('*.json'):
+            old.unlink()
+        for new in a.output.iterdir():
+            new.replace(final / new.name)
+        a.output.rmdir()
+        summary['installed'] = str(final)
+    print(json.dumps(summary))
 
 
 if __name__ == '__main__':

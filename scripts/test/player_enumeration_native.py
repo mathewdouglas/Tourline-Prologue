@@ -60,6 +60,7 @@ def main():
     ap.add_argument('--output',type=Path,required=True)
     ap.add_argument('--inputs',type=Path,help='Private path JSON; defaults to <output>/inputs.json')
     ap.add_argument('--budget',type=int,default=0,help='Cancel after this many new enumeration chunks')
+    ap.add_argument('--timeout',type=int,default=1200,help='Seconds before the run is terminated')
     a=ap.parse_args();idle();out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
     install=out/'install';storage=out/'storage'
     inputs=json.loads((a.inputs or out/'inputs.json').read_text())
@@ -105,6 +106,11 @@ def main():
         (out/'metadata-verification.json').write_text(json.dumps(stats,indent=2))
         print(json.dumps(dict(vertices=len(vp),fragments=len(fp),lookup=stats)))
         return
+    import preparation_enumeration as enum_module
+    from pipeline_template import read as read_template
+    plan=enum_module.load(ROOT/'assets/shader-enumeration/gt5p-disc-v1',ROOT/'assets/pipeline-templates/gt5p-disc-v2')['plan']
+    expected_jobs=len(plan['fragment_jobs'])+len(plan['vertex_jobs'])
+    expected_records=len(read_template(ROOT/'assets/pipeline-templates/gt5p-disc-v2')['records'])
     rollback=a.step=='rollback'
     pointer=storage/'prepared-cache.txt'
     before=pointer.read_text() if pointer.exists() else None
@@ -130,7 +136,7 @@ def main():
         child=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
         try:
             while child.poll() is None:
-                if time.perf_counter()-started>1200:raise TimeoutError('Player acceptance exceeded 20 minutes')
+                if time.perf_counter()-started>a.timeout:raise TimeoutError(f'Player acceptance exceeded {a.timeout} seconds')
                 if a.budget:
                     current={str(p) for p in storage.glob('preparation/*/enumeration/*-*.json')}
                     if len(current-prior)>=a.budget:
@@ -159,7 +165,7 @@ def main():
         states=[json.loads(p.read_text()) for p in storage.glob('preparation/*/preparation-state.json')]
         assert any(s['phase']=='interrupted' for s in states)
     else:
-        assert selected.is_dir() and report['counts']=={'prepared':5669}
+        assert selected.is_dir() and report['counts']=={'prepared':expected_records}
         if rollback:
             assert 'enumeration' not in report and not (selected.parent/'enumeration').exists()
             assert pointer.read_text()!=before and fingerprint(old_cache)==preserved
@@ -167,9 +173,9 @@ def main():
             for phase in ('menu','race'):
                 name=phase+'-shaders-v1.pack'
                 assert (selected/name).read_bytes()==(old_cache/name).read_bytes()
-        else:assert report['enumeration']['requested']==30112
+        else:assert report['enumeration']['requested']==expected_jobs
         from pipeline_template import read
-        records=read(install/'assets/pipeline-templates/gt5p-disc-v2')['records']
+        records=read(install/'assets/pipeline-templates/gt5p-disc-v2')['records'];assert len(records)==expected_records
         keys={r['key'] for r in records}
         assert {p.stem[4:] for p in selected.glob('pso_*.bin')}==keys
     assert (out/'storage/preparation'/('a'*24)/'shadercache/preserved.txt').read_text()=='Prior selected cache remains intact'
