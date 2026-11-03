@@ -36,13 +36,26 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-03, Phase 210)
+## Start here: state of play (2026-11-03, Phase 211)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 210 is the latest).
+has the evidence, newest phase first (Phase 211 is the latest).
 
 ### What works now
+
+- **Shader-stage profiling and fewer preparation opens (Phase 211, development):**
+  opt-in aggregate shader timings distinguish translation/compiler work, queue
+  residence, host reads and checkpoints. The full vertex control spends 0.07 s
+  translating versus 472 s accumulated across four compiler workers (120.46 s
+  wall). A capability-gated 128 MiB bytecode bundle replaces thousands of native
+  reads; repeated durable-code timestamps occur once per code per batch. An
+  ordered fresh 5,669-record pair passes exact shaders/native keys/persistence,
+  with identical packs, and reduces native input loading 22.11 -> 0.24 s.
+  Fragment host reads also use bounded sized reads and per-chunk reuse, retaining
+  cross-chunk conflict checks. Final acceptance/evidence and cache cleanup are
+  recorded in progress. Compiler/driver variation limits total-time attribution;
+  normal renderer policy and published v0.2.3 remain unchanged.
 
 - **Native preparation timing and bounded handoff (Phase 210, development):**
   default-off aggregate timing separates startup, recipe/shader reads, driver

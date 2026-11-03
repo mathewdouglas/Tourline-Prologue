@@ -403,7 +403,12 @@ def worker_main(argv):
         compiler = NativeCompiler(Path(argv[2]))
         sys.stdout.buffer.write(READY)
         sys.stdout.buffer.flush()
-        return serve(compiler, sys.stdin.buffer, sys.stdout.buffer)
+        try:
+            return serve(compiler, sys.stdin.buffer, sys.stdout.buffer)
+        finally:
+            if compiler.profile:
+                import json
+                sys.stderr.write('[vertex-profile] ' + json.dumps(compiler.timings) + '\n')
     except BrokenPipeError:
         return 1
     except Exception as exc:
@@ -491,6 +496,12 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
     monotonic = monotonic or time.monotonic
     sleep = sleep or time.sleep
     started = time.perf_counter()
+    from preparation_profile import enabled
+    profiling = enabled()
+    profile = dict(startup_us=0, dispatch_us=0, accept_us=0, checkpoint_us=0,
+                   idle_poll_us=0, shutdown_us=0)
+    def tick():
+        return time.perf_counter_ns() if profiling else 0
     selected, duplicates = _select_jobs(jobs, derive)
     report = dict(mode='batch', translation=translation, derive=derive, requested_variants=len(jobs),
                   duplicate_variants=duplicates, compiled_variants=0, failed_variants=0,
@@ -507,6 +518,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
         work.mkdir(parents=True, exist_ok=True)
         def launch(count, decoder_path, workspace):
             return open_workers(count, decoder_path, workspace, translation=translation)
+        stamp = tick()
         pool, workers = (opener or launch)(min(worker_limit, len(selected)), decoder, work)
         report.update(workers=len(workers), launches=len(workers), ownership=getattr(pool, 'ownership', None))
         if len(workers) > worker_limit:
@@ -527,6 +539,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                 if not READY.startswith(buf) or not worker.alive():
                     raise ProtocolError('Unknown vertex worker preamble')
                 sleep(interval)
+        if profiling:profile['startup_us'] = (tick() - stamp) // 1000
         pending = list(selected)
         inflight = {}
         buffers = {}
@@ -548,6 +561,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
             for worker in workers:
                 if id(worker) in usable and id(worker) not in inflight and pending and worker.alive():
                     job = pending.pop(0)
+                    stamp = tick()
                     payload = encode_request(job, derive=derive)
                     try:
                         worker.write(payload)
@@ -564,6 +578,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     report['inflight_bytes_max'] = max(report['inflight_bytes_max'],
                                                        sum(item[2] for item in inflight.values()))
                     progressed = True
+                    if profiling:profile['dispatch_us'] += (tick() - stamp) // 1000
             for worker in list(workers):
                 if id(worker) not in inflight:
                     continue
@@ -604,11 +619,16 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     if frame[0] != 'result':
                         raise ProtocolError('Unknown vertex worker result')
                     if derive:
+                        stamp = tick()
                         source_id, code_id, code = accept_derived(job, frame[1], frame[2], frame[3])
                     else:
+                        stamp = tick()
                         source_id, code_id, code = accept_result(job, frame[1], frame[2], frame[3])
+                    if profiling:profile['accept_us'] += (tick() - stamp) // 1000
                     if on_ready:
+                        stamp = tick()
                         on_ready(job, source_id, code_id, code)
+                        if profiling:profile['checkpoint_us'] += (tick() - stamp) // 1000
                     compiled[identity] = (source_id, code_id, code)
                     report['compiled_variants'] += 1
                 except ProtocolError as exc:
@@ -627,7 +647,10 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                     report['failed_variants'] += 1
                 progressed = True
             if not progressed:
+                stamp = tick()
                 sleep(interval)
+                if profiling:profile['idle_poll_us'] += (tick() - stamp) // 1000
+        stamp = tick()
         shutdown = monotonic() + SHUTDOWN_SECONDS
         for worker in workers:
             if worker.alive():
@@ -644,6 +667,7 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
                 except OSError:
                     pass
             sleep(interval)
+        if profiling:profile['shutdown_us'] = (tick() - stamp) // 1000
         return compiled, failures, report
     finally:
         if pool is not None:
@@ -653,6 +677,19 @@ def compile_jobs(jobs, decoder, work, poll=None, on_ready=None, opener=None, mon
             finally:
                 pool.retire(workers)
         report['seconds'] = time.perf_counter() - started
+        if profiling:
+            import json
+            from shader_coverage import bounded_read
+            rows = []
+            for path in sorted(work.glob('worker-*.log')):
+                try:
+                    for line in bounded_read(path, 65536).decode('ascii', errors='replace').splitlines():
+                        if line.startswith('[vertex-profile] '):
+                            rows.append(json.loads(line[len('[vertex-profile] '):]))
+                except (ValueError, OSError):
+                    pass  # Cancellation may stop a worker in its final diagnostic write.
+            profile['workers'] = rows
+            report['timings'] = profile
 
 
 def ctypes_kernel():
@@ -994,6 +1031,8 @@ def open_workers(count, decoder, work, translation='default'):
     if not 1 <= count <= MAX_WORKERS:
         raise ValueError('Vertex compiler worker cap exceeded')
     environment = shader_translation.environment(translation)
+    from preparation_profile import enabled
+    if enabled():environment['GT5P_PREPARE_SHADER_PROFILE']='1'
     pool = _WinPool()
     workers = []
     try:

@@ -246,7 +246,8 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             derived.append(dict(template_key=record['key'], key=row['key'],
                                 vp_source=row['vp_source'], fp_source=row['fp_source']))
         native_counts = None
-        handoff.release()
+        handoff.release(native_root, lambda: progress('translation-native-input',
+            dict(completed=len(document['records']),total=len(document['records']))) if progress else None)
         native_timings=[]
         if requests:
             env = offline_env(game_root, cache)

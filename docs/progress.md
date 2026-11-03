@@ -9,6 +9,119 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 211 - Shader-stage profiling and fewer preparation file opens (2026-11-03)
+
+`GT5P_PREPARE_SHADER_PROFILE=1` adds default-off aggregate instrumentation.
+Vertex workers report translation and D3DCompile intervals once at shutdown;
+the owner reports startup, dispatch, acceptance, checkpoint callbacks, idle
+polling and shutdown. Fragment batches report raw input reads, translation/queue
+submission, throttle/drain waits, accumulated compiler/persistence intervals and
+queue residence, with host staging/process/result intervals. These are elapsed
+intervals, not sampled CPU time. Worker totals, queue residence and owner waits
+overlap and must not be added to wall time. Normal gameplay never enables them.
+
+The full control's 482 vertex variants take 120.46 s wall, with 472.35 s accumulated
+in four compiler workers, 0.072 s translation and 0.479 s checkpoint callbacks.
+Its main fragment batch spends 402.35 s accumulated in compiler calls versus
+1.04 s translation/submission. The bounded queue remains occupied; its 98.02 s
+owner throttle and accumulated queue residence overlap compiler execution. This
+does not identify polling or translation as a large remaining optimization.
+The host instead spends 8.61 s staging fragment inputs and 9.37 s reading results.
+
+Native preparation now capability-gates `GT5P_OFFLINE_CODE_V1` alongside V2
+recipe/result handoff. `GT5P_PREPARE_CODE_BUNDLE=auto` is the default; `=0`
+restores individual reads and repeated code timestamp operations, while `=1`
+requires matching capabilities. The private transient transport contains a
+16-byte header, at most 8,192 numeric index entries and 128 MiB of bytecode.
+Host writes stream existing verified references without another bytecode copy;
+incomplete pooling/budget overflow falls back to the existing individual path.
+The native owner validates exact layout, sizes, offsets, uniqueness, complete
+checksums, DXBC markers and every recipe dependency before any requested driver
+call. It never mixes an invalid/incomplete bundle with disk fallback. Owned
+arena bytes are freed on completion. The successful helper removes only the
+transient request bundle after native children exit; interrupted transports are
+rebuilt on resume. Durable shader checkpoints/cache formats and full final
+persistence verification are retained. Shared durable code timestamps need the
+existing successful operation once per code per native batch, avoiding repeated
+metadata opens while preserving that generation's retention timestamps.
+
+The fragment host defaults to `GT5P_PREPARE_FRAGMENT_IO=1`; `=0` restores the
+earlier per-request checks/rereads. Raw input is checked/written once per distinct
+program per chunk, with complete-byte identity checks. Native children finish
+before results are read. The existing opened-handle size/sentinel reader checks
+each distinct output key once per chunk into the existing 128 MiB pool. A key
+seen in another chunk must match the complete retained bytes; collisions or
+changed outputs still reject. Source/code IDs, native keys, chunk callbacks,
+checkpoint publication and cancellation ownership stay mandatory/unchanged.
+
+Three ordered, profiled, application-cache-fresh full runs use default translation,
+four compiler workers, the same original packed volume/ELF and all 5,669 records.
+The first two share one private engine and the earlier fragment host; the final
+run adds the fragment host changes with another private build of the same runtime
+patch. Hardware: i5-12400F (6C/12T), 16 GB RAM, RTX 4060, driver 32.0.16.1088;
+`PS3_VERBOSE=0`. OS/driver caches are retained. This is a development series,
+not ABBA or a driver-cold test.
+
+| Measured cost | Individual code reads | Native bundle | Final fragment I/O |
+| --- | ---: | ---: | ---: |
+| Full preparation | 364.20 s | 313.25 s | 313.98 s |
+| Vertex batch wall | 120.46 s | 120.55 s | 114.77 s |
+| Fragment stage wall | 128.98 s | 120.78 s | 111.09 s |
+| Fragment host input/results | 17.98 s | 15.56 s | 1.28 s |
+| Native stage process wall | 76.67 s | 36.68 s | 53.12 s |
+| Native shader/bundle loading | 22.11 s | 0.236 s | 0.225 s |
+| Driver creation | 24.57 s | 9.57 s | 25.35 s |
+| Recipe/code persistence | 11.39 s | 8.51 s | 8.85 s |
+
+Final preparation is 50.22 s / 13.79% shorter than the control. The middle run's
+driver interval changes substantially; it must not all be credited to transport.
+The final driver interval is closer to the control, but compiler and other
+timings still vary, so this is not a universal speedup claim. Native individual
+code reads fall 4,468 -> 0, replaced by two bundle reads; 6,870 repeated timestamp
+operations are skipped. The bundle carries 4,067 code bodies / 62,189,856 payload
+bytes (62,254,944 serialized bytes). Native arena highwater is about 59.3 MiB;
+the previous first chunk's code cache was about 51.0 MiB. Final fragment input
+checks are 1,406 for 3,696 exact requests, and 3,609 distinct output reads. Output
+file count stays 20,926: this reduces opens/rereads, not the durable cache layout.
+The transient bundle is confirmed absent after successful preparation.
+
+Every full run compiles 482 VP variants / 3,696 exact fragment requests (3,609
+canonical compiler jobs), with zero application shader reuse. All 5,669 exact
+native requests and persisted blobs pass in 4,096/1,573 sequential chunks, with
+zero supplied cached-driver-blob calls. Menu/race packs match each other and
+Phase 210 byte-for-byte. No native concurrency, draw-policy, root-signature/key
+ABI, compiler/job memory cap or coverage change is introduced. The conservative
+runtime source fingerprint and all starter/plan/index pins are reissued;
+all 5,669 records, maps and observed warmup membership stay unchanged.
+
+Real native rejection checks cover corrupt/truncated bytecode bundles and a valid
+bundle missing a recipe dependency: zero requested driver calls, prior result
+manifest preserved. Existing corrupt shared code, valid-checksum pointer, recipe
+truncation and ID negatives still pass. Actual-header native tests cover bounds,
+uncached fallback, default-off clocks, bundle offsets/checksums and timestamp
+scope. Host tests cover bounded spill, old-capability fallback, interrupted bundle
+writes/rebuilds, transport removal, changed output across chunks, rollback, result
+membership, timeout and publication/cancellation failures. Metadata, translation,
+large-catalogue and package checks pass. Final frozen default/ultrawide 32-record
+acceptance cancels after eight fragments, resumes all eight, validates every
+native key/blob, preserves source/selection, and passes both native handoff
+rollbacks, chunk reuse and invalid worker/handoff/profile/fragment-I/O rejection.
+
+Evidence: ignored `scratch/native-preparation-211/{subset,full,final}/` summaries,
+acceptance/frozen reports, `policy.json` and `comparison.json`. Reproduction:
+`preparation_native_profile.py --full --code-study --fragment-io 0`, followed by
+`--full --shared-only --fragment-io 1`, with the reference/input arguments in the
+retained controller CMDs, under `isolated_validation.ps1` and an x64 VS environment.
+All private test shader/driver caches, raw intermediates, helper/PyInstaller and
+engine/build outputs are removed automatically; existing user/OS/driver caches
+stay intact. No live gameplay/stutter, whole-game or multi-GPU acceptance is
+claimed. Main, tags and published v0.2.3 stay unchanged; feature push `[skip ci]`.
+
+Cleanup exception: automatic approval review blocked deletion of the ignored
+`native-preparation-211/author-source` copy (0.87 MiB) and its two authoring scripts,
+returning only "blocked by policy". They remain private. They are runtime source,
+not game data, shader caches or build outputs; the test-output cleanup above passed.
+
 ## Phase 210 - Native timing and bounded intermediate handoff (2026-11-03)
 
 Native preparation now exposes default-off aggregate timing via

@@ -671,7 +671,7 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
             report['records'].append(dict(key=r['key'], status='incompatible', reason=str(exc)))
     report['native_input_seconds']=time.perf_counter()-input_started
     if requests:
-        handoff.release()
+        handoff.release(root, lambda: checkpoint.progress('native-input',dict(completed=len(jobs),total=len(jobs))) if checkpoint.progress else None)
         checkpoint.stage('native',requested=len(requests))
         env = offline_env(game_root, cache)
         env.update(RSX_PSO_PREPARE_BATCH=str(root), RSX_PSO_TEMPLATE_PREPARE='1', RSX_PSO_RECIPE_KEEP_DAYS='0')

@@ -31,6 +31,11 @@ def main():
 #include <stdio.h>
 #include <string.h>
 typedef uint64_t u64;typedef uint32_t u32;
+#define PSO_WARM_CODE_MAX (4u*1024u*1024u)
+static u64 pso_hash_bytes(u64 hash,const void* ptr,size_t n) {
+    const unsigned char* p=(const unsigned char*)ptr;
+    for(size_t i=0;i<n;i++){hash^=p[i];hash*=1099511628211ull;}return hash;
+}
 typedef struct { unsigned char data[2760]; } PsoWarmRecipe;
 static int pso_warm_recipe_valid(const PsoWarmRecipe* r){return r->data[0]==42;}
 static unsigned loaded,freed,ticks;
@@ -77,6 +82,28 @@ int main(void) {
     names[0][0]='f';assert(!pso_offline_requests("requests.bin",names,2) && !s_offline.requests);
     names[0][0]='a';f=fopen("requests.bin","ab");fputc(0,f);fclose(f);
     assert(!pso_offline_requests("requests.bin",names,2) && !s_offline.requests);
+    unsigned char data[16+16+8]={0};memcpy(data,"GT5PCOD1",8);
+    u32 one=1,eight=8,at=32;u64 hash=pso_hash_bytes(1469598103934665603ull,"DXBCtest",8);
+    memcpy(data+8,&one,4);memcpy(data+12,&eight,4);memcpy(data+16,&hash,8);
+    memcpy(data+24,&eight,4);memcpy(data+28,&at,4);memcpy(data+32,"DXBCtest",8);
+    f=fopen("code.bin","wb");fwrite(data,1,sizeof data,f);fclose(f);
+    s_offline.active=1;s_offline.shared="pool";
+    assert(pso_offline_code_bundle("code.bin") && s_offline.arena && s_offline.codes==1);
+    b=pso_offline_code("unused",hash,8,&owned);assert(b&&!owned&&!memcmp(b,"DXBCtest",8));
+    assert(!pso_offline_code("unused",hash+1,8,&owned));
+    assert(!pso_offline_code_persisted("pool",hash,8,0));
+    pso_offline_code_persisted("pool",hash,8,1);assert(pso_offline_code_persisted("pool",hash,8,0));
+    assert(pso_offline_code_persisted("POOL",hash,8,0));
+    assert(!pso_offline_code_persisted("other",hash,8,0));pso_offline_clear();
+    for(int damage=0;damage<4;damage++) {
+        unsigned char broken[sizeof data];memcpy(broken,data,sizeof data);
+        if(damage==0)broken[39]^=1;
+        if(damage==1)broken[28]=33;
+        if(damage==2)memset(broken+12,255,4);
+        f=fopen("code.bin","wb");fwrite(broken,1,sizeof broken-(damage==3),f);fclose(f);
+        s_offline.active=1;s_offline.shared="pool";
+        assert(!pso_offline_code_bundle("code.bin")&&!s_offline.arena&&!s_offline.codes);pso_offline_clear();
+    }
     puts("native bounded cache, uncached fallback, default-off clock and bundle guards passed");return 0;
 }
 ''')

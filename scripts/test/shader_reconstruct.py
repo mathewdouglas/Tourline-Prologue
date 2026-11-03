@@ -10,6 +10,17 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
 from preparation_workers import compiler_workers
+from preparation_profile import enabled
+
+assert not enabled({}) and enabled({'GT5P_PREPARE_SHADER_PROFILE':'1'})
+for value in ('','2','true'):
+    try:enabled({'GT5P_PREPARE_SHADER_PROFILE':value})
+    except ValueError:pass
+    else:raise AssertionError('Invalid shader profile accepted')
+with patch.dict(os.environ,{'GT5P_PREPARE_SHADER_PROFILE':'0','RSX_PREPARE_SHADER_PROFILE':'1'}):
+    assert 'RSX_PREPARE_SHADER_PROFILE' not in m.offline_env(Path('game'),Path('cache'))
+with patch.dict(os.environ,{'GT5P_PREPARE_SHADER_PROFILE':'1'}):
+    assert m.offline_env(Path('game'),Path('cache'))['RSX_PREPARE_SHADER_PROFILE']=='1'
 
 with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':'0','RSX_PSO_PREPARE_PROFILE':'1'}):
     assert 'RSX_PSO_PREPARE_PROFILE' not in m.offline_env(Path('game'),Path('cache'))

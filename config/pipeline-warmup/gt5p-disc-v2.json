@@ -1,7 +1,7 @@
 {
   "schema": "gt5p-pipeline-warmup-plan",
   "version": 1,
-  "template_sha256": "b05e14ca71694f85da2f76e0403a685d7e48e98e7060fcbc3451cdf03efb7606",
+  "template_sha256": "8ae9b2fd1ecfbcf8d54c5cc38a332a5d79ddae96b5e146d4c7ff64640f653371",
   "context": "default-template-keys-v1",
   "scope": "Observed renderer notifier membership, including prepass requests; not first-draw readiness or residency.",
   "phases": {
