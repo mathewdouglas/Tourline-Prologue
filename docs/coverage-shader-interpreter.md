@@ -14,6 +14,16 @@ Default is off. `RSX_SHADER_INTERP=0` (unset) must leave pipeline keys, HLSL,
 DXBC and pixels unchanged. Unvalidated behaviour stays on an environment
 switch.
 
+Stage 1 offline status (2026-11-03): the fragment encoder and the ps_5_1
+interpreter match `rsx_fp_decompile_buffered` on WARP. Three synthetic
+programs and 80 catalogue programs (30 ALU, 20 branch, 20 textured, 10
+predicated) plus 5 of those textured programs resampled as cube unit 0 all
+compared equal (max abs error 0, tolerance 1e-4). The runtime hook, the
+overlay patch, and the in-game `force` screenshots are not done. The
+instruction image and register file below are the ones that comparison
+used. An earlier draft of this section described a different packing and a
+64-wide register file; that draft was not what ran.
+
 Runtime facts below are from a private copy of ps3recomp `4e8f3ca8` plus
 `patches/ps3recomp-4e8f3ca8-local.patch` (`libs/video/rsx_fp_decompiler.c`,
 `rsx_vp_decompiler.c`, `rsx_d3d12_backend.c`). The asset-catalogue counts are
@@ -444,21 +454,43 @@ pipelines:
   that shape. Sampling a null view returns 0, and the profile's shape id
   never samples it.
 
-`b1` for an interpreter draw is a different view of the same ring, not a new
-register. The interpreter declaration is fixed:
+`b1` for an interpreter draw is the same wide layout the backend already
+uploads (4352 bytes). Named `fp_constants[N]` is float4 index `5 + N`.
+Profile bits do not go in `b1`. They go in a 64-byte header in the program
+arena. Parameter 6 is four pixel root constants at `b3`: the byte offset of
+that header, then three zeros. A one-dword root constant does not match the
+16-byte cbuffer slot and `CreateGraphicsPipelineState` returns
+`E_INVALIDARG`.
 
 ```
-float4 profile[8];          /* shape, masks, alpha, wpos, dither, export */
-float4 rsx_texscale[4];
-float4 rsx_texscale_hi[6];
-float4 rsx_texexpand[4];
-float4 fp_constants[256];
+cbuffer PSConstants : register(b1) { /* wide layout above */ };
+cbuffer RSXInterpRoot : register(b3) {
+    uint rsx_ip_hdr; uint pad0; uint pad1; uint pad2;
+};
+ByteAddressBuffer rsx_iprog : register(t16);
 ```
+
+Header dwords at `rsx_ip_hdr`: instruction byte offset, instruction count,
+flags, shape (2 bits x 16), unnormalized mask, sRGB read mask, shadow
+word, sampler nibbles 0-7, sampler nibbles 8-15. Flag bits: 0 half, 4
+alpha test, 5 fog, 6 WPOS scale, 7 final dither, 8 log2-of-abs (default
+on), 9 game dither, 10 sRGB write. The harness sets only bit 8, puts
+instructions at byte 64, and passes root constant 0.
+
+Textures are ps_5_1 arrays: `Texture2D[16]` at t0, `TextureCube[16]` at
+t32, `Texture3D[16]` at t48. ps_5_0 cannot dynamically index them, and a
+literal switch of 16 units by 16 samplers by 3 shapes compiled to about
+460KB unoptimized and heap-corrupted pipeline creation
+(`0xC0000374`). Samplers stay the sixteen static samplers. A sampler
+array asks for a descriptor range the static-sampler signature does not
+bind. The shader switches on the sampler index and indexes the texture
+array. Optimized bytecode is about 72KB (single target) and 74KB (MRT).
 
 Specialized draws keep today's `b1` layout and today's root signature. The
 replay loop binds the interpreter signature only for an interpreter draw and
 binds the guest signature again afterwards. `RSX_SHADER_INTERP=0` does not
-create the second signature and does not touch a root binding.
+create the second signature and does not touch a root binding. That replay
+hook is not in the backend yet.
 
 ## Interpreter program image
 
@@ -466,26 +498,34 @@ The CPU decodes the guest program once per distinct ucode (cached beside the
 shader cache, in memory only) into a fixed 16-byte instruction the pixel
 shader can switch on. The image is not NV40 bitfields and it is not HLSL.
 
-Each instruction:
+Each instruction is one `uint4`, little-endian, loaded with `Load4`.
 
-| Bytes | Field |
-| --- | --- |
-| 0 | opcode, or `FLOW` plus the flow op |
-| 1 | dest index (6) and file (1) and "no write" (1) |
-| 2 | write mask (4), saturate (1), scale (3) |
-| 3 | predicate: cc register, comparison, set-cond register, never bit |
-| 4..6 | three sources: type (2), file (1), negate (1), absolute (1), modifier (3) |
-| 7 | source indices, or the low half of a flow target |
-| 8..11 | swizzle nibbles, four per source, plus condition swizzle |
-| 12..13 | texture unit, `_bx2`, perspective, input-source index |
-| 14..15 | flow end / else word, or loop init / count / step |
+`u0`: opcode 6, dest 6, dest-half, no-write, mask 4, saturate, scale 3,
+predicate 2 (0 unconditional, 1 never, 2 conditional), compare 3, cc-read,
+set-cond, cc-write, perspective, FLOW.
 
-Constants stay in `fp_constants`, not in the instruction. The image header is
-16 bytes: instruction count, constant count, export file, target count,
-depth-export bit, a support flag, and the WPOS-used bit. A program the
-encoder rejects (unterminated, over 512 instructions, over 256 constants,
-shadow or gamma layout the translator rejects, nesting it cannot encode)
-sets the support flag. The draw then uses today's async path.
+ALU `u1`: source0 22, input index 4, texture unit 4, bx2. ALU `u2`:
+source1 22, condition swizzle 8. ALU `u3`: source2 22, constant slot 8.
+Each source is 22 bits: type 2, index 6, half, negate, absolute, precision
+3, swizzle 8. Swizzle xyzw is `0xE4`.
+
+FLOW `u1`: else PC 16, end PC 16 (else `0xFFFF` means none). FLOW `u2`:
+init 8, end count 8, step 8. FLOW condition swizzle is `u3` bits 0-7.
+Malformed flow, CAL, and RET occupy a PC slot and do nothing. An ALU
+opcode the emitter does not handle is the same kind of slot, with
+set-cond cleared. KIL stays opcode `0x12` and discards after the loop.
+
+Constants stay in `fp_constants`, not in the instruction. The per-draw
+header is the 64-byte record above, not a prefix of the instruction
+stream. The encoder rejects a program that is unterminated, longer than
+512 instructions, has more than 256 constants, nests flow deeper than 8,
+overflows the destination buffer, or uses a temp or dest index at or
+above 48 on an opcode it actually executes. It does not reject cube, 3D,
+shadow, gamma, bx2, or an unhandled opcode. Of 8,142 catalogue programs,
+8,021 encode: 73 unterminated (the decompiler also rejects those), 49
+temp-index, max instructions 433, max constants 142, max nest 4. Depth-copy
+unnorm bits, mip-stack bits, and stencil bit 26 are draw-time skips, not
+encoder rejects. A rejected program keeps today's async path.
 
 Upload is a per-frame arena, not a buffer per draw. One upload buffer of
 2 MiB (about 4,000 draws at the catalogue mean of ~55 instructions, and the
@@ -506,18 +546,22 @@ skipped, matching the translator. IFE nesting is encoded as explicit else
 and end instruction indices, walked with a small stack of 8 in the shader.
 Deeper nesting is a CPU rejection.
 
-Register file. `float4 r[64]` and `float4 h[64]`, plus `float4 cc[2]`. Index
-48 is the highest export the translator names (`h8`); 64 matches the 6-bit
-index. Both files start at 0. Dynamic indexing of that size is legal in
-`ps_5_0` and lands in indexable temporary memory. That is the expensive
-part. A catalogue-mean program of 55 instructions, each indexing those
-arrays, is expected to cost several times a specialized shader. It is still
-expected to cost less than a 50 ms compile hitch, and it runs for one or a
-few frames. This cost is a hypothesis until `RSX_GPU_TIME` is read on a
-dealership frame in `force` mode.
+Register file. The decompiler's files are `float4 r[48]` and `float4 h[48]`,
+plus two condition registers. The interpreter uses those sizes. A used
+index at or above 48 is an encoder reject (49 catalogue programs). Both
+files start at 0. Dynamic indexing lands in indexable temporary memory.
+That is the expensive part. A catalogue-mean program of 55 instructions is
+expected to cost several times a specialized shader, and less than a 50 ms
+compile hitch, for one or a few frames. This cost is a hypothesis until
+`RSX_GPU_TIME` is read on a dealership frame in `force` mode. The offline
+WARP run did not measure GPU time. Default D3DCompile optimisation of the
+ps_5_1 shader takes about 15 s (single target) and 25 s (MRT). The earlier
+ps_5_0 literal texture switch was still optimising after 8 minutes and was
+not used.
 
-Texture shape in the shader. A profile nibble per unit is 0 = 2D, 1 = cube,
-2 = 3D. The sample is a switch on that nibble. Unnormalized units multiply
+Texture shape in the shader. Two profile bits per unit are 0 = 2D, 1 = cube,
+2 = 3D. The sample indexes the matching ps_5_1 texture array and switches
+the static sampler. Unnormalized units multiply
 the coordinate by `rsx_texscale` first. Gamma and expand run on the fetched
 value using the lane masks in `profile` and `rsx_texexpand`. Shadow units
 that passed the CPU check use the same compare helper as the translator,
@@ -565,11 +609,22 @@ Stage 0 is this document.
 Stage 1 is the fragment interpreter, the second root signature, the arena,
 the CPU encoder, and `RSX_SHADER_INTERP`. Validation is offline first: a
 WARP harness compiles the specialized shader from `rsx_fp_decompile_*` and
-the interpreter, draws a small grid with synthetic interpolants and the
+the interpreter, draws an 8x8 grid with synthetic interpolants and the
 program's own constants, and compares pixels. Texture programs get a
 deterministic 2D or cube texture. Programs the encoder rejects are counted,
 not compared. The harness reads the catalogue in place and writes only under
 `scratch/`. Nothing from the catalogue is committed.
+
+The offline pieces are `scripts/test/gen_fp_interp_hlsl.py` (the HLSL),
+`scripts/test/fp_interp_harness.c`, and `scripts/test/fp_interp_warp.py`.
+The encoder is `rsx_fp_interp.h` in the private runtime copy; it is not in
+the overlay patch until the backend includes it. On 2026-11-03 the locked
+WARP compare (`fp-interp-warp`) reported synthetic math, colour, and texture
+worst error 0, then `pass=80 fail=0 skip=0 spec_compile_fail=0 worst=0
+cube_pass=5 cube_fail=0`. Epilogue flags (alpha test, fog, WPOS scale, dither,
+sRGB write) were off, so this matches the decompiler, not yet the backend
+rewrites. In-game `force` screenshots are still required before stage 1 is
+done.
 
 Then one `force` game run on the dealership and one on High Speed Ring,
 screenshots against a normal run (pixel diff), and `RSX_GPU_TIME` per frame.
