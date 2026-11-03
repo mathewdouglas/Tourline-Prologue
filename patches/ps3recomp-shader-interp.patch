@@ -1,33 +1,67 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index b0a23fc..86163f4 100644
+index b0a23fc..e558398 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
-@@ -238,6 +238,24 @@ typedef struct {
+@@ -236,8 +236,50 @@ typedef struct {
+     u8    uw_edge;      /* ultrawide: edges stretched to the screen's (vp_record_cb), scissor widened */
+     u16   rb_x, rb_y, rb_w, rb_h;   /* its rectangle (the scissor fields get rewritten) */
      u32   rb_ea;
++    u32   vp_hash;      /* vertex-interpreter program key; 0 when that switch is off */
  } D3D12DrawRecord;
  
-+/* Fragment interpreter (RSX_SHADER_INTERP). Definitions are at the bottom of
-+ * this file. Mode 0 returns before touching a signature, heap, or binding. */
++/* Shader interpreters (RSX_SHADER_INTERP for the fragment stage,
++ * RSX_SHADER_INTERP_VP for the vertex stage). Definitions are at the bottom of
++ * this file. Mode 0 returns before touching a signature, heap, or binding.
++ * *_cfg is the process setting; *_mode is what this replay frame uses (they
++ * differ only under RSX_SHADER_INTERP_AB). */
++static int fp_interp_cfg(void);
 +static int fp_interp_mode(void);
 +static u32 fp_interp_srv_extra(void);
 +static void fp_interp_init_views(void);
 +static void fp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp);
 +static void fp_interp_startup(void);
 +static void fp_interp_shutdown(void);
-+static void fp_interp_sig_reset(void);
-+static void fp_interp_use_sig(int on);
-+static void fp_interp_sig_restore(void);
 +static void fp_interp_note_fallback(void);
 +static void fp_interp_log_tick(void);
 +static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
 +    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
-+    u32* hdr_off);
++    int vp_stage, u32* hdr_off);
 +static void fp_interp_bind(const D3D12DrawRecord* dr, u32 draw_i, u32 hdr_off);
++static void interp_frame_begin(void);
++static const char* interp_ab_label(void);
++static void interp_set_sig(int kind);
++static void interp_sig_restore(void);
++
++static int vp_interp_cfg(void);
++static int vp_interp_mode(void);
++static void vp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp);
++static void vp_interp_startup(void);
++static void vp_interp_shutdown(void);
++static void vp_interp_note_fallback(void);
++static void vp_interp_log_tick(void);
++static void vp_interp_see(u32 hash, const u8* bytes, u32 nbytes, u32 base);
++static u32 vp_interp_last_hash(void);
++static void vp_ps_hold_clear(void);
++static void vp_ps_hold_set(ID3DBlob* pb);
++static ID3DBlob* vp_ps_hold_ref(void);
++static int vp_interp_stage(const D3D12DrawRecord* dr, u32* hdr_off);
++static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
++    u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil, ID3DBlob* ps);
++static void vp_interp_bind(u32 hdr_off, int on_fp_sig);
++static u32 s_vp_seen_hash;
 +
  /* Offscreen render target (render-to-texture). Persistent across frames --
   * pass N's output is sampled by pass N+1 and possibly by later frames. */
  typedef struct {
-@@ -1869,7 +1887,7 @@ static int init_d3d12(u32 width, u32 height)
+@@ -374,6 +416,7 @@ typedef struct {
+                              * pipelines and must not share a cache entry. */
+     ID3D12PipelineState* pso;
+     u64 native_hash; /* race recipe membership; not part of shader identity */
++    ID3DBlob* ps_keep; /* specialized PS bytecode for the vertex interpreter; NULL when that switch is off */
+ } VPFPEntry;
+ /* Hash index over s_d3d.vp_fp (Phase 59): entry index + 1 per bucket, 0 empty.
+  * Entries are never moved. The old cache evicted its oldest entry when full,
+@@ -1869,7 +1912,7 @@ static int init_d3d12(u32 width, u32 height)
          {
              D3D12_DESCRIPTOR_HEAP_DESC hd = {0};
              hd.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -36,7 +70,7 @@ index b0a23fc..86163f4 100644
              hd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
              hr = s_d3d.device->lpVtbl->CreateDescriptorHeap(
                  s_d3d.device, &hd, &IID_ID3D12DescriptorHeap, (void**)&s_d3d.srv_heap);
-@@ -1884,10 +1902,11 @@ static int init_d3d12(u32 width, u32 height)
+@@ -1884,10 +1927,11 @@ static int init_d3d12(u32 width, u32 height)
                  nv.Texture2D.MipLevels = 1;
                  D3D12_CPU_DESCRIPTOR_HANDLE hh;
                  s_d3d.srv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(s_d3d.srv_heap, &hh);
@@ -49,31 +83,128 @@ index b0a23fc..86163f4 100644
              }
          }
  
-@@ -2020,6 +2039,7 @@ static int init_d3d12(u32 width, u32 height)
+@@ -2020,6 +2064,8 @@ static int init_d3d12(u32 width, u32 height)
              sig->lpVtbl->Release(sig);
              s_vgpu_rs = s_d3d.vp_root_sig != NULL;
          } else if (err) { printf("[D3D12] VP root sig: %s\n", (const char*)err->lpVtbl->GetBufferPointer(err)); err->lpVtbl->Release(err); }
 +        fp_interp_make_root_sig(samp);
++        vp_interp_make_root_sig(samp);
  
          /* raw float4 vertex buffer + constant bank (both UPLOAD, persistently mapped) */
          D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
-@@ -2161,6 +2181,7 @@ static int init_d3d12(u32 width, u32 height)
+@@ -2161,6 +2207,8 @@ static int init_d3d12(u32 width, u32 height)
                 (void*)s_d3d.vp_root_sig, (void*)s_d3d.vp_vb, (void*)s_d3d.vp_cb);
      }
  
 +    fp_interp_startup();
++    vp_interp_startup();
      printf("[D3D12] Initialization complete (%ux%u, %u buffers, pipeline=%s)\n",
             width, height, FRAME_COUNT,
             s_d3d.pipeline_ready ? "ready" : "NOT ready");
-@@ -11572,6 +11593,7 @@ static void render_frame_body(void)
+@@ -2725,15 +2773,18 @@ static int vp_get_vs_mode(const rsx_state* st, int gpu)
+ {
+     static int on = -1;
+     if (on < 0) { const char* e = getenv("RSX_VS_MEMO"); on = !(e && e[0] == '0'); }
+-    static const rsx_state* m_st[2]; static u32 m_gen[2], m_start[2], m_bytes[2]; static int m_idx[2], m_ok[2];
++    static const rsx_state* m_st[2]; static u32 m_gen[2], m_start[2], m_bytes[2], m_hash[2]; static int m_idx[2], m_ok[2];
+     gpu = gpu ? 1 : 0;
+     if (on && st && m_ok[gpu] && m_st[gpu] == st && m_gen[gpu] == st->vp_ucode_gen &&
+-        m_start[gpu] == st->transform_program_start && m_bytes[gpu] == st->vp_ucode_bytes)
++        m_start[gpu] == st->transform_program_start && m_bytes[gpu] == st->vp_ucode_bytes) {
++        if (vp_interp_cfg()) s_vp_seen_hash = m_hash[gpu];
+         return m_idx[gpu];
++    }
+     int r = vp_get_vs_mode_impl(st, gpu);
+     if (r == VS_PENDING) return r;            /* not remembered: asked again next draw */
+     if (st) { m_st[gpu] = st; m_gen[gpu] = st->vp_ucode_gen; m_start[gpu] = st->transform_program_start;
+-              m_bytes[gpu] = st->vp_ucode_bytes; m_idx[gpu] = r; m_ok[gpu] = 1; }
++              m_bytes[gpu] = st->vp_ucode_bytes; m_idx[gpu] = r; m_ok[gpu] = 1;
++              if (vp_interp_cfg()) m_hash[gpu] = s_vp_seen_hash; }
+     return r;
+ }
+ static int vp_get_vs_mode_impl(const rsx_state* st, int gpu)
+@@ -2769,6 +2820,7 @@ static int vp_get_vs_mode_impl(const rsx_state* st, int gpu)
+       if (ni_) hlen = ni_ * 16u; }
+     u32 hash = vp_hash_ucode(vuc, hlen);
+     if (gpu) hash ^= 0x6A09E667u;              /* its own cache entry */
++    vp_interp_see(hash, vuc, hlen, vstart / 16u);
+     { static int s_miss = 0, s_calls = 0;      /* VP_CACHEDBG=1: miss rate */
+       static int dbg = -1; if (dbg < 0) dbg = getenv("VP_CACHEDBG") ? 1 : 0;
+       if (dbg) {
+@@ -5245,6 +5297,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+                                           u64 samp_key)
+ {
+     s_fp_pending = 0;
++    if (vp_interp_cfg()) vp_ps_hold_clear();
+     /* Key on which units are texel-addressed. Their sizes reach the shader
+      * as per-draw constants, so they are not part of the pipeline. */
+     u32 unnorm = unnorm_mask ? (0x100u | unnorm_mask) : 0;
+@@ -5389,7 +5442,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+           for (u32 h = fp_key_hash(&key) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1)) {
+               const int e = s_fpi[h];
+               if (!e) break;
+-              if (!s_library_fp && fp_key_eq(&s_d3d.vp_fp[e - 1], &key)) { pso_race_learn(s_d3d.vp_fp[e-1].native_hash); return s_d3d.vp_fp[e - 1].pso; }
++              if (!s_library_fp && fp_key_eq(&s_d3d.vp_fp[e - 1], &key)) { vp_ps_hold_set(s_d3d.vp_fp[e - 1].ps_keep); pso_race_learn(s_d3d.vp_fp[e-1].native_hash); return s_d3d.vp_fp[e - 1].pso; }
+           }
+       } else
+     for (int i = 0; i < s_d3d.vp_fp_n; i++)
+@@ -5405,7 +5458,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+             s_d3d.vp_fp[i].vmask == s_pso_vmask &&
+             s_d3d.vp_fp[i].samp_key == samp_key && s_d3d.vp_fp[i].ghi == s_pso_ghi &&
+             s_d3d.vp_fp[i].shd == s_pso_shd && s_d3d.vp_fp[i].unhi == s_pso_unhi)
+-            if (!s_library_fp) { pso_race_learn(s_d3d.vp_fp[i].native_hash); return s_d3d.vp_fp[i].pso; } }
++            if (!s_library_fp) { vp_ps_hold_set(s_d3d.vp_fp[i].ps_keep); pso_race_learn(s_d3d.vp_fp[i].native_hash); return s_d3d.vp_fp[i].pso; } }
+     /* Keys whose pixel shader the pool is compiling: answer "pending" without
+      * building the HLSL again. Both the pre-pass and the draw ask every frame,
+      * and rebuilding it for every waiting draw took 4 of every 5 s while a
+@@ -6494,6 +6547,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+             (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) ? &s_d3d.vp_vs[vs_idx].provenance : NULL,
+             hlsl, fp_shc, fp_flags, hr);
+     if (pso_timing_on()) s_pt_pso += pt_ms_since(&s_pt_t0);
++    vp_ps_hold_set(pb);
+     pb->lpVtbl->Release(pb);
+     if (hr == E_PENDING) {
+         for (u32 h=fp_pend_h,n=0;n<32;++n,h=(h+1)&(FP_PEND_N-1))
+@@ -6565,6 +6619,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+     s_d3d.vp_fp[s_d3d.vp_fp_n].unhi = s_pso_unhi;
+     s_d3d.vp_fp[s_d3d.vp_fp_n].native_hash = native_hash;
+     s_d3d.vp_fp[s_d3d.vp_fp_n].pso     = pso;
++    s_d3d.vp_fp[s_d3d.vp_fp_n].ps_keep = vp_ps_hold_ref();
+     for (u32 h = fp_key_hash(&s_d3d.vp_fp[s_d3d.vp_fp_n]) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1))
+         if (!s_fpi[h]) { s_fpi[h] = s_d3d.vp_fp_n + 1; break; }
+     s_d3d.vp_fp_n++;
+@@ -6796,8 +6851,10 @@ static void tex_upload_sweep(void)
+ static void vp_fp_cache_flush_if_full(void)
+ {
+     if (!s_fp_full) return;
+-    for (int i = 0; i < s_d3d.vp_fp_n; i++)
++    for (int i = 0; i < s_d3d.vp_fp_n; i++) {
+         if (s_d3d.vp_fp[i].pso) s_d3d.vp_fp[i].pso->lpVtbl->Release(s_d3d.vp_fp[i].pso);
++        if (s_d3d.vp_fp[i].ps_keep) { s_d3d.vp_fp[i].ps_keep->lpVtbl->Release(s_d3d.vp_fp[i].ps_keep); s_d3d.vp_fp[i].ps_keep = NULL; }
++    }
+     for (int i = 0; i < s_fp_orphan_n; i++) s_fp_orphan[i]->lpVtbl->Release(s_fp_orphan[i]);
+     s_d3d.vp_fp_n = 0; s_fp_orphan_n = 0; s_fp_full = 0;
+     memset(s_fpi, 0, sizeof s_fpi);
+@@ -11572,6 +11629,7 @@ static void render_frame_body(void)
                      (void*)vpso, (void*)s_d3d.vp_root_sig); } }
          if (any && vpso) {
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
-+            if (fp_interp_mode()) fp_interp_sig_reset();
++            interp_frame_begin();
              s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list, vpso);
              s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(s_d3d.cmd_list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
-@@ -11846,19 +11868,42 @@ static void render_frame_body(void)
+@@ -11837,8 +11895,8 @@ static void render_frame_body(void)
+                 static u32 skipdbg = 1; static int skipdbg_n;
+                 if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
+                 const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
+-                /* Its vertex shader is still compiling in the background. */
+-                if (dr->vs_idx == VS_PENDING) { if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); } FR->shader_pending = 1; continue; }
++                /* Its vertex shader is still compiling in the background. The
++                 * vertex interpreter (decided below) may draw it instead. */
+                 /* Per-draw pipeline: prefer the guest's own compiled FP; fall
+                  * back to the hardcoded atlas/colour PS pair. */
+                 u32 _un_dim[16][2];
+@@ -11846,19 +11904,67 @@ static void render_frame_body(void)
                  s_pso_vmask = dr->vtx_mask ? dr->vtx_mask : 0xFFFFu; s_pso_ghi = dr->tex_gamma_hi | (dr_volume_mask(dr) << 16);
                  s_pso_unhi = dr_unnorm_hi(dr);
                  s_pso_shd = dr->tex_shd ? (dr->tex_shd | ((u32)dr->shd_func << 16)) : 0u;
@@ -89,13 +220,14 @@ index b0a23fc..86163f4 100644
 -                                                         ? (s_d3d.off_rt[cur_rt].ms_n << 16) : 0u),
 -                                                /* bit 27: no depth buffer is bound */
 -                                                dr->stencil | (cur_has_dsv ? 0u : (1u << 27)),
-+                /* RSX_SHADER_INTERP: force runs the fragment interpreter first;
-+                 * 1 uses it only while the specialized PS (or its driver PSO)
-+                 * is still pending. A reject, known gap, or full arena keeps
-+                 * today's path. The signature switch is before SetPipelineState
-+                 * so the PSO matches the root signature that draw binds. */
-+                int use_interp = 0;
-+                u32 hdr_off = 0;
++                /* RSX_SHADER_INTERP / RSX_SHADER_INTERP_VP: 2 (force) runs the
++                 * interpreter for that stage on every eligible draw; 1 only
++                 * while the specialized shader (or its driver pipeline) is
++                 * pending. A reject, a known gap, or a full arena keeps today's
++                 * path. The signature switch is before SetPipelineState so the
++                 * pipeline matches the root signature that draw binds. */
++                int use_interp = 0, use_vp = 0;
++                u32 hdr_off = 0, vp_hdr = 0;
 +                int _nrt = dr_num_rts(dr);
 +                DXGI_FORMAT _rtfmt = dr->rt_off ? rsx_surface_dxgi(dr->rt_fmt)
 +                                                : DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -104,11 +236,22 @@ index b0a23fc..86163f4 100644
 +                    ((cur_rt >= 0 && s_d3d.off_rt[cur_rt].ms)
 +                         ? (s_d3d.off_rt[cur_rt].ms_n << 16) : 0u);
 +                u32 _sten = dr->stencil | (cur_has_dsv ? 0u : (1u << 27));
-+                int _imode = fp_interp_mode();
++                const int _imode = fp_interp_mode();
++                const int _vmode = vp_interp_mode();
++                int vp_stage = 0;
++                if (dr->is_vp && dr->fp_addr &&
++                    (_vmode == 2 || (_vmode == 1 && dr->vs_idx == VS_PENDING))) {
++                    vp_stage = vp_interp_stage(dr, &vp_hdr);
++                    if (!vp_stage) vp_interp_note_fallback();
++                }
++                if (dr->vs_idx == VS_PENDING && !vp_stage) {
++                    if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); }
++                    FR->shader_pending = 1; continue;
++                }
 +                ID3D12PipelineState* dpso = NULL;
 +                if (_imode == 2 && dr->fp_addr) {
 +                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
-+                                             _cmask, dr->cull, _cube, _sten, &hdr_off);
++                                             _cmask, dr->cull, _cube, _sten, vp_stage, &hdr_off);
 +                    use_interp = dpso != NULL;
 +                    if (!use_interp) fp_interp_note_fallback();
 +                }
@@ -118,25 +261,38 @@ index b0a23fc..86163f4 100644
 +                                                dr->fp_exp32, _cmask, dr->cull,
 +                                                _cube, _sten,
                                                  _un_mask, _un_dim, dr->samp_key) : NULL;
-+                if (!dpso && s_fp_pending && _imode == 1 && dr->fp_addr) {
++                /* Vertex interpreter with the specialized pixel shader. That shader's
++                 * bytecode is the one vp_get_fp_pso just resolved; it holds nothing
++                 * when the pixel shader is itself still compiling. */
++                if (!use_interp && vp_stage) {
++                    ID3DBlob* hold = vp_ps_hold_ref();
++                    ID3D12PipelineState* ip = hold ? vp_interp_pso(dr, _nrt, _rtfmt, dr->blend_key,
++                        _cmask, dr->cull, _cube, _sten, hold) : NULL;
++                    if (hold) hold->lpVtbl->Release(hold);
++                    if (ip) { dpso = ip; use_vp = 1; s_fp_pending = 0; }
++                }
++                if (!use_interp && !use_vp && !dpso && s_fp_pending && _imode == 1 && dr->fp_addr) {
 +                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
-+                                             _cmask, dr->cull, _cube, _sten, &hdr_off);
++                                             _cmask, dr->cull, _cube, _sten, vp_stage, &hdr_off);
 +                    if (dpso) { use_interp = 1; s_fp_pending = 0; }
 +                    else fp_interp_note_fallback();
 +                }
-+                if (use_interp) s_fp_pending = 0;
++                if (use_interp) { s_fp_pending = 0; if (vp_stage) use_vp = 1; }
++                /* A pending vertex shader with no interpreter pipeline must not draw
++                 * through the fallback pipeline's vertex shader. */
++                if (dr->vs_idx == VS_PENDING && !use_vp) { FR->shader_pending = 1; continue; }
                  /* Its shader is still compiling in the background: leave the
                   * draw out until it is ready. */
                  if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] d=%u dpso=%p fp_pending=%d vtx_mask=0x%X cur_rt=%d has_dsv=%d n=%u%c",
-@@ -11867,6 +11912,7 @@ static void render_frame_body(void)
+@@ -11867,6 +11973,7 @@ static void render_frame_body(void)
                  /* The fallback pipeline reads sixteen slots; a packed draw
                   * would read garbage through it. */
                  if (!dpso && dr->vtx_mask && dr->vtx_mask != 0xFFFFu) continue;
-+                if (_imode) fp_interp_use_sig(use_interp);
++                if (_imode || _vmode) interp_set_sig(use_interp ? 1 : use_vp ? 2 : 0);
                  s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list,
                                                           dpso ? dpso : vpso);
                  if (dr->stencil & 1u)
-@@ -11980,9 +12026,13 @@ static void render_frame_body(void)
+@@ -11980,9 +12087,13 @@ static void render_frame_body(void)
                          rt != cur_m[0] && rt != cur_m[1] && rt != cur_m[2])
                          off_rt_transition(rt, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                  }
@@ -153,27 +309,85 @@ index b0a23fc..86163f4 100644
                  /* Per-draw constants: this draw's vp_cb + FP texscale slots. */
                  s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
                      frame_gva(s_d3d.vp_cb)
-@@ -12087,6 +12137,7 @@ static void render_frame_body(void)
+@@ -12026,6 +12137,7 @@ static void render_frame_body(void)
+                       s_d3d.cmd_list->lpVtbl->OMSetRenderTargets(
+                           s_d3d.cmd_list, bn, brh, FALSE, cur_has_dsv ? &dsv_handle : NULL);
+                   } }
++                if (use_vp) vp_interp_bind(vp_hdr, use_interp);
+                 if (gf_slot(d)) {
+                     s_d3d.cmd_list->lpVtbl->SetGraphicsRootShaderResourceView(s_d3d.cmd_list, 3,
+                         frame_gva(s_vraw) + (u64)FR->parity * VRAW_BYTES);
+@@ -12087,6 +12199,11 @@ static void render_frame_body(void)
                  s_d3d.cmd_list->lpVtbl->RSSetViewports(s_d3d.cmd_list, 1, &vp);
                  s_d3d.cmd_list->lpVtbl->RSSetScissorRects(s_d3d.cmd_list, 1, &sc);
              }
-+            if (fp_interp_mode()) { fp_interp_sig_restore(); fp_interp_log_tick(); }
++            if (fp_interp_cfg() || vp_interp_cfg()) {
++                interp_sig_restore();
++                if (fp_interp_cfg()) fp_interp_log_tick();
++                if (vp_interp_cfg()) vp_interp_log_tick();
++            }
          }
      }
  
-@@ -15747,6 +15798,7 @@ void rsx_d3d12_backend_shutdown(void)
+@@ -12458,7 +12575,9 @@ skip_dump_consider: ;
+     }
+     if (dumping) {
+         wait_for_gpu();            /* ensure the copy finished before mapping */
++        s_dump_name = interp_ab_label();   /* "interp" / "spec" under RSX_SHADER_INTERP_AB */
+         dump_backbuffer_bmp();
++        s_dump_name = NULL;
+         s_d3d.dump_frames_left--;
+     }
+ 
+@@ -14961,6 +15080,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+                 }
+                 dr->tex_slot = -1;
+                 { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
++                dr->vp_hash = vp_interp_last_hash();
+                 dr->is_clear = 0; dr->readback = 0;
+                 dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
+                 dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
+@@ -15100,6 +15220,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+             }
+             dr->tex_slot = -1;
+             { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
++                dr->vp_hash = vp_interp_last_hash();
+             dr->is_clear = 0; dr->readback = 0;
+             dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
+             dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
+@@ -15355,11 +15476,14 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
+         dr->gf_defhash = gfc ? vgpu_def_hash() : 0;
+         DP_ADD(DP_RECORD, _dpr);
+         { const unsigned long long _dv = DP_T0();
+-          double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs_mode(s_d3d.current_rsx_state, gfc); if (perf_on()) s_perf_vs += perf_now() - _q;
++          double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs_mode(s_d3d.current_rsx_state, gfc); dr->vp_hash = vp_interp_last_hash(); if (perf_on()) s_perf_vs += perf_now() - _q;
+           DP_ADD(DP_VS, _dv); }
+-        if (gfc && dr->vs_idx < 0) {
++        if (gfc && dr->vs_idx < 0 && !(dr->vs_idx == VS_PENDING && vp_interp_cfg() && dr->vp_hash)) {
+             /* No GPU-fetch shader for this program: the draw cannot be made
+-             * from raw bytes, and its vertices were not converted. */
++             * from raw bytes, and its vertices were not converted. (With the
++             * vertex interpreter configured, a draw whose shader is only
++             * still compiling is kept; replay draws it through the
++             * interpreter or leaves it out as before.) */
+             if (dr->vs_idx == VS_PENDING) FR->shader_pending = 1;
+             static int _n = 0; if (dr->vs_idx != VS_PENDING && _n++ < 8)
+                 fprintf(stderr, "[VTXGPU] no fetch shader for this vertex program; draw dropped%c", 10);
+@@ -15747,6 +15871,8 @@ void rsx_d3d12_backend_shutdown(void)
      rt_stop();
      pso_queue_stop();
      wait_for_gpu();
 +    fp_interp_shutdown();
++    vp_interp_shutdown();
      spack_race_end_ex(1);   /* quitting from a race keeps what it learned */
      dxbc_mem_clear();
      pso_warm_clear();
-@@ -15909,6 +15961,8 @@ void rsx_d3d12_backend_present(void)
+@@ -15909,6 +16035,9 @@ void rsx_d3d12_backend_present(void)
      }
  }
  
 +#include "rsx_fp_interp_backend.inc"
++#include "rsx_vp_interp_backend.inc"
 +
  #else /* !_WIN32 */
  
@@ -631,13 +845,15 @@ index 0000000..6011b6f
 +#endif
 diff --git a/libs/video/rsx_fp_interp_backend.inc b/libs/video/rsx_fp_interp_backend.inc
 new file mode 100644
-index 0000000..02d8253
+index 0000000..166a98c
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp_backend.inc
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,699 @@
 +/* Fragment-interpreter replay. Included at the bottom of rsx_d3d12_backend.c
 + * so it can call that file's static helpers. RSX_SHADER_INTERP unset or 0
-+ * returns before any allocation, signature, or binding. */
++ * returns before any allocation, signature, or binding. This file also owns
++ * what the vertex interpreter (rsx_vp_interp_backend.inc) shares: one pipeline
++ * cache, one signature switch, and the frame-alternating A/B diagnostic. */
 +
 +#define RSX_FP_INTERP_IMPLEMENTATION
 +#define RSX_FP_INTERP_EMBED_HLSL
@@ -650,18 +866,24 @@ index 0000000..02d8253
 +static u32 s_interp_arena_bytes;
 +static u32 s_interp_used[2];
 +static u64 s_interp_tag[2];
-+static int s_interp_sig_on;
++static int s_interp_sig_kind;          /* 0 base, 1 fragment interpreter, 2 vertex-only interpreter */
++static int s_interp_ab_on;             /* RSX_SHADER_INTERP_AB: this replay frame uses the interpreters */
 +
 +typedef struct { u64 hash; u32 off; u32 nbytes; } InterpProg;
 +static InterpProg s_interp_prog[2][4096];
 +static u32 s_interp_prog_n[2];
 +
++/* One pipeline cache for all three interpreter kinds. Blobs are never freed
++ * while a pipeline names them (specialized VS slots never evict; the
++ * interpreter blobs live to shutdown; a held PS keeps its reference), so
++ * their addresses identify them. */
 +typedef struct {
-+    u32 vs_hash, blend, cmask, rtfmt, stencil, cull, samples, vmask, packed;
-+    int vs_idx;
++    const void* vs; const void* ps;
++    u32 blend, cmask, rtfmt, stencil, cull, samples, vmask, packed;
 +} InterpPsoKey;
-+typedef struct { InterpPsoKey key; ID3D12PipelineState* pso; } InterpPsoSlot;
-+static InterpPsoSlot s_interp_pso[4096];
++typedef struct { InterpPsoKey key; ID3D12PipelineState* pso; ID3DBlob* vs_hold; ID3DBlob* ps_hold; } InterpPsoSlot;
++#define INTERP_PSO_MAX 4096
++static InterpPsoSlot s_interp_pso[INTERP_PSO_MAX];
 +static u32 s_interp_pso_n;
 +static u32 s_interp_img[RSX_FP_INTERP_MAX_INSNS * 4];
 +static char s_interp_src[65536];
@@ -669,9 +891,12 @@ index 0000000..02d8253
 +static struct {
 +    u32 draws, fallback, reject, gap, arena, pso_fail;
 +    u32 arena_peak, compile_ms;
++    u32 pso_new, pso_ms, pso_max_ms;
 +} s_interp_stat;
 +
-+static int fp_interp_mode(void)
++/* Configured mode: 0 off, 1 only while the specialized stage is pending,
++ * 2 force. Fixed for the process; init and shutdown key off it. */
++static int fp_interp_cfg(void)
 +{
 +    static int m = -1;
 +    if (m >= 0) return m;
@@ -683,10 +908,42 @@ index 0000000..02d8253
 +    return m;
 +}
 +
++static int interp_ab(void)
++{
++    static int a = -1;
++    if (a < 0) { const char* e = getenv("RSX_SHADER_INTERP_AB"); a = e && e[0] && e[0] != '0'; }
++    return a;
++}
++
++/* Mode for this replay frame. With RSX_SHADER_INTERP_AB=1 odd frames run the
++ * specialized shaders and even frames run the configured interpreter mode, so
++ * adjacent presented frames can be compared (see interp_ab_label). */
++static int fp_interp_mode(void)
++{
++    int m = fp_interp_cfg();
++    if (m && interp_ab() && !s_interp_ab_on) return 0;
++    return m;
++}
++
++static void interp_frame_begin(void)
++{
++    /* render_frame_body has just rebound the ordinary root signature. */
++    s_interp_sig_kind = 0;
++    if (interp_ab()) s_interp_ab_on = (s_d3d.frame_count & 1u) == 0;
++    else s_interp_ab_on = 1;
++}
++
++/* Name for a backbuffer dump taken after this frame: NULL unless A/B is on. */
++static const char* interp_ab_label(void)
++{
++    if (!interp_ab()) return NULL;
++    return s_interp_ab_on ? "interp" : "spec";
++}
++
 +static u32 fp_interp_srv_extra(void)
 +{
 +    /* 48 template descriptors plus one 48-wide table per draw record. */
-+    if (!fp_interp_mode()) return 0;
++    if (!fp_interp_cfg()) return 0;
 +    return 48u + (u32)MAX_DRAWS * 48u;
 +}
 +
@@ -702,7 +959,7 @@ index 0000000..02d8253
 +
 +static void fp_interp_init_views(void)
 +{
-+    if (!fp_interp_mode() || !s_d3d.srv_heap || !s_d3d.device) return;
++    if (!fp_interp_cfg() || !s_d3d.srv_heap || !s_d3d.device) return;
 +    D3D12_SHADER_RESOURCE_VIEW_DESC cube = {0};
 +    cube.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 +    cube.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -723,7 +980,7 @@ index 0000000..02d8253
 +
 +static void fp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp)
 +{
-+    if (!fp_interp_mode() || !s_d3d.device || !samp) return;
++    if (!fp_interp_cfg() || !s_d3d.device || !samp) return;
 +    D3D12_DESCRIPTOR_RANGE rng[3];
 +    memset(rng, 0, sizeof rng);
 +    rng[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -739,7 +996,7 @@ index 0000000..02d8253
 +    rng[2].BaseShaderRegister = 48;
 +    rng[2].OffsetInDescriptorsFromTableStart = 32;
 +
-+    D3D12_ROOT_PARAMETER rp[7];
++    D3D12_ROOT_PARAMETER rp[9];
 +    memset(rp, 0, sizeof rp);
 +    rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 +    rp[0].Descriptor.ShaderRegister = 0;
@@ -764,9 +1021,18 @@ index 0000000..02d8253
 +    rp[6].Constants.ShaderRegister = 3;
 +    rp[6].Constants.Num32BitValues = 4;
 +    rp[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    /* 7 and 8: the vertex interpreter's program (t21) and header (b4), used
++     * when both stages are interpreted in one draw. */
++    rp[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
++    rp[7].Descriptor.ShaderRegister = 21;
++    rp[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
++    rp[8].Constants.ShaderRegister = 4;
++    rp[8].Constants.Num32BitValues = 4;
++    rp[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 +
 +    D3D12_ROOT_SIGNATURE_DESC rd = {0};
-+    rd.NumParameters = 7;
++    rd.NumParameters = 9;
 +    rd.pParameters = rp;
 +    rd.NumStaticSamplers = RSX_TEX_UNITS;
 +    rd.pStaticSamplers = samp;
@@ -833,7 +1099,7 @@ index 0000000..02d8253
 +
 +static void fp_interp_startup(void)
 +{
-+    if (!fp_interp_mode() || !s_d3d.device) return;
++    if (!fp_interp_cfg() || !s_d3d.device) return;
 +    u32 kb = 2048;
 +    const char* e = getenv("RSX_SHADER_INTERP_ARENA_KB");
 +    if (e && atoi(e) >= 256) kb = (u32)atoi(e);
@@ -858,14 +1124,17 @@ index 0000000..02d8253
 +        for (int sample = 0; sample < 2; sample++)
 +            for (int t = 1; t <= 4; t++)
 +                fp_interp_blob(full, sample, t);
-+    fprintf(stderr, "[interp] mode %d arena %u KB warmup %llu ms opt 0x%X\n",
-+            fp_interp_mode(), kb, (unsigned long long)(GetTickCount64() - t0), fp_interp_opt());
++    fprintf(stderr, "[interp] mode %d%s arena %u KB warmup %llu ms opt 0x%X\n",
++            fp_interp_cfg(), interp_ab() ? " ab" : "", kb, (unsigned long long)(GetTickCount64() - t0), fp_interp_opt());
 +}
 +
 +static void fp_interp_shutdown(void)
 +{
-+    for (u32 i = 0; i < s_interp_pso_n; i++)
++    for (u32 i = 0; i < s_interp_pso_n; i++) {
 +        if (s_interp_pso[i].pso) s_interp_pso[i].pso->lpVtbl->Release(s_interp_pso[i].pso);
++        if (s_interp_pso[i].vs_hold) s_interp_pso[i].vs_hold->lpVtbl->Release(s_interp_pso[i].vs_hold);
++        if (s_interp_pso[i].ps_hold) s_interp_pso[i].ps_hold->lpVtbl->Release(s_interp_pso[i].ps_hold);
++    }
 +    s_interp_pso_n = 0;
 +    for (int i = 0; i < 16; i++)
 +        if (s_interp_ps[i]) { s_interp_ps[i]->lpVtbl->Release(s_interp_ps[i]); s_interp_ps[i] = NULL; }
@@ -880,34 +1149,42 @@ index 0000000..02d8253
 +    }
 +}
 +
-+static void fp_interp_sig_reset(void) { s_interp_sig_on = 0; }
++static ID3D12RootSignature* s_vp_rs;           /* defined with the vertex interpreter */
++static ID3DBlob* vp_interp_blob(int fetch);
 +
-+static void fp_interp_use_sig(int on)
++static void interp_sig_reset(void) { s_interp_sig_kind = 0; }
++
++/* kind: 0 the guest signature, 1 the fragment interpreter's, 2 the vertex
++ * interpreter's. A switch invalidates every root binding, which each draw
++ * rebinds after this call. */
++static void interp_set_sig(int kind)
 +{
-+    if (!s_interp_rs) { s_interp_sig_on = 0; return; }
-+    if (s_interp_sig_on == (on ? 1 : 0)) return;
++    ID3D12RootSignature* rs = kind == 1 ? s_interp_rs : kind == 2 ? s_vp_rs : s_d3d.vp_root_sig;
++    if (kind && !rs) kind = 0;
++    if (s_interp_sig_kind == kind) return;
 +    s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list,
-+        on ? s_interp_rs : s_d3d.vp_root_sig);
-+    s_interp_sig_on = on ? 1 : 0;
++        kind == 1 ? s_interp_rs : kind == 2 ? s_vp_rs : s_d3d.vp_root_sig);
++    s_interp_sig_kind = kind;
 +}
 +
-+static void fp_interp_sig_restore(void)
++static void interp_sig_restore(void)
 +{
-+    if (s_interp_sig_on && s_d3d.vp_root_sig && s_d3d.cmd_list)
++    if (s_interp_sig_kind && s_d3d.vp_root_sig && s_d3d.cmd_list)
 +        s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
-+    s_interp_sig_on = 0;
++    s_interp_sig_kind = 0;
 +}
 +
 +static void fp_interp_log_tick(void)
 +{
-+    if (!fp_interp_mode()) return;
++    if (!fp_interp_cfg()) return;
 +    static ULONGLONG last;
 +    ULONGLONG now = GetTickCount64();
 +    if (last && now - last < 5000) return;
 +    last = now;
-+    fprintf(stderr, "[interp] draws %u fallback %u reject %u gap %u arena %u pso_fail %u pso %u peak %uKB compile %ums\n",
++    fprintf(stderr, "[interp] draws %u fallback %u reject %u gap %u arena %u pso_fail %u pso %u (new ms total %u max %u) peak %uKB compile %ums\n",
 +            s_interp_stat.draws, s_interp_stat.fallback, s_interp_stat.reject, s_interp_stat.gap,
 +            s_interp_stat.arena, s_interp_stat.pso_fail, s_interp_pso_n,
++            s_interp_stat.pso_ms, s_interp_stat.pso_max_ms,
 +            s_interp_stat.arena_peak >> 10, s_interp_stat.compile_ms);
 +}
 +
@@ -975,30 +1252,27 @@ index 0000000..02d8253
 +    return ss;
 +}
 +
-+static ID3D12PipelineState* fp_interp_get_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
-+                                              u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
-+                                              int variant, ID3DBlob* ps)
++/* Pipeline for one interpreter draw. kind 1 pairs the fragment interpreter
++ * (ps) with either the specialized vertex shader or the vertex interpreter
++ * (vsb); kind 2 pairs the vertex interpreter with a specialized pixel shader.
++ * Nothing in the key names a guest program: only blobs and native state. */
++static ID3D12PipelineState* interp_get_pso(int kind, ID3DBlob* vsb, ID3DBlob* ps, int gpu, u32 vmask_in,
++                                           int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull,
++                                           u32 cube_mask, u32 stencil)
 +{
-+    ID3DBlob* vsb = NULL; u32 vs_hash = 0; int gpu = 0;
-+    int vs_idx = dr->vs_idx;
-+    if (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) {
-+        vsb = s_d3d.vp_vs[vs_idx].vs;
-+        vs_hash = s_d3d.vp_vs[vs_idx].hash;
-+        gpu = s_d3d.vp_vs[vs_idx].gpu ? 1 : 0;
-+    }
-+    if (!vsb) { vsb = s_d3d.vp_vs_blob; vs_idx = -1; vs_hash = 0; gpu = 0; }
-+    if (!vsb || !ps || !s_interp_rs) return NULL;
++    ID3D12RootSignature* rs = kind == 1 ? s_interp_rs : s_vp_rs;
++    if (!vsb || !ps || !rs) return NULL;
 +    u32 samples = (cube_mask >> 16) & 0xFu; if (!samples) samples = 1;
++    if (nrt < 1) nrt = 1; if (nrt > 4) nrt = 4;
 +    InterpPsoKey key;
 +    memset(&key, 0, sizeof key);
-+    key.vs_hash = vs_hash; key.blend = blend; key.cmask = cmask; key.rtfmt = (u32)rtfmt;
++    key.vs = vsb; key.ps = ps; key.blend = blend; key.cmask = cmask; key.rtfmt = (u32)rtfmt;
 +    key.stencil = stencil; key.cull = cull; key.samples = samples;
-+    key.vmask = gpu ? 0u : (s_pso_vmask ? s_pso_vmask : 0xFFFFu);
-+    key.packed = (u32)nrt | ((u32)gpu << 8) | ((u32)variant << 16);
-+    key.vs_idx = vs_idx;
++    key.vmask = gpu ? 0u : (vmask_in ? vmask_in : 0xFFFFu);
++    key.packed = (u32)nrt | ((u32)(gpu ? 1 : 0) << 8) | ((u32)kind << 16);
 +    for (u32 i = 0; i < s_interp_pso_n; i++)
 +        if (memcmp(&s_interp_pso[i].key, &key, sizeof key) == 0) return s_interp_pso[i].pso;
-+    if (s_interp_pso_n >= 4096) { s_interp_stat.pso_fail++; return NULL; }
++    if (s_interp_pso_n >= INTERP_PSO_MAX) { s_interp_stat.pso_fail++; return NULL; }
 +
 +    D3D12_INPUT_ELEMENT_DESC il[16];
 +    u32 vmask = key.vmask ? key.vmask : 0xFFFFu;
@@ -1102,34 +1376,50 @@ index 0000000..02d8253
 +      if (doff < 0) { const char* e = getenv("DEPTH_OFF"); doff = e ? atoi(e) : 0; }
 +      if (doff) { pd.DepthStencilState.DepthEnable = FALSE;
 +                  pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; } }
++    pd.pRootSignature = rs;
 +    pd.SampleDesc.Count = samples;
++    LARGE_INTEGER q0, q1, qf;
++    QueryPerformanceFrequency(&qf);
++    QueryPerformanceCounter(&q0);
 +    ID3D12PipelineState* pso = NULL;
 +    HRESULT hr = s_d3d.device->lpVtbl->CreateGraphicsPipelineState(
 +        s_d3d.device, &pd, &IID_ID3D12PipelineState, (void**)&pso);
++    QueryPerformanceCounter(&q1);
++    u32 ms = (u32)((q1.QuadPart - q0.QuadPart) * 1000ll / qf.QuadPart);
 +    if (FAILED(hr) || !pso) {
 +        s_interp_stat.pso_fail++;
 +        static int logged;
 +        if (logged < 16) {
 +            logged++;
-+            fprintf(stderr, "[interp] PSO fail 0x%08lX nrt=%d fmt=%u samples=%u gpu=%d variant=%d vs=%d\n",
-+                    (unsigned long)hr, nrt, (unsigned)rtfmt, samples, gpu, variant, vs_idx);
++            fprintf(stderr, "[interp] PSO fail 0x%08lX kind=%d nrt=%d fmt=%u samples=%u gpu=%d\n",
++                    (unsigned long)hr, kind, nrt, (unsigned)rtfmt, samples, gpu ? 1 : 0);
 +        }
 +        return NULL;
 +    }
++    s_interp_stat.pso_new++;
++    s_interp_stat.pso_ms += ms;
++    if (ms > s_interp_stat.pso_max_ms) s_interp_stat.pso_max_ms = ms;
 +    s_interp_pso[s_interp_pso_n].key = key;
 +    s_interp_pso[s_interp_pso_n].pso = pso;
++    /* Blob addresses form the key: keep them alive across specialized-cache flushes. */
++    vsb->lpVtbl->AddRef(vsb); ps->lpVtbl->AddRef(ps);
++    s_interp_pso[s_interp_pso_n].vs_hold = vsb;
++    s_interp_pso[s_interp_pso_n].ps_hold = ps;
 +    s_interp_pso_n++;
 +    { static int logk = -1;
 +      if (logk < 0) { const char* e = getenv("RSX_SHADER_INTERP_LOG"); logk = e && e[0] == '1'; }
 +      if (logk && s_interp_pso_n <= 64)
-+          fprintf(stderr, "[interp] pso %u vs=0x%08X nrt=%d fmt=%u samples=%u variant=%d\n",
-+                  s_interp_pso_n, vs_hash, nrt, (unsigned)rtfmt, samples, variant); }
++          fprintf(stderr, "[interp] pso %u kind=%d nrt=%d fmt=%u samples=%u gpu=%d create %u ms\n",
++                  s_interp_pso_n, kind, nrt, (unsigned)rtfmt, samples, gpu ? 1 : 0, ms); }
 +    return pso;
 +}
 +
++/* vp_stage: the vertex interpreter's program is already staged for this draw,
++ * so the pipeline pairs the fragment interpreter with the vertex interpreter
++ * instead of the specialized vertex shader. */
 +static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
 +    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
-+    u32* hdr_off)
++    int vp_stage, u32* hdr_off)
 +{
 +    if (!fp_interp_mode() || !dr || !dr->fp_addr || !hdr_off) return NULL;
 +    if (draw_i >= MAX_DRAWS) return NULL;
@@ -1205,11 +1495,22 @@ index 0000000..02d8253
 +    int sample = fp_interp_ssaa() && samples > 1;
 +    int targets = nrt < 1 ? 1 : nrt > 4 ? 4 : nrt;
 +    int full = fp_interp_reads_extra(s_interp_img, info.instructions);
-+    int variant = (full ? 8 : 0) + (sample ? 4 : 0) + (targets - 1);
 +    ID3DBlob* ps = fp_interp_blob(full, sample, targets);
 +    if (!ps) return NULL;
-+    ID3D12PipelineState* pso = fp_interp_get_pso(dr, targets, rtfmt, blend, cmask, cull,
-+                                                 cube_mask, stencil, variant, ps);
++    ID3DBlob* vsb = NULL; int gpu = 0;
++    if (vp_stage) {
++        gpu = dr->gpu_fetch ? 1 : 0;
++        vsb = vp_interp_blob(gpu);
++    } else {
++        int vs_idx = dr->vs_idx;
++        if (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) {
++            vsb = s_d3d.vp_vs[vs_idx].vs;
++            gpu = s_d3d.vp_vs[vs_idx].gpu ? 1 : 0;
++        }
++        if (!vsb) { vsb = s_d3d.vp_vs_blob; gpu = 0; }
++    }
++    ID3D12PipelineState* pso = interp_get_pso(1, vsb, ps, gpu, s_pso_vmask, targets, rtfmt, blend,
++                                              cmask, cull, cube_mask, stencil);
 +    if (!pso) return NULL;
 +    *hdr_off = hoff;
 +    s_interp_stat.draws++;
@@ -1264,3 +1565,742 @@ index 0000000..f3d2020
 +"    stk_body[sp] = body;\n                    sp++;\n                } else next = end_pc;\n            } else if (op == 0u && cond) {\n                uint look = sp;\n                while (look > 0u && stk_kind[look - 1u] != 1u) look--;\n                if (look > 0u) { next = stk_end[look - 1u]; sp = look - 1u; }\n            }\n            pc = next;\n            continue;\n        }\n        uint s0 = iw.y & 0x3FFFFFu;\n        uint in_src = (iw.y >> 22) & 15u;\n        uint texu = (iw.y >> 26) & 15u;\n        uint bx2 = (iw.y >> 30) & 1u;\n        uint s1 = iw.z & 0x3FFFFFu;\n        uint s2 = iw.w & 0x3FFFFFu;\n        uint kslot = (iw.w >> 22) & 255u;\n#if RSX_INTERP_FULLIN\n        float4 tc8v = input.tc8;\n        float4 tc9v = input.tc9;\n        float4 face = input.front ? (float4)1 : (float4)(-1);\n#else\n        float4 tc8v = 0;\n        float4 tc9v = 0;\n        float4 face = 0;\n#endif\n        float4 tc[10] = { input.tc0, input.tc1, input.tc2, input.tc3, input.tc4,\n                          input.tc5, input.tc6, input.tc7, tc8v, tc9v };\n        float4 a, b, c;\n        {\n            uint spack[3] = { s0, s1, s2 };\n            float4 got[3];\n            [unroll] for (int si = 0; si < 3; si++) {\n                uint pk = spack[si];\n                uint ty = pk & 3u;\n                uint ix = (pk >> 2) & 63u;\n                uint sh = (pk >> 8) & 1u;\n                uint ng = (pk >> 9) & 1u;\n                uint ab = (pk >> 10) & 1u;\n                uint pr = (pk >> 11) & 7u;\n                uint sw = (pk >> 14) & 255u;\n                float4 vv = 0;\n                if (ty == 0u) vv = (sh != 0u ? h[min(ix, 47u)] : r[min(ix, 47u)]);\n                else if (ty == 1u) {\n                    uint id = in_src;\n                    if (id == 0u) vv = wpos;\n                    else if (id == 1u) vv = saturate(input.col0);\n                    else if (id == 2u) vv = saturate(input.col1);\n                    else if (id == 3u) vv = (flags & 32u) != 0u ? rsx_i_fog(input.fog.x) : input.fog;\n                    else if (id >= 4u && id <= 13u) vv = tc[id - 4u];\n                    else if (id == 14u) vv = face;\n                    if (persp != 0u && id >= 4u && id <= 13u) vv *= (1.0 / input.position.w);\n                } else vv = fp_constants[kslot];\n                vv = rsx_i_swz(vv, sw);\n                got[si] = rsx_i_modify(vv, ab, pr, ng);\n            }\n            a = got[0]; b = got[1]; c = got[2];\n        }\n        float4 v = 0;\n        uint do_alu = 1u;\n        if (op == 0x12u) {\n            do_alu = 0u;\n            bool kill = false;\n            if (pred == 0u) kill = true;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                kill = any(rsx_i_cmp4(cv, cmpop) != 0.0);\n            }\n            if (kill) killed = 1u;\n        } else if (op == 0x00u || op == 0x3Du || op == 0x3Eu) do_alu = 0u;\n        else if (op == 0x01u) v = a;\n        else if (op == 0x02u) v = a * b;\n        else if (op == 0x03u) v = a + b;\n        else if (op == 0x04u) v = a * b + c;\n        else if (op == 0x05u) v = dot(a.xyz, b.xyz).xxxx;\n        else if (op == 0x06u) v = dot(a, b).xxxx;\n        else if (op == 0x08u) v = min(a, b);\n        else if (op == 0x09u) v = max(a, b);\n        else if (op == 0x0Au) v = (float4)(a < b);\n        else if (op == 0x0Bu) v = (float4)(a >= b);\n        else if (op == 0x0Cu) v = (float4)(a <= b);\n        else if (op == 0x0Du) v = (float4)(a > b);\n        else if (op == 0x0Eu) v = (float4)(a != b);\n        else if (op == 0x0Fu) v = (float4)(a == b);\n        else if (op == 0x10u) v = frac(a);\n        else if (op == 0x11u) v = floor(a);\n        else if (op == 0x13u) v = asfloat(rsx_i_pk4b(a)).xxxx;\n        else if (op == 0x14u) v = rsx_i_up4b(a.x);\n        else if (op == 0x1Au) v = (1.0 / a.x).xxxx;\n        else if (op == 0x1Bu) v = rsqrt(abs(a.x)).xxxx;\n        else if (op == 0x1Cu) v = exp2(a.x).xxxx;\n        else if (op == 0x1Du) v = (lg2abs ? log2(abs(a.x)) : "
 +"log2(a.x)).xxxx;\n        else if (op == 0x1Fu) v = lerp(c, b, a);\n        else if (op == 0x22u) v = cos(a.x).xxxx;\n        else if (op == 0x23u) v = sin(a.x).xxxx;\n        else if (op == 0x24u) v = asfloat(rsx_i_pk2h(a)).xxxx;\n        else if (op == 0x25u) v = rsx_i_up2h(a.x);\n        else if (op == 0x26u) v = pow(a.x, b.x).xxxx;\n        else if (op == 0x27u) v = asfloat(rsx_i_pk4ub(a)).xxxx;\n        else if (op == 0x28u) v = rsx_i_up4ub(a.x);\n        else if (op == 0x29u) v = asfloat(rsx_i_pk2us(a)).xxxx;\n        else if (op == 0x2Au) v = rsx_i_up2us(a.x);\n        else if (op == 0x2Cu) v = asfloat(rsx_i_pk4ub(rsx_i_lin2srgb(a))).xxxx;\n        else if (op == 0x2Du) v = rsx_i_srgb2lin(rsx_i_up4ub(a.x));\n        else if (op == 0x38u) v = dot(a.xy, b.xy).xxxx;\n        else if (op == 0x39u) v = float4(normalize(a.xyz), 1.0);\n        else if (op == 0x3Au) v = a / b.x;\n        else if (op == 0x3Bu) v = abs(a) > 0.0 ? a / sqrt(abs(b.x)) : (float4)0.0;\n        else if (op == 0x3Cu) v = float4(1.0, a.y, a.y > 0.0 ? exp2(a.w) : 0.0, 1.0);\n        else if (op == 0x17u || op == 0x18u || op == 0x2Fu || op == 0x31u) {\n            float4 coord = a;\n            uint shbit = (shadow & (1u << texu)) != 0u;\n            uint kind = op == 0x31u ? 1u : op == 0x2Fu ? 2u : 0u;\n            float lod = b.x;\n            uint shp = (shape >> (texu * 2u)) & 3u;\n            if (shbit != 0u && (op == 0x17u || op == 0x18u)) {\n                float4 sc = op == 0x18u ? coord / coord.w : coord;\n                uint dw, dh;\n                rsx_i_dim2d(texu, dw, dh);\n                float2 p = sc.xy * float2(dw, dh) - 0.5;\n                float ref = saturate(sc.z);\n                uint func = (shadow >> 16) & 7u;\n                uint soft = (shadow >> 19) & 1u;\n                float sv = soft != 0u\n                    ? 0.25 * (rsx_i_shb(texu, p + float2(-0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, -0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(-0.5, 0.5), ref, (int)dw, (int)dh, func)\n                            + rsx_i_shb(texu, p + float2(0.5, 0.5), ref, (int)dw, (int)dh, func))\n                    : rsx_i_shb(texu, p, ref, (int)dw, (int)dh, func);\n                v = sv.xxxx;\n            } else {\n                if (op == 0x18u && shp != 1u) coord.xyz /= coord.w;\n                uint gd = 0u;\n                if ((flags & 512u) != 0u && op == 0x17u && (s0 & 3u) == 1u && in_src == 0u &&\n                    ((s0 >> 14) & 255u) == 228u && ((s0 >> 9) & 3u) == 0u && ((s0 >> 11) & 7u) == 0u && persp == 0u) {\n                    float inv = texu < 4u ? rsx_texscale[texu].x\n                        : ((texu & 1u) != 0u ? rsx_texscale_hi[(texu - 4u) >> 1].z : rsx_texscale_hi[(texu - 4u) >> 1].x);\n                    float thr = texu < 4u ? 0.015625 : 0.001953125;\n                    if (inv >= thr) { v = float4(0.5, 0.5, 0.5, 0.5); gd = 1u; }\n                }\n                if (gd == 0u) {\n                    coord = rsx_i_unnorm(coord, texu, shp, unnorm);\n                    uint sm = texu < 8u ? (samp0 >> (texu * 4u)) & 15u : (samp1 >> ((texu - 8u) * 4u)) & 15u;\n                    if (shp == 1u) v = rsx_i_scu(texu, sm, coord.xyz, kind, lod);\n                    else if (shp == 2u) v = rsx_i_s3d(texu, sm, coord.xyz, kind, lod);\n                    else v = rsx_i_s2d(texu, sm, coord.xy, kind, lod);\n                    if ((srgb & (1u << texu)) != 0u) v = rsx_i_s2l(v);\n                    if (bx2 != 0u) v = v * 2.0 - 1.0;\n                }\n            }\n        } else do_alu = 0u;\n        if (do_alu != 0u && (nowrite == 0u || setcond != 0u)) {\n            if (scale == 1u) v *= 2.0;\n            else if (scale == 2u) v *= 4.0;\n            else if (scale == 3u) v *= 8.0;\n            else if (scale == 5u) v /= 2.0;\n            else if (scale == 6u) v /= 4.0;\n            else if (scale == 7u) v /= 8.0;\n            if (osat != 0u) v = saturate(v);\n            uint di = m"
 +"in(dest, 47u);\n            float4 cur = dhalf != 0u ? h[di] : r[di];\n            float4 nxt = cur;\n            float4 pm = 1;\n            if (pred == 1u) pm = 0;\n            else if (pred == 2u) {\n                float4 cv = rsx_i_swz(ccread != 0u ? cc1 : cc0, (iw.z >> 22) & 255u);\n                pm = rsx_i_cmp4(cv, cmpop);\n            }\n            if (nowrite == 0u && pred != 1u) {\n                if ((mask & 1u) != 0u) nxt.x = (pred == 0u || pm.x != 0.0) ? v.x : cur.x;\n                if ((mask & 2u) != 0u) nxt.y = (pred == 0u || pm.y != 0.0) ? v.y : cur.y;\n                if ((mask & 4u) != 0u) nxt.z = (pred == 0u || pm.z != 0.0) ? v.z : cur.z;\n                if ((mask & 8u) != 0u) nxt.w = (pred == 0u || pm.w != 0.0) ? v.w : cur.w;\n                if (dhalf != 0u) h[di] = nxt; else r[di] = nxt;\n            }\n            if (setcond != 0u) {\n                float4 srcv = nowrite != 0u ? v : (pred == 1u ? cur : nxt);\n                float4 cd = ccwrite != 0u ? cc1 : cc0;\n                if ((mask & 1u) != 0u) cd.x = srcv.x;\n                if ((mask & 2u) != 0u) cd.y = srcv.y;\n                if ((mask & 4u) != 0u) cd.z = srcv.z;\n                if ((mask & 8u) != 0u) cd.w = srcv.w;\n                if (ccwrite != 0u) cc1 = cd; else cc0 = cd;\n            }\n        }\n        pc = next;\n    }\n    if (killed != 0u) discard;\n    float4 o0 = (steps >= RSX_FP_INTERP_STEPS && pc < instr_count) ? (float4)0 : rsx_i_export(half, 0u, r, h);\n    if ((flags & 16u) != 0u) rsx_i_atest(o0.a);\n    if ((flags & 128u) != 0u && (flags & 1024u) == 0u) {\n        uint2 dq = (uint2)input.position.xy;\n        uint ds = (dq.x * 0x8da6b343u) ^ (dq.y * 0xd8163841u);\n        ds ^= ds >> 16; ds *= 0x7feb352du; ds ^= ds >> 15; ds *= 0x846ca68bu; ds ^= ds >> 16;\n        o0.rgb += ((float)(ds & 0xFFFFu) + (float)(ds >> 16)) * (1.0 / (65535.0 * 255.0)) - (1.0 / 255.0);\n    }\n    o0 = (o0 == o0) ? o0 : (float4)0;\n    if ((flags & 1024u) != 0u) o0.rgb = rsx_i_l2s(o0.rgb);\n#if RSX_INTERP_MRT\n#if RSX_INTERP_TARGETS > 1\n    float4 o1 = rsx_i_export(half, 1u, r, h);\n#endif\n#if RSX_INTERP_TARGETS > 2\n    float4 o2 = rsx_i_export(half, 2u, r, h);\n#endif\n#if RSX_INTERP_TARGETS > 3\n    float4 o3 = rsx_i_export(half, 3u, r, h);\n#endif\n    if ((flags & 1024u) != 0u) {\n#if RSX_INTERP_TARGETS > 1\n        o1.rgb = rsx_i_l2s(o1.rgb);\n#endif\n#if RSX_INTERP_TARGETS > 2\n        o2.rgb = rsx_i_l2s(o2.rgb);\n#endif\n#if RSX_INTERP_TARGETS > 3\n        o3.rgb = rsx_i_l2s(o3.rgb);\n#endif\n    }\n    RSXInterpOut o;\n    o.c0 = o0;\n#if RSX_INTERP_TARGETS > 1\n    o.c1 = (o1 == o1) ? o1 : (float4)0;\n#endif\n#if RSX_INTERP_TARGETS > 2\n    o.c2 = (o2 == o2) ? o2 : (float4)0;\n#endif\n#if RSX_INTERP_TARGETS > 3\n    o.c3 = (o3 == o3) ? o3 : (float4)0;\n#endif\n    return o;\n#else\n    return o0;\n#endif\n}\n";
+diff --git a/libs/video/rsx_vp_interp.h b/libs/video/rsx_vp_interp.h
+new file mode 100644
+index 0000000..6886810
+--- /dev/null
++++ b/libs/video/rsx_vp_interp.h
+@@ -0,0 +1,22 @@
++/*
++ * Vertex-interpreter shader shared by the engine and vp_interp_precompile.
++ * The body is scripts/test/vp_interp.hlsl. FETCH 1 is the GPU-fetch variant.
++ * The bytes are part of the DXBC cache key, so both callers use this prefix.
++ */
++#ifndef PS3RECOMP_RSX_VP_INTERP_H
++#define PS3RECOMP_RSX_VP_INTERP_H
++
++static int rsx_vp_interp_variant_prefix(char* dst, unsigned cap, int fetch)
++{
++    int n;
++    if (!dst || cap < 8u) return -1;
++    n = snprintf(dst, cap, "#define RSX_VP_INTERP_FETCH %d\n", fetch ? 1 : 0);
++    if (n < 0 || (unsigned)n >= cap) return -1;
++    return n;
++}
++
++#ifdef RSX_VP_INTERP_EMBED_HLSL
++#include "rsx_vp_interp_hlsl.inc"
++#endif
++
++#endif
+diff --git a/libs/video/rsx_vp_interp_backend.inc b/libs/video/rsx_vp_interp_backend.inc
+new file mode 100644
+index 0000000..fe3ea60
+--- /dev/null
++++ b/libs/video/rsx_vp_interp_backend.inc
+@@ -0,0 +1,381 @@
++/* Vertex-interpreter replay. Included at the bottom of rsx_d3d12_backend.c.
++ * RSX_SHADER_INTERP_VP unset or 0 returns before any allocation, signature,
++ * or binding. Force replaces the vertex stage and keeps the specialized
++ * pixel shader. Combined vertex/fragment interpretation uses the fragment
++ * signature, which also carries the vertex program and header. */
++
++#define RSX_VP_INTERP_EMBED_HLSL
++#include "rsx_vp_interp.h"
++
++static ID3D12RootSignature* s_vp_rs;
++static ID3DBlob* s_vp_vs[2];
++static ID3D12Resource* s_vp_arena[2];
++static u8* s_vp_map[2];
++static u32 s_vp_arena_bytes;
++static u32 s_vp_used[2];
++static u64 s_vp_tag[2];
++static ID3DBlob* s_vp_ps_hold;
++
++typedef struct { u32 hash; u32 off; u32 nbytes; } VpUp;
++static VpUp s_vp_up[2][1024];
++static u32 s_vp_up_n[2];
++
++/* Programs the recorder has seen. The record thread appends and the replay
++ * thread reads, so an entry is complete before the count that publishes it. */
++typedef struct { u32 hash, base, nbytes; u8* bytes; } VpSeen;
++#define VP_SEEN_MAX 1024
++static VpSeen s_vp_seen[VP_SEEN_MAX];
++static volatile LONG s_vp_seen_n;
++
++static char s_vp_src[131072];
++
++static struct {
++    u32 draws, fallback, miss, arena, pso_fail, arena_peak, compile_ms;
++} s_vp_stat;
++
++/* Configured mode: 0 off, 1 only while the specialized vertex shader is
++ * pending, 2 force. Fixed for the process; recording keys off it. */
++static int vp_interp_cfg(void)
++{
++    static int m = -1;
++    if (m >= 0) return m;
++    const char* e = getenv("RSX_SHADER_INTERP_VP");
++    if (!e || !e[0] || e[0] == '0') m = 0;
++    else if (e[0] == 'f' || e[0] == 'F') m = 2;
++    else if (e[0] == '1') m = 1;
++    else m = 0;
++    return m;
++}
++
++/* Mode for this replay frame (A/B alternation follows the fragment side). */
++static int vp_interp_mode(void)
++{
++    int m = vp_interp_cfg();
++    if (m && interp_ab() && !s_interp_ab_on) return 0;
++    return m;
++}
++
++static void vp_interp_note_fallback(void) { s_vp_stat.fallback++; }
++
++static void vp_ps_hold_clear(void)
++{
++    if (!s_vp_ps_hold) return;
++    s_vp_ps_hold->lpVtbl->Release(s_vp_ps_hold);
++    s_vp_ps_hold = NULL;
++}
++
++static void vp_ps_hold_set(ID3DBlob* pb)
++{
++    if (!vp_interp_cfg() || !pb) return;
++    if (s_vp_ps_hold == pb) return;
++    if (s_vp_ps_hold) s_vp_ps_hold->lpVtbl->Release(s_vp_ps_hold);
++    pb->lpVtbl->AddRef(pb);
++    s_vp_ps_hold = pb;
++}
++
++static ID3DBlob* vp_ps_hold_ref(void)
++{
++    if (!vp_interp_cfg() || !s_vp_ps_hold) return NULL;
++    s_vp_ps_hold->lpVtbl->AddRef(s_vp_ps_hold);
++    return s_vp_ps_hold;
++}
++
++static UINT vp_interp_opt(void)
++{
++    static UINT f = 0xFFFFFFFFu;
++    if (f != 0xFFFFFFFFu) return f;
++    const char* e = getenv("RSX_SHADER_INTERP_VP_OPT");
++    f = !e ? 0u
++         : !strcmp(e, "skip") ? D3DCOMPILE_SKIP_OPTIMIZATION
++         : e[0] == '0' ? D3DCOMPILE_OPTIMIZATION_LEVEL0
++         : e[0] == '2' ? D3DCOMPILE_OPTIMIZATION_LEVEL2
++         : e[0] == '3' ? D3DCOMPILE_OPTIMIZATION_LEVEL3 : 0u;
++    return f;
++}
++
++static int vp_interp_uw(void)
++{
++    static int uw = -1;
++    if (uw < 0) { const char* e = getenv("RSX_ULTRAWIDE"); uw = e && e[0] && e[0] != '0'; }
++    return uw;
++}
++
++/* The specialized D3D12 vertex shader never calls rsx_vp_set_branch_base, so
++ * its branch targets are program-relative as written (base 0). The default
++ * matches it. RSX_SHADER_INTERP_VP_BASE=1 subtracts the program's start slot
++ * the way the live-draw path does. */
++static int vp_interp_base_rel(void)
++{
++    static int z = -1;
++    if (z < 0) { const char* e = getenv("RSX_SHADER_INTERP_VP_BASE"); z = e && e[0] == '1'; }
++    return z;
++}
++
++static void vp_interp_see(u32 hash, const u8* bytes, u32 nbytes, u32 base)
++{
++    if (!vp_interp_cfg()) return;
++    s_vp_seen_hash = hash;
++    if (!bytes || nbytes < 16u || (nbytes & 15u)) return;
++    LONG n = s_vp_seen_n;
++    for (LONG i = 0; i < n; i++)
++        if (s_vp_seen[i].hash == hash) return;
++    if (n >= VP_SEEN_MAX) return;
++    if (nbytes > 544u * 16u) nbytes = 544u * 16u;
++    u8* copy = (u8*)malloc(nbytes);
++    if (!copy) return;
++    memcpy(copy, bytes, nbytes);
++    VpSeen* s = &s_vp_seen[n];
++    s->hash = hash; s->base = base; s->nbytes = nbytes; s->bytes = copy;
++    MemoryBarrier();
++    s_vp_seen_n = n + 1;
++}
++
++static u32 vp_interp_last_hash(void)
++{
++    return vp_interp_cfg() ? s_vp_seen_hash : 0u;
++}
++
++static int vp_interp_find(u32 hash, const u8** bytes, u32* nbytes, u32* base)
++{
++    LONG n = s_vp_seen_n;
++    MemoryBarrier();
++    for (LONG i = 0; i < n; i++)
++        if (s_vp_seen[i].hash == hash && s_vp_seen[i].bytes) {
++            *bytes = s_vp_seen[i].bytes;
++            *nbytes = s_vp_seen[i].nbytes;
++            *base = s_vp_seen[i].base;
++            return 1;
++        }
++    return 0;
++}
++
++static ID3DBlob* vp_interp_blob(int fetch)
++{
++    int v = fetch ? 1 : 0;
++    if (s_vp_vs[v]) return s_vp_vs[v];
++    int n = rsx_vp_interp_variant_prefix(s_vp_src, sizeof s_vp_src, fetch);
++    size_t hl = strlen(rsx_vp_interp_hlsl);
++    if (n < 0 || (size_t)n + hl + 1 > sizeof s_vp_src) return NULL;
++    memcpy(s_vp_src + n, rsx_vp_interp_hlsl, hl + 1);
++    ID3DBlob* pb = NULL; ID3DBlob* err = NULL;
++    ULONGLONG t0 = GetTickCount64();
++    HRESULT hr = d3d_compile_cached(s_vp_src, (size_t)n + hl, "rsx_vp_interp", "vs_5_0",
++                                    vp_interp_opt(), &pb, &err);
++    s_vp_stat.compile_ms += (u32)(GetTickCount64() - t0);
++    if (FAILED(hr) || !pb) {
++        fprintf(stderr, "[interp-vp] compile fetch %d failed 0x%08lX %s\n", fetch, (unsigned long)hr,
++                err ? (const char*)err->lpVtbl->GetBufferPointer(err) : "");
++        if (err) err->lpVtbl->Release(err);
++        return NULL;
++    }
++    if (err) err->lpVtbl->Release(err);
++    s_vp_vs[v] = pb;
++    fprintf(stderr, "[interp-vp] vs %s: %u bytes\n", fetch ? "fetch" : "ia",
++            (unsigned)pb->lpVtbl->GetBufferSize(pb));
++    return pb;
++}
++
++static void vp_interp_make_root_sig(const D3D12_STATIC_SAMPLER_DESC* samp)
++{
++    if (!vp_interp_cfg() || !s_d3d.device || !samp) return;
++    D3D12_DESCRIPTOR_RANGE srv_range = {0};
++    srv_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
++    srv_range.NumDescriptors = RSX_TEX_UNITS;
++    srv_range.BaseShaderRegister = 0;
++    srv_range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
++
++    D3D12_ROOT_PARAMETER rp[7];
++    memset(rp, 0, sizeof rp);
++    rp[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[0].Descriptor.ShaderRegister = 0;
++    rp[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
++    rp[1].DescriptorTable.NumDescriptorRanges = 1;
++    rp[1].DescriptorTable.pDescriptorRanges = &srv_range;
++    rp[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    rp[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[2].Descriptor.ShaderRegister = 1;
++    rp[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
++    rp[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
++    rp[3].Descriptor.ShaderRegister = 20;
++    rp[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
++    rp[4].Descriptor.ShaderRegister = 2;
++    rp[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
++    rp[5].Descriptor.ShaderRegister = 21;
++    rp[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++    rp[6].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
++    rp[6].Constants.ShaderRegister = 4;
++    rp[6].Constants.Num32BitValues = 4;
++    rp[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
++
++    D3D12_ROOT_SIGNATURE_DESC rd = {0};
++    rd.NumParameters = 7;
++    rd.pParameters = rp;
++    rd.NumStaticSamplers = RSX_TEX_UNITS;
++    rd.pStaticSamplers = samp;
++    rd.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
++    ID3DBlob* sig = NULL; ID3DBlob* err = NULL;
++    HRESULT hr = D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
++    if (FAILED(hr)) {
++        fprintf(stderr, "[interp-vp] root signature serialize 0x%08lX %s\n", (unsigned long)hr,
++                err ? (const char*)err->lpVtbl->GetBufferPointer(err) : "");
++        if (err) err->lpVtbl->Release(err);
++        return;
++    }
++    hr = s_d3d.device->lpVtbl->CreateRootSignature(s_d3d.device, 0,
++        sig->lpVtbl->GetBufferPointer(sig), sig->lpVtbl->GetBufferSize(sig),
++        &IID_ID3D12RootSignature, (void**)&s_vp_rs);
++    sig->lpVtbl->Release(sig);
++    if (FAILED(hr)) fprintf(stderr, "[interp-vp] root signature create 0x%08lX\n", (unsigned long)hr);
++}
++
++static void vp_interp_startup(void)
++{
++    if (!vp_interp_cfg() || !s_d3d.device) return;
++    u32 kb = 1024;
++    const char* e = getenv("RSX_SHADER_INTERP_VP_ARENA_KB");
++    if (e && atoi(e) >= 256) kb = (u32)atoi(e);
++    if (kb > 16384u) kb = 16384u;
++    s_vp_arena_bytes = kb << 10;
++    D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_UPLOAD;
++    D3D12_RESOURCE_DESC bd = {0};
++    bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
++    bd.Width = s_vp_arena_bytes;
++    bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1;
++    bd.SampleDesc.Count = 1;
++    bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
++    D3D12_RANGE nr = {0, 0};
++    for (int p = 0; p < 2; p++) {
++        void* mapped = NULL;
++        if (SUCCEEDED(create_dyn_buffer(&hp, &bd, &s_vp_arena[p])) &&
++            SUCCEEDED(s_vp_arena[p]->lpVtbl->Map(s_vp_arena[p], 0, &nr, &mapped)))
++            s_vp_map[p] = (u8*)mapped;
++    }
++    ULONGLONG t0 = GetTickCount64();
++    vp_interp_blob(0);
++    vp_interp_blob(1);
++    fprintf(stderr, "[interp-vp] mode %d arena %u KB warmup %llu ms opt 0x%X\n",
++            vp_interp_cfg(), kb, (unsigned long long)(GetTickCount64() - t0), vp_interp_opt());
++}
++
++static void vp_interp_shutdown(void)
++{
++    vp_ps_hold_clear();
++    for (int i = 0; i < 2; i++)
++        if (s_vp_vs[i]) { s_vp_vs[i]->lpVtbl->Release(s_vp_vs[i]); s_vp_vs[i] = NULL; }
++    if (s_vp_rs) { s_vp_rs->lpVtbl->Release(s_vp_rs); s_vp_rs = NULL; }
++    for (int p = 0; p < 2; p++) {
++        if (s_vp_arena[p]) {
++            s_vp_arena[p]->lpVtbl->Unmap(s_vp_arena[p], 0, NULL);
++            s_vp_arena[p]->lpVtbl->Release(s_vp_arena[p]);
++            s_vp_arena[p] = NULL;
++        }
++        s_vp_map[p] = NULL;
++    }
++    for (LONG i = 0; i < s_vp_seen_n; i++) free(s_vp_seen[i].bytes);
++    s_vp_seen_n = 0;
++}
++
++static void vp_interp_log_tick(void)
++{
++    if (!vp_interp_cfg()) return;
++    static ULONGLONG last;
++    ULONGLONG now = GetTickCount64();
++    if (last && now - last < 5000) return;
++    last = now;
++    fprintf(stderr, "[interp-vp] draws %u fallback %u miss %u arena %u pso_fail %u seen %ld peak %uKB compile %ums\n",
++            s_vp_stat.draws, s_vp_stat.fallback, s_vp_stat.miss, s_vp_stat.arena,
++            s_vp_stat.pso_fail, (long)s_vp_seen_n, s_vp_stat.arena_peak >> 10, s_vp_stat.compile_ms);
++}
++
++static u32 vp_interp_alloc(int par, u32 bytes)
++{
++    u32 align = (s_vp_used[par] + 15u) & ~15u;
++    if (!s_vp_map[par] || align + bytes > s_vp_arena_bytes) return 0xFFFFFFFFu;
++    s_vp_used[par] = align + bytes;
++    if (s_vp_used[par] > s_vp_stat.arena_peak) s_vp_stat.arena_peak = s_vp_used[par];
++    return align;
++}
++
++/* Attributes the program reads, as the specialized GPU-fetch shader decides
++ * (rsx_vp_analyze_inputs); all sixteen when the analysis is not exact. */
++static u32 vp_interp_input_mask(const u8* bytes, u32 nbytes)
++{
++    extern int rsx_vp_analyze_inputs(const uint8_t*, u32, void*);
++    struct { u32 input_mask; int exact; } a;
++    a.input_mask = 0xFFFFu; a.exact = 0;
++    if (rsx_vp_analyze_inputs(bytes, nbytes, &a) < 0 || !a.exact) return 0xFFFFu;
++    return a.input_mask & 0xFFFFu;
++}
++
++/* Copy this draw's vertex program and a 64-byte header into the frame's
++ * arena. Returns 0 when the program was never recorded (the draw then keeps
++ * today's behaviour). The header and the offset it names live in the arena
++ * buffer, so one root SRV serves every draw. */
++static int vp_interp_stage(const D3D12DrawRecord* dr, u32* hdr_off)
++{
++    if (!vp_interp_mode() || !dr || !dr->is_vp || !hdr_off) return 0;
++    if (s_device_lost || !s_vp_rs) return 0;
++    const u8* bytes = NULL; u32 nbytes = 0, base = 0;
++    if (!dr->vp_hash || !vp_interp_find(dr->vp_hash, &bytes, &nbytes, &base)) { s_vp_stat.miss++; return 0; }
++    int par = FR->parity & 1;
++    if (!s_vp_map[par]) return 0;
++    if (s_vp_tag[par] != s_d3d.frame_count) {
++        s_vp_tag[par] = s_d3d.frame_count;
++        s_vp_used[par] = 0;
++        s_vp_up_n[par] = 0;
++    }
++    u32 ioff = 0xFFFFFFFFu;
++    for (u32 i = 0; i < s_vp_up_n[par]; i++)
++        if (s_vp_up[par][i].hash == dr->vp_hash && s_vp_up[par][i].nbytes == nbytes) {
++            ioff = s_vp_up[par][i].off;
++            break;
++        }
++    if (ioff == 0xFFFFFFFFu) {
++        ioff = vp_interp_alloc(par, nbytes);
++        if (ioff == 0xFFFFFFFFu) { s_vp_stat.arena++; return 0; }
++        memcpy(s_vp_map[par] + ioff, bytes, nbytes);
++        if (s_vp_up_n[par] < 1024) {
++            VpUp* slot = &s_vp_up[par][s_vp_up_n[par]++];
++            slot->hash = dr->vp_hash; slot->off = ioff; slot->nbytes = nbytes;
++        }
++    }
++    u32 hoff = vp_interp_alloc(par, 64u);
++    if (hoff == 0xFFFFFFFFu) { s_vp_stat.arena++; return 0; }
++    u32 hdr[16];
++    memset(hdr, 0, sizeof hdr);
++    hdr[0] = ioff;
++    hdr[1] = nbytes / 16u;
++    hdr[2] = vp_interp_base_rel() ? base : 0u;
++    hdr[3] = 0; /* branch bits: the D3D12 path never sets them (rsx_vp_set_branch_bits) */
++    hdr[4] = vp_interp_uw() ? 1u : 0u;
++    hdr[5] = vp_interp_input_mask(bytes, nbytes);
++    memcpy(s_vp_map[par] + hoff, hdr, sizeof hdr);
++    *hdr_off = hoff;
++    return 1;
++}
++
++/* Vertex interpreter with the draw's specialized pixel shader (ps). */
++static ID3D12PipelineState* vp_interp_pso(const D3D12DrawRecord* dr, int nrt, DXGI_FORMAT rtfmt,
++    u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil, ID3DBlob* ps)
++{
++    int gpu = dr->gpu_fetch ? 1 : 0;
++    ID3D12PipelineState* pso = interp_get_pso(2, vp_interp_blob(gpu), ps, gpu, s_pso_vmask, nrt, rtfmt,
++                                              blend, cmask, cull, cube_mask, stencil);
++    if (pso) s_vp_stat.draws++;
++    return pso;
++}
++
++/* on_fp_sig: the draw uses the fragment interpreter's signature, which carries
++ * the vertex interpreter's program and header as parameters 7 and 8. */
++static void vp_interp_bind(u32 hdr_off, int on_fp_sig)
++{
++    int par = FR->parity & 1;
++    if (!s_vp_arena[par] || !s_d3d.cmd_list) return;
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRootShaderResourceView(s_d3d.cmd_list, on_fp_sig ? 7u : 5u,
++        s_vp_arena[par]->lpVtbl->GetGPUVirtualAddress(s_vp_arena[par]));
++    UINT c[4] = { hdr_off, 0, 0, 0 };
++    s_d3d.cmd_list->lpVtbl->SetGraphicsRoot32BitConstants(s_d3d.cmd_list, on_fp_sig ? 8u : 6u, 4, c, 0);
++}
+diff --git a/libs/video/rsx_vp_interp_hlsl.inc b/libs/video/rsx_vp_interp_hlsl.inc
+new file mode 100644
+index 0000000..8a7ce20
+--- /dev/null
++++ b/libs/video/rsx_vp_interp_hlsl.inc
+@@ -0,0 +1,318 @@
++static const char rsx_vp_interp_hlsl[] =
++"// RSX vertex interpreter, vs_5_0. Semantics follow rsx_vp_decompiler.c in this\n"
++"// tree (NV40 co-issued vector + scalar). No RPCS3 source. RSX_VP_INTERP_FETCH\n"
++"// 1 reads attributes from t20/b2; 0 reads ATTR0..15. The program is the raw\n"
++"// little-endian words at t21. TXL is 0, matching the D3D12 decompile calls,\n"
++"// which pass a zero vertex-texture mask.\n"
++"\n"
++"#ifndef RSX_VP_INTERP_FETCH\n"
++"#define RSX_VP_INTERP_FETCH 1\n"
++"#endif\n"
++"#ifndef RSX_VP_INTERP_STEPS\n"
++"#define RSX_VP_INTERP_STEPS 4096\n"
++"#endif\n"
++"\n"
++"cbuffer VPConst : register(b0) {\n"
++"    float4 vp_c[512];\n"
++"    float4 vp_posscale;\n"
++"    float4 vp_posoffset;\n"
++"};\n"
++"ByteAddressBuffer rsx_vprog : register(t21);\n"
++"cbuffer RSXVPInterp : register(b4) {\n"
++"    uint vp_hdr;\n"
++"    uint vp_pad1;\n"
++"    uint vp_pad2;\n"
++"    uint vp_pad3;\n"
++"};\n"
++"\n"
++"#if RSX_VP_INTERP_FETCH\n"
++"ByteAddressBuffer rsx_vraw : register(t20);\n"
++"cbuffer VFetch : register(b2) { uint4 vf_desc[16]; float4 vf_def[16]; };\n"
++"uint vf_le32(uint a) {\n"
++"    uint al = a & ~3u; uint sh = (a & 3u) * 8u;\n"
++"    uint w0 = rsx_vraw.Load(al);\n"
++"    if (sh == 0u) return w0;\n"
++"    return (w0 >> sh) | (rsx_vraw.Load(al + 4u) << (32u - sh));\n"
++"}\n"
++"uint vf_be32(uint a) { uint w = vf_le32(a);\n"
++"    return (w >> 24) | ((w >> 8) & 0xFF00u) | ((w << 8) & 0xFF0000u) | (w << 24); }\n"
++"uint vf_be16(uint a) { uint w = vf_le32(a); return ((w & 0xFFu) << 8) | ((w >> 8) & 0xFFu); }\n"
++"uint vf_u8(uint a) { return vf_le32(a) & 0xFFu; }\n"
++"float vf_half(uint h) {\n"
++"    uint sg = (h >> 15) & 1u, e = (h >> 10) & 0x1Fu, m = h & 0x3FFu; uint f;\n"
++"    if (e == 0u) f = sg << 31;\n"
++"    else if (e == 31u) f = (sg << 31) | 0x7F800000u | (m << 13);\n"
++"    else f = (sg << 31) | ((e + 112u) << 23) | (m << 13);\n"
++"    return asfloat(f);\n"
++"}\n"
++"float4 rsx_vfetch(uint k, uint vid) {\n"
++"    float4 r = vf_def[k];\n"
++"    uint4 d = vf_desc[k];\n"
++"    if ((d.z & 0x100u) == 0u) return r;\n"
++"    uint ty = d.z & 0xFu, n = (d.z >> 4) & 7u;\n"
++"    uint a = d.x + vid * d.y;\n"
++"    float c0 = r.x, c1 = r.y, c2 = r.z, c3 = r.w;\n"
++"    if (ty == 6u) {\n"
++"        uint w = vf_be32(a);\n"
++"        int x = int(w & 0x7FFu), y = int((w >> 11) & 0x7FFu), z = int((w >> 22) & 0x3FFu);\n"
++"        if (x & 0x400) x -= 0x800;\n"
++"        if (y & 0x400) y -= 0x800;\n"
++"        if (z & 0x200) z -= 0x400;\n"
++"        c0 = float(x) / 1023.0; c1 = float(y) / 1023.0; c2 = float(z) / 511.0;\n"
++"    } else {\n"
++"        [unroll] for (uint i = 0; i < 4u; i++) {\n"
++"            if (i < n) {\n"
++"                float v;\n"
++"                if (ty == 3u)      v = vf_half(vf_be16(a + 2u * i));\n"
++"                else if (ty == 4u) v = float(vf_u8(a + i)) / 255.0;\n"
++"                else if (ty == 1u) v = float(int(vf_be16(a + 2u * i) << 16) >> 16) / 32767.0;\n"
++"                else if (ty == 5u) v = float(int(vf_be16(a + 2u * i) << 16) >> 16);\n"
++"                else if (ty == 7u) v = float(vf_u8(a + i));\n"
++"                else               v = asfloat(vf_be32(a + 4u * i));\n"
++"                if (i == 0u) c0 = v; else if (i == 1u) c1 = v; else if (i == 2u) c2 = v; else c3 = v;\n"
++"            }\n"
++"        }\n"
++"    }\n"
++"    return float4(c0, c1, c2, c3);\n"
++"}\n"
++"struct VSInput { uint vid : SV_VertexID; };\n"
++"#else\n"
++"struct VSInput {\n"
++"    float4 a0:ATTR0;  float4 a1:ATTR1;  float4 a2:ATTR2;  float4 a3:ATTR3;\n"
++"    float4 a4:ATTR4;  float4 a5:ATTR5;  float4 a6:ATTR6;  float4 a7:ATTR7;\n"
++"    float4 a8:ATTR8;  float4 a9:ATTR9;  float4 a10:ATTR10; float4 a11:ATTR11;\n"
++"    float4 a12:ATTR12; float4 a13:ATTR13; float4 a14:ATTR14; float4 a15:ATTR15;\n"
++"};\n"
++"#endif\n"
++"\n"
++"struct VSOutput {\n"
++"    float4 pos:SV_Position; float4 col0:COLOR0; float4 col1:COLOR1;\n"
++"    float4 fog:FOG;\n"
++"    float4 t0:TEXCOORD0; float4 t1:TEXCOORD1; float4 t2:TEXCOORD2; float4 t3:TEXCOORD3;\n"
++"    float4 t4:TEXCOORD4; float4 t5:TEXCOORD5; float4 t6:TEXCOORD6; float4 t7:TEXCOORD7;\n"
++"    float4 t8:TEXCOORD8; float4 t9:TEXCOORD9;\n"
++"};\n"
++"\n"
++"float vp_mul1(float a, float b) { return (a == 0.0 || b == 0.0) ? 0.0 : a * b; }\n"
++"float4 vp_mul(float4 a, float4 b) {\n"
++"    return float4(vp_mul1(a.x, b.x), vp_mul1(a.y, b.y), vp_mul1(a.z, b.z), vp_mul1(a.w, b.w));\n"
++"}\n"
++"float vp_dot3(float4 a, float4 b) { float4 m = vp_mul(a, b); return m.x + m.y + m.z; }\n"
++"float vp_dot4(float4 a, float4 b) { float4 m = vp_mul(a, b); return m.x + m.y + m.z + m.w; }\n"
++"\n"
++"float4 vp_swiz(float4 b, uint src) {\n"
++"    uint sw = (src >> 8) & 3u, sz = (src >> 10) & 3u, sy = (src >> 12) & 3u, sx = (src >> 14) & 3u;\n"
++"    return float4(b[sx], b[sy], b[sz], b[sw]);\n"
++"}\n"
++"\n"
++"int vp_addr(int4 a0, int4 a1, uint sel, uint sw) {\n"
++"    int4 a = sel != 0u ? a1 : a0;\n"
++"    return sw == 0u ? a.x : sw == 1u ? a.y : sw == 2u ? a.z : a.w;\n"
++"}\n"
++"\n"
++"bool vp_cc_pass(float cv, uint cond) {\n"
++"    if (cond == 1u) return cv < 0.0;\n"
++"    if (cond == 2u) return cv == 0.0;\n"
++"    if (cond == 3u) return cv <= 0.0;\n"
++"    if (cond == 4u) return cv > 0.0;\n"
++"    if (cond == 5u) return cv != 0.0;\n"
++"    if (cond == 6u) return cv >= 0.0;\n"
++"    if (cond == 7u) return true;\n"
++"    return false;\n"
++"}\n"
++"\n"
++"// One 17-bit source operand: register file, swizzle, then absolute, then negate.\n"
++"// A macro, not a function, so v[] and r[] are not copied per call.\n"
++"#define VP_SRC(DST, SRC, ABSBIT) { \\\n"
++"    uint _s = (SRC); uint _ty = _s & 3u; float4 _b = (float4)0; \\\n"
++"    if (_ty == 2u) _b = v[input_src & 15u]; \\\n"
++"    else if (_ty == 3u) { \\\n"
++"        uint _ix = const_src & 511u; \\\n"
++"        if (index_const != 0u) _ix = (uint)((int)const_src + vp_addr(a0, a1, addr_sel, addr_swz)) & 511u; \\\n"
++"        _b = vp_c[_ix]; \\\n"
++"    } else _b = r[(_s >> 2) & 31u]; \\\n"
++"    _b = vp_swiz(_b, _s); \\\n"
++"    if ((ABSBIT) != 0u) _b = abs(_b); \\\n"
++"    if (((_s >> 16) & 1u) != 0u) _b = -_b; \\\n"
++"    DST = _b; }\n"
++"\n"
++"VSOutput main(VSInput input) {\n"
++"    float4 v[16];\n"
++"    float4 r[32];\n"
++"    float4 o[16];\n"
++"    float4 cc[2];\n"
++"    int4 a0 = (int4)0;\n"
++"    int4 a1 = (int4)0;\n"
++"    [unroll] for (int i = 0; i < 16; i++) { v[i] = float4(0, 0, 0, 1); o[i] = float4(0, 0, 0, 1); }\n"
++"    [unroll] for (int j = 0; j < 32; j++) r[j] = (float4)0;\n"
++"    cc[0] = (float4)0; cc[1] = (float4)0;\n"
++"    uint h = vp_hdr;\n"
++"#if RSX_VP_INTERP_FETCH\n"
++"    // Only the attributes the program reads, as the specialized fetch shader does. One loop,\n"
++"    // so the fetch code is emitted once rather than sixteen times.\n"
++"    uint imask = rsx_vprog.Load(h + 20u);\n"
++"    [loop] for (uint k = 0; k < 16u; k++) if (((imask >> k) & 1u) != 0u) v[k] = rsx_vfetch(k, input.vid);\n"
++"#else\n"
++"    v[0]=input.a0; v[1]=input.a1; v[2]=input.a2; v[3]=input.a3;\n"
++"    v[4]=input.a4; v[5]=input.a5; v[6]=input.a6; v[7]=input.a7;\n"
++"    v[8]=input.a8; v[9]=input.a9; v[10]=input.a10; v[11]=input.a11;\n"
++"    v[12]=input.a12; v[13]=input.a13; v[14]=input.a14; v[15]=input.a15;\n"
++"#endif\n"
++"    uint ioff = rsx_vprog.Load(h);\n"
++"    uint count = rsx_vprog.Load(h + 4u);\n"
++"    uint base = rsx_vprog.Load(h + 8u);\n"
++"    uint bits = rsx_vprog.Load(h + 12u);\n"
++"    uint flags = rsx_vprog.Load(h + 16u);\n"
++"    int pc = 0;\n"
++"    int cs[8];\n"
++"    int csp = 0;\n"
++"    [unroll] for (int s = 0; s < 8; s++) cs[s] = 0;\n"
++"    [loop] for (int it = 0; it < RSX_VP_INTERP_STEPS && pc >= 0 && (uint)pc < count; it++) {\n"
++"        uint at = ioff + (uint)pc * 16u;\n"
++"        uint d0 = rsx_vprog.Load(at);\n"
++"        uint d1 = rsx_vprog.Load(at + 4u);\n"
++"        uint d2 = rsx_vprog.Load(at + 8u);\n"
++"        uint d3 = rsx_vprog.Load(at + 12u);\n"
++"        uint vec_op = (d1 >> 22) & 0x1Fu;\n"
++"        uint sca_op = (d1 >> 27) & 0x1Fu;\n"
++"        uint input_src = (d1 >> 8) & 0xFu;\n"
++"        uint const_src = (d1 >> 12) & 0x3FFu;\n"
++"        uint index_const = (d3 >> 1) & 1u;\n"
++"        uint src0 = ((d2 >> 23) & 0x1FFu) | ((d1 & 0xFFu) << 9);\n"
++"        uint src1 = (d2 >> 6) & 0x1FFFFu;\n"
++"        uint src2 = ((d3 >> 21) & 0x7FFu) | ((d2 & 0x3Fu) << 11);\n"
++"        uint dst_tmp = (d0 >> 15) & 0x3Fu;\n"
++"        uint dst_out = (d3 >> 2) & 0x1Fu;\n"
++"        uint sca_dst_tmp = (d3 >> 7) & 0x3Fu;\n"
++"        uint vec_result = (d0 >> 30) & 1u;\n"
++"        uint vmask = ((d3 >> 16) & 1u) | (((d3 >> 15) & 1u) << 1) | (((d3 >> 14) & 1u) << 2) | (((d3 >> 13) & 1u) << 3);\n"
++"        uint smask = ((d3 >> 20) & 1u) | (((d3 >> 19) & 1u) << 1) | (((d3 >> 18) & 1u) << 2) | (((d3 >> 17) & 1u) << 3);\n"
++"        uint cond = (d0 >> 10) & 7u;\n"
++"        uint cond_test = (d0 >> 13) & 1u;\n"
++"        uint csel = (d0 >> 25) & 1u;\n"
++"        uint cswx = (d0 >> 8) & 3u, cswy = (d0 >> 6) & 3u, cswz = (d0 >> 4) & 3u, csww = (d0 >> 2) & 3u;\n"
++"        uint4 csw = uint4(cswx, cswy, cswz, csww);\n"
++"        int predicated = (cond_test != 0u && cond != 7u) ? 1 : 0;\n"
++"        uint sat_bit = (d0 >> 26) & 1u;\n"
++"        uint addr_sel = (d0 >> 24) & 1u;\n"
++"        uint addr_swz = d0 & 3u;\n"
++"        float4 A, B, C;\n"
++"        VP_SRC(A, src0, (d0 >> 21) & 1u)\n"
++"        VP_SRC(B, src1, (d0 >> 22) & 1u)\n"
++"        VP_SRC(C, src2, (d0 >> 23) & 1u)\n"
++"        int branched = 0;\n"
++"        int next = pc + 1;\n"
++"        if (vmask != 0u && vec_op != 0u) {\n"
++"            if (vec_op == 0x0Du) {\n"
++"                int4 ar = (int4)floor(A);\n"
++"                [unroll] for (uint c = 0u; c < 4u; c++) if (vmask & (1u << c)) {\n"
++"                    if (addr_sel != 0u) a1[c] = ar[c]; else a0[c] = ar[c];\n"
++"                }\n"
++"            } else if (vec_op <= 0x16u || vec_op == 0x19u) {\n"
++"                float4 val = (float4)0;\n"
++"                if (vec_op == 0x01u) val = A;\n"
++"                else if (vec_op == 0x02u) val = vp_mul(A, B);\n"
++"                else if (vec_op == 0x03u) val = A + C;\n"
++"                else if (vec_op == 0x04u) val = vp_mul(A, B) + C;\n"
++"                else if (vec_op == 0x05u) val = (float4)vp_dot3(A, B);\n"
++"                else if (vec_op == 0x06u) val = (float4)(vp_dot3(A, B) + B.w);\n"
++"                else if (vec_op == 0x07u) val = (float4)vp_dot4(A, B);\n"
++"                else if (vec_op == 0x08u) val = float4(1, A.y * B.y, A.z, B.w);\n"
++"                else if (vec_op == 0x09u) val = min(A, B);\n"
++"                else if (vec_op == 0x0Au) val = max(A, B);\n"
++"                else if (vec_op == 0x0Bu) val = float4(A.x < B.x, A.y < B.y, A.z < B.z, A.w < B.w);\n"
++"                else if (vec_op == 0x0Cu) val = float4(A.x >= B.x, A.y >= B.y, A.z >= B.z, A.w >= B.w);\n"
++"                else if (vec_op == 0x0Eu) val = frac(A);\n"
++"                else if (vec_op == 0x0Fu) val = floor(A);\n"
++"                else if (vec_op == 0x10u) val = float4(A.x == B.x, A.y == B.y, A.z == B.z, A.w == B.w);\n"
++"                else if (vec_op == 0x11u) val = (float4)0;\n"
++"                else if (vec_op == 0x12u) val = float4(A.x > B.x, A.y > B.y, A.z > B.z, A.w > B.w);\n"
++"                else if (vec_op == 0x13u) val = float4(A.x <= B.x, A.y <= B.y, A.z <= B.z, A.w <= B.w);\n"
++"                else if (vec_op == 0x14u) val = float4(A.x != B.x, A.y != B.y, A.z != B.z, A.w != B.w);\n"
++"                else if (vec_op == 0x15u) val = float4(1, 1, 1, 1);\n"
++"                else if (vec_op == 0x16u) val = sign(A);\n"
++"                else val = (float4)0;\n"
++"                if (sat_bit) val = saturate(val);\n"
++"                uint cc_update = ((d0 >> 14) & 1u) && ((d0 >> 29) & 1u);\n"
++"                bool ok[4];\n"
++"                [unroll] for (uint c = 0u; c < 4u; c++)\n"
++"                    ok[c] = predicated == 0 || vp_cc_pass(cc[csel][csw[c]], cond);\n"
++"                [unroll] for (uint c = 0u; c < 4u; c++) if ((vmask & (1u << c)) != 0u && ok[c]) {\n"
++"                    if (vec_result != 0u && dst_out != 0x1Fu) o[dst_out & 15u][c] = val[c];\n"
++"                    if (dst_tmp != 0x3Fu) r[dst_tmp & 31u][c] = val[c];\n"
++"                }\n"
++"                // The decompiler stores the condition register last, testing it live per lane.\n"
++"                if (cc_update != 0u) {\n"
++"                    [unroll] for (uint c = 0u; c < 4u; c++) if ((vmask & (1u << c)) != 0u &&\n"
++"                        (predicated == 0 || vp_cc_pass(cc[csel][csw[c]], cond))) cc[csel][c] = val[c];\n"
++"                }\n"
++"            }\n"
++"        }\n"
++"        uint flow = (sca_op == 0x08u || sca_op == 0x09u || sca_op == 0x0Au || sca_op == 0x0Bu ||\n"
++"                     sca_op == 0x0Cu || sca_op == 0x11u || sca_op == 0x12u) ? 1u : 0u;\n"
++"        if (smask != 0u && sca_op != 0u && flow == 0u && sca_op <= 0x10u && sca_op != 0x08u) {\n"
++"            float4 C2;\n"
++"            VP_SRC(C2, src2, (d0 >> 23) & 1u)\n"
++"            float4 val = (float4)0;\n"
++"            float x = C2.x;\n"
++"            if (sca_op == 0x01u) val = C2;\n"
++"            else if (sca_op == 0x02u) val = (float4)(1.0 / x);\n"
++"            else if (sca_op == 0x03u) val = (float4)clamp(1.0 / x, 5.42101e-20, 1.884467e19);\n"
++"            else if (sca_op == 0x04u) val = (float4)rsqrt(max(abs(x), 1e-10));\n"
++"            else if (sca_op == 0x05u || sca_op == 0x0Eu) val = (float4)exp2(x);\n"
++"            else if (sca_op == 0x06u || sca_op == 0x0Du) val = (float4)log2(max(abs(x), 1e-10));\n"
++"            else if (sca_op == 0x0Fu) val = (float4)sin(x);\n"
++"            else if (sca_op == 0x10u) val = (float4)cos(x);\n"
++"            else if (sca_op == 0x07u) {\n"
++"                float lit = (C2.x > 0.0) ? exp2(clamp(C2.w, -127.996, 127.996) * log2(max(C2.y, 1e-10))) : 0.0;\n"
++"                val = float4(1.0, max(C2.x, 0.0), lit, 1.0);\n"
++"            }\n"
++"            if (sat_bit) val = saturate(val);\n"
++"            [unroll] for (uint c = 0u; c < 4u; c++) if ((smask & (1u << c)) != 0u &&\n"
++"                (predicated == 0 || vp_cc_pass(cc[csel][csw[c]], cond))) {\n"
++"                if (vec_result == 0u && dst_out != 0x1Fu) o[dst_out & 15u][c] = val[c];\n"
++"                if (sca_dst_tmp != 0x3Fu) r[sca_dst_tmp & 31u][c] = val[c];\n"
++"            }\n"
++"        }\n"
++"        if (flow != 0u) {\n"
++"            uint tgt = (((d0 >> 23) & 1u) << 9) | ((d2 & 0x3Fu) << 3) | ((d3 >> 29) & 7u);\n"
++"            uint rel = tgt >= base ? tgt - base : tgt;\n"
++"            int taken = 0;\n"
++"            if (sca_op == 0x11u || sca_op == 0x12u) {\n"
++"                uint bit = (bits >> ((d3 >> 23) & 0x1Fu)) & 1u;\n"
++"                taken = bit == ((d3 >> 28) & 1u);\n"
++"            } else if (cond == 7u) taken = 1;\n"
++"            else if (cond == 0u) taken = 0;\n"
++"            else taken = vp_cc_pass(cc[csel][cswx], cond) ? 1 : 0;\n"
++"            branched = 1;\n"
++"            if (sca_op == 0x08u || sca_op == 0x09u || sca_op == 0x11u) {\n"
++"                pc = taken ? (int)rel : next;\n"
++"            } else if (sca_op == 0x0Au || sca_op == 0x0Bu || sca_op == 0x12u) {\n"
++"                if (taken) { cs[csp] = next; csp = min(csp + 1, 7); pc = (int)rel; }\n"
++"                else pc = next;\n"
++"            } else {\n"
++"                if (taken) { if (csp > 0) { csp--; pc = cs[csp]; } else pc = -1; }\n"
++"                else pc = next;\n"
++"            }\n"
++"        }\n"
++"        if (!branched) pc = (d3 & 1u) ? -1 : next;\n"
++"    }\n"
++"    VSOutput Out;\n"
++"    float4 p = o[0];\n"
++"    Out.pos = float4(p.xyz * vp_posscale.xyz + p.w * vp_posoffset.xyz, p.w);\n"
++"    if ((flags & 1u) != 0u) {\n"
++"        if (vp_posoffset.w > 0.0) {\n"
++"            float aw = abs(p.w);\n"
++"            if (abs(abs(Out.pos.x) - vp_posoffset.w * aw) < 0.004 * aw) Out.pos.x = Out.pos.x < 0.0 ? -aw : aw;\n"
++"        } else if (vp_posoffset.w < 0.0) {\n"
++"            float aw = abs(p.w);\n"
++"            if (abs(abs(Out.pos.x) - aw) < 0.004 * aw) Out.pos.x *= -vp_posoffset.w;\n"
++"        }\n"
++"    }\n"
++"    Out.col0 = o[1]; Out.col1 = o[2]; Out.fog = o[5].xxxx;\n"
++"    Out.t0=o[7]; Out.t1=o[8]; Out.t2=o[9]; Out.t3=o[10];\n"
++"    Out.t4=o[11]; Out.t5=o[12]; Out.t6=o[13]; Out.t7=o[14];\n"
++"    Out.t8=o[15]; Out.t9=o[6];\n"
++"    return Out;\n"
++"}\n"
++;

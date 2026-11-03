@@ -697,6 +697,19 @@ interpreter's pipeline still depends on the fragment shader in `force` mode
 only when the fragment side is the specialized one; the key adds the vertex
 input layout the fetch path already uses. Validation matches stage 1.
 
+Stage 2 implementation checkpoint (2026-11-04): the separate overlay now
+contains the generic vertex body, per-frame program arena, recorded-program
+lookup, GPU-fetch and IA variants, and combined vertex/fragment root bindings.
+`scripts/test/vp_interp.hlsl` is original generic interpreter source, not
+game-derived HLSL. `gen_vp_interp_hlsl.py` embeds it in the overlay;
+`interp_make_patch.py` regenerates the overlay from the private scratch tree.
+The private build also precompiles the two vertex variants. The prior locked
+`interp-s2-build` succeeded; live vertex interpretation is still unverified at
+this checkpoint. Review added frame-start signature-state reset and retained
+bytecode references in the shared interpreter pipeline cache. A fresh locked
+build and the new synthetic IA/GPU-fetch WARP output comparison are pending.
+The synthetic comparison is not a catalogue or rasterization proof.
+
 Stage 3 wires `=1` into the pending-draw path. With an empty private shader
 cache, a first dealership visit and an HSR race are compared with today's
 async policy: missing draws, frame times (`scripts/test/race.ps1 -FrameTest`),

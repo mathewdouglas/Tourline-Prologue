@@ -6,6 +6,11 @@ Does not assert the runtime working tree matches an older baseline: that tree
 is dirty. Headers the overlay adds sit next to the patched .c so quoted
 includes resolve there. The reference ninja -I paths still supply the rest.
 
+Also builds fp_interp_precompile.c and vp_interp_precompile.c from the patched
+tree and runs them into scratch/interp-cache, so the interpreter's own DXBC is
+in the private shader cache before the first game launch (an unchanged source
+hits the existing entries in about a second).
+
 Run from an x64 VS environment. The engine link is heavy: call this through
 run_locked.py. Prints the exe path on stdout.
 """
@@ -45,7 +50,8 @@ def apply_sources(tree: Path) -> Path:
         if not target.exists():
             shutil.copyfile(header, target)
     backend = tree / name
-    for extra in ("rsx_fp_interp.h", "rsx_fp_interp_hlsl.inc", "rsx_fp_interp_backend.inc"):
+    for extra in ("rsx_fp_interp.h", "rsx_fp_interp_hlsl.inc", "rsx_fp_interp_backend.inc",
+                   "rsx_vp_interp.h", "rsx_vp_interp_hlsl.inc", "rsx_vp_interp_backend.inc"):
         if not (video / extra).is_file():
             raise SystemExit("overlay did not add " + extra)
     return backend
@@ -114,6 +120,22 @@ def install_worktree(exe: Path) -> Path:
     return dest / "gt5p.exe"
 
 
+def precompile_interpreters(tree: Path, cache: Path) -> None:
+    """Build the two precompile tools against the patched headers and run them."""
+    clang = r"C:\Program Files\LLVM\bin\clang-cl.exe"
+    out = ROOT / "scratch" / "fp-interp"
+    out.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
+    for name in ("fp_interp_precompile", "vp_interp_precompile"):
+        exe = out / (name + ".exe")
+        subprocess.run([clang, "/nologo", "/TC", "/O2", "/MD", "/D_CRT_SECURE_NO_WARNINGS",
+                        "/I" + str(tree / "libs" / "video"), "/I" + str(RUNTIME / "include"),
+                        "/Fo" + str(out / (name + ".obj")), "/Fe" + str(exe),
+                        str(ROOT / "scripts" / "test" / (name + ".c")),
+                        "/link", "d3dcompiler.lib"], check=True)
+        subprocess.run([str(exe), str(cache), "0"], check=True)
+
+
 def main() -> None:
     if os.environ.get("VSCMD_ARG_TGT_ARCH", "").lower() != "x64":
         raise SystemExit("Use an x64 VS environment")
@@ -125,6 +147,8 @@ def main() -> None:
     obj = compile_backend(backend, fresh / "backend-objects")
     exe = link_engine(fresh, obj)
     installed = install_worktree(exe)
+    if os.environ.get("INTERP_SKIP_PRECOMPILE") != "1":
+        precompile_interpreters(fresh / "tree", ROOT / "scratch" / "interp-cache")
     print(installed)
 
 
