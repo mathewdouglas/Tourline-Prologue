@@ -1274,7 +1274,7 @@ def cmd_report(args):
     out = isolated(args.out)
     state = load_state(out)
     plan = load_plan(args.plan)
-    cache = out / 'shadercache'
+    cache = isolated(args.cache) if args.cache else out / 'shadercache'
     baseline = pt.read(Path(args.baseline))
     starter = {r['key'] for r in baseline['records']}
     elf = Path(args.elf) if args.elf else (isolated(args.root) / 'game/input/EMAIN.ELF')
@@ -1388,6 +1388,7 @@ def main(argv=None):
     rp = sub.add_parser('report')
     rp.add_argument('--root', type=Path, default=ROOT / 'scratch/content-sweep')
     rp.add_argument('--out', type=Path, required=True)
+    rp.add_argument('--cache', type=Path, help='private RSX_SHADER_CACHE used by the runs (default: <out>/shadercache)')
     rp.add_argument('--baseline', type=Path, default=ROOT / 'assets/pipeline-templates/gt5p-disc-v2')
     rp.add_argument('--engine', type=Path, default=DEFAULT_ENGINE)
     rp.add_argument('--decoder', type=Path, default=DEFAULT_DECODER)
