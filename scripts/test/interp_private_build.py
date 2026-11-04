@@ -47,14 +47,16 @@ def apply_patch(tree: Path, patch: Path, include: list[str] | None = None) -> No
 def apply_sources(tree: Path) -> Path:
     video = tree / "libs" / "video"
     video.mkdir(parents=True)
-    name = "libs/video/rsx_d3d12_backend.c"
-    original = subprocess.check_output(["git", "-C", str(RUNTIME), "show", "HEAD:" + name])
     subprocess.run(["git", "init", "-q", str(tree)], check=True)
     subprocess.run(["git", "-C", str(tree), "config", "core.autocrlf", "false"], check=True)
-    (tree / name).parent.mkdir(parents=True, exist_ok=True)
-    (tree / name).write_bytes(original)
+    names = subprocess.check_output(["git", "-C", str(RUNTIME), "ls-tree", "-r", "--name-only",
+                                     "HEAD", "libs/video", "include"], text=True).splitlines()
+    for name in names:
+        target = tree / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(subprocess.check_output(["git", "-C", str(RUNTIME), "show", "HEAD:" + name]))
     apply_patch(tree, ROOT / "patches" / "ps3recomp-4e8f3ca8-local.patch",
-                [name, "libs/video/rsx_offline_batch.h"])
+                ["libs/video/*", "include/*"])
     apply_patch(tree, ROOT / "patches" / "ps3recomp-shader-interp.patch")
     # Quoted includes search the source directory first. The typecheck used the
     # private post-local-patch headers, not the dirty runtime working tree.
@@ -63,7 +65,7 @@ def apply_sources(tree: Path) -> Path:
         target = video / header.name
         if not target.exists():
             shutil.copyfile(header, target)
-    backend = tree / name
+    backend = video / "rsx_d3d12_backend.c"
     for extra in ("rsx_fp_interp.h", "rsx_fp_interp_hlsl.inc", "rsx_fp_interp_backend.inc",
                    "rsx_vp_interp.h", "rsx_vp_interp_hlsl.inc", "rsx_vp_interp_backend.inc"):
         if not (video / extra).is_file():
@@ -93,7 +95,26 @@ def compile_backend(backend: Path, objects: Path) -> Path:
     return out
 
 
-def link_engine(fresh: Path, backend_obj: Path) -> Path:
+def compile_decompilers(fresh: Path) -> list[Path]:
+    """Override archive members with the same patched sources as the backend."""
+    objects = fresh / "decoder-objects"
+    (objects / "libs" / "video").mkdir(parents=True)
+    result = []
+    for name in ("rsx_fp_decompiler.c", "rsx_vp_decompiler.c"):
+        obj = rf"ps3recomp\CMakeFiles\ps3recomp_runtime.dir\libs\video\{name}.obj"
+        command = subprocess.check_output(["ninja", "-t", "commands", obj], cwd=REFERENCE,
+                                          text=True).splitlines()[-1]
+        original = str(RUNTIME / "libs" / "video" / name)
+        if original not in command:
+            raise SystemExit("unexpected decoder compile command: " + name)
+        command = command.replace(original, str(fresh / "tree" / "libs" / "video" / name))
+        command = command.replace(r"ps3recomp\CMakeFiles\ps3recomp_runtime.dir", str(objects))
+        subprocess.run(command, cwd=objects, check=True)
+        result.append(objects / "libs" / "video" / (name + ".obj"))
+    return result
+
+
+def link_engine(fresh: Path, backend_obj: Path, decoder_objs: list[Path]) -> Path:
     source = REFERENCE.parent / "src" / "gt5p_present.cpp"
     obj = r"CMakeFiles\gt5p.dir\src\gt5p_present.cpp.obj"
     command = subprocess.check_output(
@@ -117,6 +138,7 @@ def link_engine(fresh: Path, backend_obj: Path) -> Path:
     args += [str(objects / "src" / "gt5p_present.cpp.obj") if item == obj else str(REFERENCE / item)
              for item in inputs]
     args.append(str(backend_obj))
+    args.extend(map(str, decoder_objs))
     args += [str(REFERENCE / name) if "\\" in name else name for name in libraries]
     exe = runtime / "gt5p.exe"
     args += ["/out:" + str(exe), "/pdb:" + str(fresh / "gt5p.pdb"),
@@ -165,10 +187,11 @@ def main() -> None:
     if os.environ.get("INTERP_EMBED_DXBC") != "0":
         interp_embed.generate(backend.parent, ROOT / "scratch" / "interp-cache")
     obj = compile_backend(backend, fresh / "backend-objects")
-    exe = link_engine(fresh, obj)
+    exe = link_engine(fresh, obj, compile_decompilers(fresh))
     installed = install_worktree(exe)
     print(installed)
 
 
 if __name__ == "__main__":
     main()
+

@@ -881,10 +881,10 @@ index 0000000..6011b6f
 +#endif
 diff --git a/libs/video/rsx_fp_interp_backend.inc b/libs/video/rsx_fp_interp_backend.inc
 new file mode 100644
-index 0000000..c1d8842
+index 0000000..2696f17
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp_backend.inc
-@@ -0,0 +1,1004 @@
+@@ -0,0 +1,1012 @@
 +/* Fragment-interpreter replay. Included at the bottom of rsx_d3d12_backend.c
 + * so it can call that file's static helpers. RSX_SHADER_INTERP unset or 0
 + * returns before any allocation, signature, or binding. This file also owns
@@ -1529,7 +1529,9 @@ index 0000000..c1d8842
 +    if (s_ijob_thread) {
 +        InterlockedExchange(&s_ijob_stop, 1);
 +        WakeAllConditionVariable(&s_ijob_cv);
-+        WaitForSingleObject(s_ijob_thread, 10000);
++        /* Slots, bytecode and signatures must outlive an in-flight driver call.
++         * A timeout followed by freeing them is a use-after-free. */
++        WaitForSingleObject(s_ijob_thread, INFINITE);
 +        CloseHandle(s_ijob_thread);
 +        s_ijob_thread = NULL;
 +    }
@@ -1670,10 +1672,16 @@ index 0000000..c1d8842
 +    pd.SampleDesc.Count = samples;
 +    if (interp_pso_async()) {
 +        InterpPsoSlot* sl = &s_interp_pso[s_interp_pso_n];
-+        if (!interp_job_enqueue(&pd, il, s_interp_pso_n)) { s_interp_stat.pso_queue_full++; return NULL; }
 +        sl->key = key; sl->pso = NULL; sl->state = 1;
 +        vsb->lpVtbl->AddRef(vsb); ps->lpVtbl->AddRef(ps);
 +        sl->vs_hold = vsb; sl->ps_hold = ps;
++        /* Publish a fully initialized slot before waking the worker. Otherwise
++         * a fast cache hit can publish READY, then be overwritten with QUEUED. */
++        if (!interp_job_enqueue(&pd, il, s_interp_pso_n)) {
++            vsb->lpVtbl->Release(vsb); ps->lpVtbl->Release(ps);
++            memset(sl, 0, sizeof *sl);
++            s_interp_stat.pso_queue_full++; return NULL;
++        }
 +        s_interp_pso_n++;
 +        s_interp_stat.pso_queued++;
 +        s_interp_stat.pso_wait++;
@@ -1937,7 +1945,7 @@ index 0000000..6886810
 +#endif
 diff --git a/libs/video/rsx_vp_interp_backend.inc b/libs/video/rsx_vp_interp_backend.inc
 new file mode 100644
-index 0000000..a331c4a
+index 0000000..763864c
 --- /dev/null
 +++ b/libs/video/rsx_vp_interp_backend.inc
 @@ -0,0 +1,388 @@
