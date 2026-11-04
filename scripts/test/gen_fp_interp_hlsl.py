@@ -302,6 +302,14 @@ void rsx_i_atest(float a) {
     }
 }
 
+// NaN guard that the HLSL optimizer cannot fold: (v == v) is assumed true under the default floating-point
+// model, so the guard was silently dropped from some compiled layouts and a NaN reached the target (the specialized
+// shader writes 0 there). Compares the bit pattern instead: NaN is exponent all ones with a non-zero mantissa.
+float4 rsx_i_nan0(float4 v) {
+    uint4 u = asuint(v) & 0x7FFFFFFFu;
+    return (u > 0x7F800000u) ? (float4)0 : v;
+}
+
 float4 rsx_i_export(uint half, uint target, float4 r[48], float4 h[48]) {
     uint idx = 0;
     if (half != 0u) {
@@ -630,14 +638,14 @@ float4 main(RSXInterpIn input) : SV_TARGET {
         ds ^= ds >> 16; ds *= 0x7feb352du; ds ^= ds >> 15; ds *= 0x846ca68bu; ds ^= ds >> 16;
         o0.rgb += ((float)(ds & 0xFFFFu) + (float)(ds >> 16)) * (1.0 / (65535.0 * 255.0)) - (1.0 / 255.0);
     }
-    o0 = (o0 == o0) ? o0 : (float4)0;
+    o0 = rsx_i_nan0(o0);
     if ((flags & 1024u) != 0u) o0.rgb = rsx_i_l2s(o0.rgb);
 #if RSX_INTERP_MRT
     RSXInterpOut o;
     o.c0 = o0;
-    o.c1 = (o1 == o1) ? o1 : (float4)0;
-    o.c2 = (o2 == o2) ? o2 : (float4)0;
-    o.c3 = (o3 == o3) ? o3 : (float4)0;
+    o.c1 = rsx_i_nan0(o1);
+    o.c2 = rsx_i_nan0(o2);
+    o.c3 = rsx_i_nan0(o3);
     float4 o1 = rsx_i_export(half, 1u, r, h);
     float4 o2 = rsx_i_export(half, 2u, r, h);
     float4 o3 = rsx_i_export(half, 3u, r, h);
@@ -655,9 +663,9 @@ def fix_mrt(body: str) -> str:
     old = """#if RSX_INTERP_MRT
     RSXInterpOut o;
     o.c0 = o0;
-    o.c1 = (o1 == o1) ? o1 : (float4)0;
-    o.c2 = (o2 == o2) ? o2 : (float4)0;
-    o.c3 = (o3 == o3) ? o3 : (float4)0;
+    o.c1 = rsx_i_nan0(o1);
+    o.c2 = rsx_i_nan0(o2);
+    o.c3 = rsx_i_nan0(o3);
     float4 o1 = rsx_i_export(half, 1u, r, h);
     float4 o2 = rsx_i_export(half, 2u, r, h);
     float4 o3 = rsx_i_export(half, 3u, r, h);
@@ -692,13 +700,13 @@ def fix_mrt(body: str) -> str:
     RSXInterpOut o;
     o.c0 = o0;
 #if RSX_INTERP_TARGETS > 1
-    o.c1 = (o1 == o1) ? o1 : (float4)0;
+    o.c1 = rsx_i_nan0(o1);
 #endif
 #if RSX_INTERP_TARGETS > 2
-    o.c2 = (o2 == o2) ? o2 : (float4)0;
+    o.c2 = rsx_i_nan0(o2);
 #endif
 #if RSX_INTERP_TARGETS > 3
-    o.c3 = (o3 == o3) ? o3 : (float4)0;
+    o.c3 = rsx_i_nan0(o3);
 #endif
     return o;
 #else

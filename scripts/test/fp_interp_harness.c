@@ -884,7 +884,11 @@ static int compare_readback(Gpu* g, UINT nrt, float* worst)
             float* b = (float*)(map + fp_b.Offset + (size_t)y * fp_b.Footprint.RowPitch + (size_t)x * 16);
             for (c = 0; c < 4; c++) {
                 float d;
-                if (a[c] != a[c] || b[c] != b[c]) { bad = 1; *worst = 1e9f; continue; }
+                if (a[c] != a[c] || b[c] != b[c]) {
+                    static int nan_logged;
+                    if (nan_logged < 24) { nan_logged++; printf("NaN rt=%u x=%u y=%u c=%u spec=%g interp=%g\n", t, x, y, c, (double)a[c], (double)b[c]); }
+                    bad = 1; *worst = 1e9f; continue;
+                }
                 d = a[c] - b[c];
                 if (d < 0) d = -d;
                 if (d > *worst) *worst = d;
@@ -1093,7 +1097,7 @@ static int cmd_compare(const char* dir, const char* cso_dir, const char* summary
         r = run_program(&g, b, nb, 0, 0, 0, 0, &w);
         if (r == -5) spec_fail++;
         else if (r < 0) skip++;
-        else if (r > 0) { fail++; if (w > cat_worst) cat_worst = w; }
+        else if (r > 0) { fail++; if (w > cat_worst) cat_worst = w; printf("catalogue FAIL kind=%d worst=%g %s\n", kind[pi], w, picked[pi]); }
         else pass++;
         if (kind[pi] == 2 && cube_pass + cube_fail < 5 && r >= 0) {
             float cw = 0;

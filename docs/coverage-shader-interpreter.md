@@ -14,7 +14,153 @@ Default is off. `RSX_SHADER_INTERP=0` (unset) must leave pipeline keys, HLSL,
 DXBC and pixels unchanged. Unvalidated behaviour stays on an environment
 switch.
 
-## Status (2026-11-04)
+## Status (Phase 216, 2026-11-05)
+
+Phase 216 closed four of the five gaps that kept `RSX_SHADER_INTERP=1` from being a player default and
+measured it against the async baseline on cold and warm caches. Everything stays default-off; the sections
+below that describe the earlier state are kept as the record and are corrected here.
+
+What was wrong and what changed (all in `patches/ps3recomp-shader-interp.patch`, the overlay):
+
+1. **ACURA wordmark (was red 13 vs 39): fixed. The cause was a missing behaviour, not gamma.** A stencil mask
+   pass that the renderer redirects to a colour target (`stencil` bit 26, the title's glyph/shape mask) computes
+   its pass operation as a blend from a source of exactly 1, so the specialized shader's colour output is forced
+   to `(1,1,1,1)` (the `FP_ONE` block in `vp_get_fp_pso`). The interpreter wrote the program's own colour into the
+   mask instead. It now sets header flag bit 11 (`2048`) for a single-target draw with that stencil bit and the
+   epilogue forces `o0 = 1` before the alpha test, as the specialized path does. Evidence: the same
+   `RSX_SHADER_INTERP_AB` alternating-frame capture, `force` fragment interpreter, same save, same warm cache,
+   crop 1015,110-1215,145 (the wordmark), per-channel maximum: Phase 215 overlay engine, interpreted frames
+   red 13, green 24-28, blue 53-60 against specialized frames red 39, green 48-51, blue 71-76; Phase 216 engine,
+   interpreted red 39-40, green 49-51, blue 71-76 against specialized red 39, green 48-50, blue 70-75 (the one-level
+   differences follow the fade, which advances between adjacent frames; the specialized frames step the same way).
+   The whole-frame mean absolute difference of adjacent pairs is 0.8-1.04 / 255 (motion included),
+   unchanged from before, and the title crop differs by at most 2. `RSX_SHADER_INTERP_MASK_ONE=0` is the rollback (by construction restores the Phase 215 behaviour; not re-run) -- the
+   earlier gamma-read and export-count experiments were looking in the wrong
+   place and stay reverted.
+2. **`tex_dz` (depth-copy) and `tex_mip` (stacked-mip) draws: interpreted.** Two header words carry the depth
+   units and crossbar (`hdr[9]`: bits 0-3 units, 8-19 crossbar selectors) and the mip units (`hdr[10]`). The
+   shader reproduces the specialized `rsx_dz<u>` byte unpacking (`rsx_i_dz`) and the `rsx_mip<u>` stacked-level
+   fetch for TXL (`rsx_i_mip`, `rsx_i_mipuv`: clamp, per-level origin/scale from `rsx_texscale`, two-level blend,
+   gamma per tap). Depth-copy units keep sRGB decode off, as in the specialized shader. Evidence: the gap counter
+   (`[interp] ... gap`) that was 780 (dealership) and 3,141 (High Speed Ring) in Phase 215 is 0 in every run
+   below. There is no offline equivalence proof for these two paths (the WARP harness compares the decompiler
+   alone, which does not emit them); validation is the in-game alternating captures. `RSX_SHADER_INTERP_DZMIP=0`
+   restores the skip.
+3. **Replay vertex omissions rising 713 -> 2,028 with the vertex interpreter: explained, gone.** The Phase 215
+   High Speed Ring run had `fallback = gap = 3,141`, and 2,028 + 1,113 (replay vertex + replay fragment
+   omissions) is exactly 3,141: they were the `tex_dz`/`tex_mip` gap draws, whose vertex shader was also pending,
+   so neither interpreter could take them. With gap 2 closed the interpreter-only synchronous run has 0 replay
+   vertex, 0 replay fragment and 0 recording-time vertex omissions. (The baseline's own replay vertex count is
+   681; the raise was not a vertex-interpreter defect.) New diagnostics split `vp_interp_stage` misses into
+   `nohash`/`unseen`/`not_vp`/`lost` in the `[interp-vp]` line; they were all zero.
+4. **Interpreter pipelines were created on first use on the replay thread and never saved (gap 1): persisted
+   and moved off the replay thread, behind two switches.** `RSX_SHADER_INTERP_PSO_DISK=1` stores each driver
+   blob as `ipso_<hash>.bin` (separate prefix, so tools that enumerate `pso_*.bin` do not see them) under the
+   same size/checksum validation as the guest blobs; the key hashes both shaders, all native state and the
+   interpreter root signature's serialized bytes (`interp_rs_hash`, so a layout change cannot reuse a blob).
+   `RSX_SHADER_INTERP_PSO_ASYNC=1` queues a missing pipeline to one below-normal worker (ring of 512
+   descriptor copies; shader blobs are held by the slot, the root signatures live to shutdown) and treats the
+   draw as pending until it is ready, exactly like a specialized pipeline still compiling. New counters on the
+   `[interp-pso]` line: replay-thread time inside `CreateGraphicsPipelineState` (`block_ms`, `block_max_ms`),
+   queued, queue-full, draws that found their pipeline pending, disk hits/saves/rejects.
+   **Not done:** observed pipelines are not recorded for startup creation in the background. The existing
+   `RSX_SHADER_INTERP_PREWARM=1` still precreates only the generic-vertex-shader pairs (133 classes) and
+   therefore only helps paired mode; in fragment-only `=1` the vertex shader is the specialized one and is
+   unknown at startup. Persisted blobs make the second launch cheap (see the disk-hit counts), but the first
+   launch still pays each pipeline once, on the worker, not on the replay thread. Creating the interpreter
+   pipelines during preparation (the starter has the vertex programs and native state) is the remaining step.
+5. **p99 on the cold race: not fixed (gap 5, open).** See the measurements.
+
+### Phase 216 measurements
+
+Private engine built by `scripts/test/interp_private_build.py` from the overlay at this commit (Phase 215 main
+patch underneath; the specialized decompiler objects are the v0.2.3 reference objects, so specialized shader
+text is the older, not the Phase 215, text), 720p, MSAA default, `RSX_SSAA=0`, private empty or reused caches,
+one locked run per cell, same save seed (`9161393d2439d610`), `GT5P_PRESENT_PROF=1`. "off" is the new engine with
+both switches 0 (the async baseline). "interp" is `RSX_SHADER_INTERP=1 RSX_SHADER_INTERP_VP=1`; "interp+pso" adds
+`RSX_SHADER_INTERP_PSO_DISK=1 RSX_SHADER_INTERP_PSO_ASYNC=1`. FrameTest is `race.ps1 -FrameTest` (60 s after a
+45 s delay, foreground required). Single runs on a shared workstation: differences of a few percent are within
+run-to-run variation (the Phase 215 note recorded 23.1% late and p99 151.8 ms for what is the same cold-HSR
+baseline; this session's baseline was 11.5% and 91.8 ms), so compare mechanisms and counters, not decimals.
+
+| Route / cache | Mode | FPS | p99 ms | max ms | >20 ms | Replay omissions (fp / vp), recording vp |
+| --- | --- | --- | --- | --- | --- | --- |
+| HSR cold | off | 50.8 | 91.8 | 288 | 11.5% | 812,595 / 681, 829,624 |
+| HSR cold | interp | 51.3 | 88.4 | 955 | 9.3% | 0 / 0, 0 |
+| HSR cold | interp+pso | 52.4 | 86.7 | 235 | 9.2% | 3,873 / 6,730, 0 |
+| HSR warm | off | 59.8 | 18.0 | 54.0 | 0.3% | 42,734 / 6 |
+| HSR warm | interp+pso | 59.9 | 18.0 | 20.3 | 0.1% | 3,203 / 1 |
+| Daytona cold | off | 52.3 | 83.1 | 166 | 8.3% | 1,035,919 / 378, 542,898 |
+| Daytona cold | interp+pso | 51.3 | 100.2 | 184 | 7.5% | 4,296 / 1,562, 0 |
+| Daytona warm | off | 56.0 | 40.0 | 193 | 10.2% | 57,882 / 0, 45 |
+| Daytona warm | interp+pso | 59.5 | 22.2 | 71.3 | 1.2% | 3,844 / 4, 0 |
+
+Interpreter pipeline creation (cold HSR): synchronous `interp` blocked the replay thread for 1,926 ms in total
+(461 pipelines, 900 ms the largest, the 955 ms frame in the table); with PSO async the replay thread blocked for
+0 ms (462 pipelines, 2,817 ms on the worker, 688 ms the largest, max frame 235 ms). Warm HSR: 143 of 168
+requested pipelines loaded from `ipso_*.bin` (25 new, saved); warm Daytona 139 of 183; warm dealership 102
+of 104; no rejected blob in any run. The omissions that remain with PSO async are draw attempts left out
+while their interpreter pipeline was queued (`wait_draws`: 10,638 cold HSR, 4,048 cold dealership), about
+0.5-2% of the draw attempts the baseline leaves out.
+
+Dealership (cold, 12 shots, inspected): the off run's shots show missing materials and background for the first
+seconds (cars as dark grey slabs, no blue backdrop; replay omissions 258,009 / 648 plus 555,867 recording-time);
+the interp+pso run's shots at the same moments show both cars with paint, glass, reflections, backdrop and text
+(omissions 2,713 / 1,320, recording-time 0). Frame cost: the cold dealership windows at the page's first
+appearance are GPU-bound while many programs are interpreted (60-63 presents per 5 s, GPU 17-27 ms, against
+98-128 presents and 5.6 ms for the baseline, which simply leaves the draws out); settled windows are equal
+(150 presents, 4.9-7 ms, in both). Warm dealership omissions 23,347 (off) against 1,881 (interp+pso).
+
+What the table says honestly: warm caches, `=1` with PSO persistence is equal or better in every cell
+(Daytona warm clearly: p99 40.0 -> 22.2 ms, 10.2% -> 1.2% late, mostly because the baseline's pending native
+pipelines left draws out and interpreted draws kept the frame filled while a pipeline finished). Cold caches: the
+share of late frames is lower, the pictures are complete instead of missing most materials, and the worst single
+frame is no longer a driver call; p99 is not reduced beyond noise (HSR 91.8 -> 86.7, Daytona 83.1 -> 100.2).
+
+Why p99 stays high on cold caches (gap 5): the per-5-second `[present-prof]` windows show two different cold
+costs. The baseline's late frames come from compile completions and first-time pipeline/texture work with many
+draws missing. With the interpreter the late frames are GPU-bound windows (34-60 presents per 5 s, GPU 36-54 ms)
+at the moments when many unseen programs are on screen at once, for example the first seconds after the race
+starts; the interpreter's per-pixel cost, about 20x the specialized shader's in `force` (see below), is the
+price of drawing those pixels at all. Removing it needs a cheaper interpreter (below), not another switch.
+
+### Remaining work, in priority order
+
+1. **Cheaper interpreter pixel shader.** Candidates, all untested: size the `r[48]`/`h[48]` register files by the
+   program's highest used index (the Phase 215 specialized change, here as shader variants: 16/32/48), skip the
+   96-register zero fill, and replace the per-instruction 22-bit source decode by a pre-decoded form. Each
+   variant multiplies the embedded generic bytecode (about 20-27 s of D3DCompile per variant today).
+2. **Interpreter pipelines at preparation time** (starter vertex programs x native classes), so even the first
+   launch loads blobs instead of building them on the worker.
+3. A foreground-held, repeated cold HSR/Daytona series (three or more pairs) to put an interval on the p99
+   difference; this session has one pair per cell and the Phase 215 baseline varied by 60 ms.
+4. Epilogue pixel equivalence for the rest of the epilogue flags (WPOS host-pixel noise sample on small
+   dither textures differs in form from the specialized shader's and was not examined) and `tex_dz`/`tex_mip`
+   equivalence beyond the inspected captures.
+
+### Proposed default change (not applied)
+
+Not applied by this phase. If accepted, the change touches exactly:
+
+- `fp_interp_cfg()` and `vp_interp_cfg()` (`rsx_fp_interp_backend.inc`, `rsx_vp_interp_backend.inc`): treat an
+  unset `RSX_SHADER_INTERP` / `RSX_SHADER_INTERP_VP` as `1` (keep `0` as the rollback).
+- `interp_pso_disk()` and `interp_pso_async()`: unset means on (keep `0` as the rollback).
+- `src/main.cpp`, which sets the other renderer defaults (`RSX_SHADER_ASYNC`), is where a player default would be
+  set instead if the engine default should stay off for development.
+- The interpreter generic DXBC (embedded, 1.2 MB with these variants) must be linked in the release engine:
+  `scripts/test/interp_private_build.py` is a private-build recipe only; the CI build would need the same
+  embed step (or the 20+ s per variant D3DCompile at first run would block startup).
+- The F1 settings page and `gt5p_settings.toml` have no interpreter entry; one is needed if it becomes a player
+  choice.
+- No pipeline key, shader text, cache format or starter change; the interpreter adds `ipso_*.bin` files beside
+  the existing cache entries, which the cache-size/cleanup code does not yet count.
+
+Recommendation: the data supports making `=1` with persisted, background pipelines the default only for
+warm-cache play (equal or better in all three routes, with far fewer left-out draws). Cold-cache play trades
+missing materials for GPU-bound windows and does not lower p99 beyond noise in this single-run set; accept that
+trade explicitly (or wait for the cheaper pixel shader) before shipping it.
+
+## Status (2026-11-04, superseded where Phase 216 says so)
 
 The fallback works in game and stays off. `=1` draws with the interpreter
 only while a specialized shader or its driver pipeline is pending, then the
@@ -81,6 +227,10 @@ embedded bytecode, and gamma decode stays on unless `GAMMA_READ=0`.
 | `RSX_SHADER_INTERP_ARENA_KB`, `RSX_SHADER_INTERP_VP_ARENA_KB` | Raise the program arena (256..16384) |
 | `RSX_SHADER_INTERP_OPT`, `RSX_SHADER_INTERP_VP_OPT` | D3DCompile optimization level for a non-embedded build |
 | `RSX_SHADER_INTERP_VP_BASE=1` | Subtract the vertex program's start slot. Default matches the specialized shader |
+| `RSX_SHADER_INTERP_PSO_DISK=1` | Phase 216: persist each interpreter pipeline's driver blob as `ipso_<hash>.bin` in the shader cache and reuse it when it validates. Default off |
+| `RSX_SHADER_INTERP_PSO_ASYNC=1` | Phase 216: create interpreter pipelines on one below-normal worker; the draw is left out (pending) until its pipeline is ready, so the replay thread never blocks in the driver. Default off |
+| `RSX_SHADER_INTERP_DZMIP=0` | Phase 216: restore the old skip of depth-copy (`tex_dz`) and stacked-mip (`tex_mip`) draws (they then keep the specialized shader and count as gaps). Default is to interpret them |
+| `RSX_SHADER_INTERP_MASK_ONE=0` | Phase 216 diagnostic: stop forcing a redirected stencil-mask pass's colour to 1.0 (restores the ACURA wordmark defect) |
 
 Build-only: `INTERP_EMBED_DXBC=0` links without the embedded payload.
 `INTERP_SKIP_PRECOMPILE=1` reuses generic bytecode whose source key still matches.

@@ -23,6 +23,7 @@ def main() -> None:
     p.add_argument("--fp", choices=("0", "1", "force"), default="0")
     p.add_argument("--vp", choices=("0", "1", "force"), default="0")
     p.add_argument("--seconds", type=int)
+    p.add_argument("--track", choices=("HighSpeedRing", "Daytona", "FujiSpeedwayF"), default="HighSpeedRing")
     p.add_argument("--frame-test", action="store_true")
     p.add_argument("--ab", action="store_true")
     p.add_argument("--cold", action="store_true", help="require a completely empty cache")
@@ -80,7 +81,7 @@ def main() -> None:
                  "-Engine", str(a.engine.resolve()),
                  "-GameRoot", str(game), "-TimeoutSec", "180", "-MenuDelaySec", "30" if a.cold else "0"]
     else:
-        args += [str(ROOT / "scripts" / "test" / "race.ps1"), "-Track", "HighSpeedRing",
+        args += [str(ROOT / "scripts" / "test" / "race.ps1"), "-Track", a.track,
                  "-Tag", a.tag, "-Seconds", str(a.seconds or (60 if a.frame_test else 35)),
                  "-SampleDelay", "12", "-RaceShots", "12",
                  "-Engine", str(a.engine.resolve()),
