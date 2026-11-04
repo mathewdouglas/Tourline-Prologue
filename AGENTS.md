@@ -40,9 +40,19 @@ Treat every statement about BCUS98158 as a hypothesis unless it appears under
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 214 is the latest).
+has the evidence, newest phase first (Phase 215 is the latest).
 
 ### What works now
+
+- **De-specialized shader text (Phase 215, development, on branch t3/shader-despecialize):** looped GPU vertex
+  fetch (`RSX_VFETCH_LOOP`, 2), sized fragment registers (`RSX_FP_REG_SIZE`), lazy sRGB helpers (`RSX_FP_GAMMA_LAZY`)
+  and no encode of a forced-constant mask pass (`RSX_FP_MASK_ENCODE`) are default in the main runtime patch; `=0`
+  restores each, and the helper rollbacks `GT5P_PREPARE_VFETCH_LOOP` / `_FP_REG_SIZE` / `_FP_GAMMA_LAZY` /
+  `_FP_MASK_ENCODE` must match the game run (the text is the cache key). Vertex output bit-identical on the GPU,
+  fragment instruction streams identical, all 22,194 enumerated DXBCs unchanged. Enumeration stage 504 -> 262 s;
+  frozen full preparation 250 -> 159 s to native input (consecutive runs). In-game GPU time and frames unchanged
+  within noise. Starter unchanged (inputs only). See docs/progress.md Phase 215 and
+  docs/coverage-enumeration.md for limits and the remaining axis design.
 
 - **Input-only pipeline templates (Phase 214, development):** the 12,669-record
   starter is now template format 3: canonical program/state inputs only, with

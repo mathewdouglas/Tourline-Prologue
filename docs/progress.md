@@ -9,6 +9,57 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 215 - De-specialized shader text: cheaper to compile, same shaders (2026-11-04)
+
+Preparation cost is dominated by the D3D compiler, so the generated HLSL was made cheaper without changing what
+it computes. Four generator changes are now **default**, each with a renderer switch (`0` restores the previous text)
+and a helper-side rollback that must also be set for the game run (the text is the cache key). Full details,
+tables and the equivalence method are in
+[coverage-enumeration](coverage-enumeration.md#de-specialized-shader-text-phase-215-now-default).
+
+| Change | Renderer switch | Helper rollback |
+| --- | --- | --- |
+| Looped GPU vertex fetch (one loop over the attribute mask) | `RSX_VFETCH_LOOP` (2; 1 or 0 for older text) | `GT5P_PREPARE_VFETCH_LOOP` |
+| Fragment register files sized to the highest literal index | `RSX_FP_REG_SIZE=0` | `GT5P_PREPARE_FP_REG_SIZE=0` |
+| sRGB helper functions only when called | `RSX_FP_GAMMA_LAZY=0` | `GT5P_PREPARE_FP_GAMMA_LAZY=0` |
+| No output encode when a stencil-mask pass forces its colour to 1.0 | `RSX_FP_MASK_ENCODE=0` | `GT5P_PREPARE_FP_MASK_ENCODE=0` |
+
+The changes live in the main runtime patch (`patches/ps3recomp-4e8f3ca8-local.patch`, only the three decoder/backend
+sections changed; the standalone vertex-fetch overlay patch was folded in and removed). The format-3 starter, plan,
+maps and warmup plan are byte-identical to Phase 214: the starter holds inputs only, so no re-key was needed. Engine
+and helper hashes change, so existing generations are not reused for the new text; rollbacks get their own
+generation.
+
+**Equivalence (no output claim rests on a sample alone).**
+- Vertex: all 1,120 enumerated vertex programs bit-identical on the RTX 4060 (128,450,560 values, 0 differences).
+- Fragment registers: rollback text equals the previous decoder for 7,929 of 7,929 catalogue programs; the default
+  compiles to byte-identical bytecode for 94.6-95.0% of 4,141 sampled programs and to an identical instruction
+  stream for every other one (the declared `dcl_indexableTemp` size is the only difference).
+- Enumeration, 22,194 jobs: lazy-helper and mask-encode changes leave every DXBC unchanged; the full frozen helper run
+  with all four rollbacks set equals the format-2 reference exactly.
+
+**Measured.** Enumeration stage 504.3 -> 262.0 s (seeded). Frozen full 12,669-record preparation, consecutive runs:
+249.9 -> 158.6 s until native input is published, then 204.9 -> 176.9 s to finish (stage-times pairs: vertex
+104-107 -> 19-20 s, fragment ~150 -> 126-141 s). Cancellation at native input and resume pass (retained shaders
+4,230-4,231, 627 vertex programs and all fragment jobs reused, 12,669/12,669/12,669 native, the previous selection
+preserved). In game (dealership, High Speed Ring, Daytona; 720p 1x and 1080p 2x MSAA) GPU time and frame statistics are
+the same within noise, with no PSO failure or device removal, and the window shots look the same. The looped fetch
+has no measurable GPU cost, so `RSX_VFETCH_LOOP=1` was not needed.
+
+**Axes.** Of 19,094 distinct fragment sources, removing the sampler-lane axis could save at most 2,482 (13%), the
+gamma bits 1,810 (9.5%), both 4,360 (22.8%) if they became run-time values; that needs renderer uniform
+plumbing, is not provably identical and was not implemented (design in the coverage document). A different finding was
+implemented: 1,293 sources compile to the same bytecode as a sibling, 1,001 of them stencil-mask passes whose colour is
+forced to a constant after the output encode was added (the mask-encode change; 235 sources merge, 1.2%, within timing
+noise). 817 + 94 sibling pairs remain uninvestigated.
+
+**Limits.** One GPU, one save, a few routes, consecutive-run timings with run-to-run variation (an earlier defaults
+run on a busier machine was 619 s end to end, so do not compare numbers across sessions). Only the combination of the
+four helper rollbacks was run through the frozen helper; each switch alone was not (their plumbing is unit-tested and
+the combined rollback is exact). The 780 enumeration jobs whose bytecode differs between the first two changes and
+the full rollback were not disassembled individually. `reject` through the frozen helper and
+whole-game/other-GPU/stutter claims are not made. Published v0.2.3 is unchanged.
+
 ## Phase 214 - Renderer-independent pipeline input templates (2026-11-04)
 
 Format 3 replaces shipped renderer-output expectations with canonical inputs.

@@ -495,30 +495,122 @@ Single-thread `D3DCompile` over real generated sources (`scripts/test/hlsl_compi
 | `RSX_VFETCH_LOOP=1` (4-component loop is a real loop) | 2.39 | 29.5 KB |
 | `RSX_VFETCH_LOOP=2` (plus one loop over the attribute mask) | 4.83 | 13.3 KB |
 
-CPU-fetch (mode 0) vertex sources average 65 ms and gain nothing from it. `patches/ps3recomp-vertex-fetch-loop.patch`
-implements the vertex switch in the decoder (default off; with it unset the generated text is byte-identical
-to the unpatched decoder for 150/150 sampled programs; a private decoder DLL was built from it and measured as
-above). `patches/ps3recomp-shader-source-dump.patch` (`RSX_SHADER_SRC_DUMP`, passed through by
-`GT5P_PREPARE_SHADER_SRC_DUMP`) is the diagnostic that produced the fragment sources. Developer pass-through:
-`GT5P_PREPARE_VFETCH_LOOP=1|2` (unit-tested with a fake pool; not run through a stage).
+CPU-fetch (mode 0) vertex sources average 65 ms and gain nothing from it. `patches/ps3recomp-shader-source-dump.patch`
+(`RSX_SHADER_SRC_DUMP`, passed through by `GT5P_PREPARE_SHADER_SRC_DUMP`) is the diagnostic that produced the
+fragment sources. The table above was a projection when written. Phase 215 below made the vertex switch and the
+register sizing defaults (the standalone `patches/ps3recomp-vertex-fetch-loop.patch` was folded into the main runtime
+patch and removed) and measured them end to end.
 
-**Projection, not measured end to end.** Scaling the 198 s vertex stage by the per-source factors gives about
-83 s (mode 1) or 41 s (mode 2); with fragment sources 1.3x cheaper (271 s -> about 210 s) the full list would
-be about 4.6 minutes. Defaulting any of these needs: the rewrite in the decoder and engine generators (the
-runtime shares them); a starter re-key (about 464 GPU-fetch vertex sources, every dependent native pipeline
-key, then the plan and warmup pins, via a generalised `pipeline_template_rekey.py`); an engine/renderer
-contract bump; and visual plus GPU-time validation, because the looped fetch indexes `v[]` dynamically.
-Old caches would not serve the new keys.
+### De-specialized shader text (Phase 215, now default)
+
+Four generator changes make the same shaders cheaper to compile. None changes what a shader computes, and each
+has a renderer switch (default on, `0` restores the previous text) and a helper-side rollback. The helper switch must
+be set for the game run as well, because the text is the cache key (`scripts/shader_source_policy.py`):
+
+| Change | Renderer switch | Helper rollback | What it does |
+| --- | --- | --- | --- |
+| Looped GPU vertex fetch | `RSX_VFETCH_LOOP` (2 default; 1, 0) | `GT5P_PREPARE_VFETCH_LOOP=0`/`1`/`2` | one loop over the program's attribute mask replaces the inlined per-attribute fetch |
+| Sized fragment registers | `RSX_FP_REG_SIZE=0` | `GT5P_PREPARE_FP_REG_SIZE=0` | `r[]`/`h[]` are declared to the highest literal index the body uses (48 if any index is not a literal) |
+| Lazy sRGB helpers | `RSX_FP_GAMMA_LAZY=0` | `GT5P_PREPARE_FP_GAMMA_LAZY=0` | the encode/decode helper functions are added only when a call site was wrapped |
+| No encode of a forced constant | `RSX_FP_MASK_ENCODE=0` | `GT5P_PREPARE_FP_MASK_ENCODE=0` | a redirected stencil-mask pass (its colour is replaced by `(1.0).xxxx` after the sRGB step) no longer gets the single-target output encode |
+
+The generation token mixes any helper rollback, so a rollback never reuses a default generation. The starter
+templates (format 3, inputs only) are unchanged: nothing under `assets/` or `config/` differs from Phase 214
+(`git diff d7d38dc -- assets config` is empty), so no re-key was needed.
+
+**Equivalence.**
+
+- Vertex: all 1,120 enumerated vertex programs, original and looped text, run on the RTX 4060 with random constants,
+  fetch descriptors and vertex data (2 x 1,024 vertices x 14 float4 outputs): 128,450,560 values, 0 bit differences
+  (`scripts/test/vertex_fetch_equiv.cpp`).
+- Fragment registers: `RSX_FP_REG_SIZE=0` text is identical to the unpatched decoder for 7,929 of 7,929 translatable
+  catalogue programs. For the default, 2,963 programs (cube mask 0) and 1,178 (cube mask 0x10001) were compiled both ways
+  (`scripts/test/fp_reg_size_check.py --disasm`): 0 compile-status differences; 94.6% and 95.0% byte-identical bytecode;
+  **every other pair has an identical instruction stream** after renumbering temporaries and ignoring the declared size
+  of `dcl_indexableTemp`, which is the only difference. Total DXBC size is equal. This is a stronger statement than
+  sampled GPU outputs, since the same instructions run. D3DCompile is about 1.8x faster for the new text.
+- Whole enumeration, 22,194 prepared (program, profile) jobs: the DXBC with the lazy-helper change equals the DXBC without
+  it for all 22,194, and adding the mask-encode change again changes none. The first two changes against the full rollback
+  give identical bytecode for 21,414 jobs (96.5%); the other 780 were not disassembled one by one (hypothesis: the
+  declared-size differences found in the catalogue samples).
+- Frozen helper on the full 12,669-record starter with all four rollbacks set: the output equals the format-2 reference
+  exactly (so every helper switch reaches the engine).
+
+**Measured (this machine, RTX 4060, application-cache cold, consecutive runs through the lock).**
+
+| | rollback | default |
+| --- | ---: | ---: |
+| Enumeration stage, 24,522 plan jobs, seeded (`enumeration_speed.py stage`) | 504.3 s | 262.0 s |
+| Full starter preparation (frozen helper), until native input is published (vertex + fragment) | 249.9 s | 158.6 s |
+| ... then the resumed run (native pipelines, verification, packs) | 204.9 s | 176.9 s |
+| `preparation_stage_times.py`, vertex / fragment stage | 104-107 / about 150 s | 19-20 / 126-141 s |
+| Distinct fragment sources / bytecodes in the enumeration | 19,094 / 17,907 | 18,856 / 17,907 |
+
+The earlier stage-times pairs (rollback 485 and 507 s, defaults 414 and 315 s in total) and the first frozen default run
+(299 s to native input, then 320 s) were taken when the machine was probably busier; the frozen numbers in the table are
+the consecutive pair. Source counts are exact; wall times vary from run to run (compiler workers, driver and OS caches).
+The lazy-helper and mask-encode changes remove 238 distinct sources (1.2%) and are within timing noise: the time comes
+from the first two changes.
+
+**In-game.** The same prepared cache seeds, the engine with and without the text changes; GPU time is the mean of the
+engine's five-second `[present-prof]` GPU averages (first dropped); frame statistics from `race.ps1 -FrameTest` (60 s).
+There was no PSO failure and no device removal in any run, and only 4-6 shaders were compiled after the cache copy.
+
+| Scene | rollback GPU ms | default GPU ms | frame result, rollback -> default |
+| --- | ---: | ---: | --- |
+| Dealership 720p, 1x | 5.26 | 4.81, 4.67 | 30 FPS (title cap) both |
+| Dealership 1080p, 2x MSAA | 6.78 | 6.92, 6.36 | 30 FPS both |
+| High Speed Ring 720p | 5.64, 5.66 | 5.61, 5.66, 5.73 | 59.7, 59.1 -> 59.7, 59.9, 59.6 FPS; p99 18.1, 21.5 -> 18.2, 18.1, 18.7 ms |
+| High Speed Ring 1080p, 2x | 5.94, 6.00 | 5.61, 6.03, 6.02 | 59.7, 59.8 -> 59.5, 59.7, 59.5 FPS; p99 18.2, 18.1 -> 18.5, 18.6, 18.2 ms |
+| Daytona 1080p, 2x | 5.93 | 5.53 | 59.2 -> 59.4 FPS; p99 22.1 -> 19.4 ms |
+
+(The third default value in each row is the engine with all four changes against a cache prepared by the engine with
+the first two; its text changes were compiled on demand.) GPU time is the same within run-to-run noise (about 5%); the
+looped fetch has no measurable GPU cost here, so the less aggressive `RSX_VFETCH_LOOP=1` was not needed. The window shots
+(PrintWindow) of every scene were inspected: the dealership, the race introduction and the race pictures look the same.
+The dealership changes its car colours per visit and its camera moves between shots, so a pixel comparison is not
+meaningful there. This is one GPU, one save and a few routes: not a whole-game, other-GPU or stutter claim.
+
+**Which axes still split fragment shaders** (`scripts/test/enumeration_axes.py`). An upper bound: the prepared jobs are
+grouped by (program, profile with the axis removed), and the saving is how many sources would merge if the axis were
+a run-time value instead of text.
+
+| Axis removed | sources saved (of 19,094) |
+| --- | ---: |
+| sampler lanes (`samplers`) | 2,482 (13.0%) |
+| sRGB read bits 8-11 and output bit 12 of the cube word | 1,810 (9.5%) |
+| stencil-mask flag | 475 (2.5%) |
+| dither | 238 (1.2%) |
+| unnorm, shadow flag, `unhi`, `ghi`, `exp32`, `used` | 0 to 6 |
+| gamma bits + samplers | 4,360 (22.8%) |
+| everything but `used` | 14,055 (73.6%) |
+
+Cube and shape bits are left out (they change which texture type is declared). The sampler lanes and gamma bits are
+literals in the text (`_rsx_gamma_input(v, mask)`, the `rsx_s2l` wrappers, the sampler selection). Turning them into
+values read from a constant buffer needs uniform plumbing in the renderer and a per-draw upload, and moves compile-time
+constants into run time, where the compiler can no longer fold them. That is not provably identical, so it was not
+implemented. Design note: a per-unit mask uniform next to `rsx_texscale` in `b1`, with each decode written as a
+branch-free `lerp(v, srgb_to_linear(v), flag)`; the source key would drop the axis and the profile's `samplers` and gamma
+fields would collapse in `fragment_jobs(collapse=True)` the way the 0xf0000 sample bits do. The price is shader
+arithmetic for every unit on every pixel, so GPU time must be measured before any default.
+
+A direct finding: 1,293 of the 19,094 sources (6.8%) compile to the same bytecode as another source of the same program
+and differ only in the cube word (1,093, of which 1,001 in bit 12) or the sampler lanes
+(`enumeration_axes.py` prints this). The 1,001 were stencil-mask passes: `rsx_d3d12_backend.c` adds the output encode
+first and then replaces the colour with `(1.0).xxxx`, and the compiler folds the encoded constant. The mask-encode change
+removes that text, but only 235 sources merge (the pairs were already deduplicated in most cases). 817 pairs that differ
+only in the cube word and 94 in the cube word plus samplers remain; their cause was not investigated (hypothesis:
+other programs whose output is dead code, where a decoded sample feeds nothing). Equal DXBC for every job is a
+check the enumeration comparison can make, so these are the next provably identical candidates.
 
 ### Not done
 
-- Frozen player acceptance with the new defaults (fresh private storage, original volume): cancellation and
-  resume, `reject`, `rollback`, and the two rollback switches through the helper. The unit tests below pass.
+- (Done in Phase 215: cancellation/resume and the four rollback switches together through the frozen helper.)
+  `reject`, and each switch on its own through the frozen helper, were not repeated.
 - The template stage's time with the new worker default (it applies there too; not measured).
 - 2048-job launches, 12 workers, overlapping the vertex pool with the fragment launches, and overlapping the
   19 s volume lookup were not tried.
-- A stage-level run of the vertex switch (queued and cancelled at wrap-up), and any change to the generators,
-  starter or defaults for step 5.
+- (Done in Phase 215: stage-level runs and the generator defaults for step 5; the starter needed no change.)
 - `docs/player-setup.md` states only the measured stage time; the full first preparation (template stage plus
   enumeration) with the new defaults has not been measured.
 

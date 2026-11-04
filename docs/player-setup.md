@@ -23,7 +23,11 @@ on your CPU. Development builds now default to logical processors minus two comp
 (2 to 10, limited by free RAM; `GT5P_PREPARE_COMPILER_WORKERS=legacy` restores four or two) and larger
 compiler launches (`GT5P_PREPARE_ENUMERATE_BATCH=256` restores the old size). On the development machine the
 enumeration step alone then took about 8 minutes instead of about 17 (measured in isolation with the template
-stage's cache present; the full first preparation was not re-timed). Details:
+stage's cache present; the full first preparation was not re-timed). Cheaper generated shader text (looped vertex
+fetch and sized fragment registers, default since Phase 215) brings the same
+enumeration step to about 4.4 minutes and the template stages' shader work from about 4.2 to about 2.6 minutes
+(consecutive runs, rollbacks with `GT5P_PREPARE_VFETCH_LOOP=0` and `GT5P_PREPARE_FP_REG_SIZE=0`; see
+[de-specialized shader text](coverage-enumeration.md#de-specialized-shader-text-phase-215-now-default)). Details:
 [player enumeration acceptance](coverage-enumeration.md#packed-player-acceptance-2026-11-04-12669-record-starter).
 Cancel/close/Escape retains completed chunks. Repeat preparation to resume;
 completed bytecode is checked before reuse. The previous selected cache stays
