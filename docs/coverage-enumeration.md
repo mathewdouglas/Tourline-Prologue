@@ -414,3 +414,115 @@ not a player preparation limit.
 Completed chunks resume within the same generation. Cross-generation verified
 reuse remains template-scoped: a changed plan or a fork after learned pack changes
 can compile enumeration again. No old generation is deleted automatically.
+
+## Enumeration speed work
+
+Branch `t3/enumeration-speed` (development, unfinished; see "Not done"). Goal: the full
+**Enumerating shaders** list in about five minutes on the 6-core / 12-thread i5-12400F, with the same
+bytecode, no dropped jobs, and no time budget: every job still runs before the stage reports complete.
+All numbers are single runs on this machine. The stage is measured in isolation
+(`scripts/test/enumeration_speed.py stage`: the real `preparation_enumeration.stage()` against the original
+GT.VOL/ELF, a private engine built from the reference objects, and a cache seeded with the DXBC files of a
+template-only generation, so jobs the template stage already produced are real disk hits), not through the
+frozen player helper.
+
+### Measured: full list, before and after
+
+| | baseline (`GT5P_PREPARE_COMPILER_WORKERS=legacy`, `GT5P_PREPARE_ENUMERATE_BATCH=256`) | new defaults (10 workers, 4096-job launches) |
+| --- | ---: | ---: |
+| stage wall time | **1,028.5 s (17.1 min)** | **493.8 s (8.2 min)** |
+| fragment (22,282 requests, 16,019 real compiles) | 708.7 s | 271.4 s |
+| fragment engine launches | 175 | 12 |
+| fragment launch overhead (process wall minus in-engine batch time) | 341 s | 27 s |
+| vertex (2,240 jobs) | 293.4 s, nine pools of 4 workers | 198.1 s, one pool of 10 workers |
+| volume lookup (19 s) and the rest | ~25 s | ~24 s |
+| prepared / failed jobs | 24,434 / 88 | 24,434 / 88 |
+
+The results are identical: all 97 checkpoint chunks have the same (source key, DXBC SHA-256, size) rows and
+the two caches hold the same 21,779 `.dxbc` names. The 88 failures are fragment jobs whose compile failed
+(the same class as the earlier 122). A 2,319-request fixed subset (first 3,200 plan fragment jobs, 256
+vertex jobs): 121.2 s legacy/256, 104.6 s with 1024-job launches at 4 workers, 79.8 s with 10 workers and
+1024-job launches.
+
+Where the time went in the baseline: engine process start-up and shutdown cost about 2 s per launch, and the
+fragment stage launched 175 times (256-job chunks, two dither classes each), which was 48% of its wall time.
+Within a launch the single submitting thread needs 1-2 ms per job to translate, so with 10 workers the
+4,096-job batch is compile-bound, not submit-bound (`translate_submit` 33 s for all jobs, overlapped with the
+workers). Vertex peak commit: 60 MiB per worker, 479 MiB aggregate with ten workers. The 12 launches still
+carry roughly 2.2 s of fixed cost each.
+
+### Changes (all helper-side; no engine or starter change)
+
+| Switch | Default | Rollback |
+| --- | --- | --- |
+| `GT5P_PREPARE_COMPILER_WORKERS` | `auto`: logical processors minus two, 2..10, and no more than free RAM allows (256 MiB per worker after a 1 GiB reserve); resolved once per process | `legacy` (4 on 8+ logical processors, else 2), or an explicit 2..12 |
+| `GT5P_PREPARE_ENUMERATE_BATCH` | 4096 jobs per fragment engine launch; the vertex pool takes every remaining chunk at once and writes each 256-job checkpoint when it completes | `256` (previous), 512, 1024 or 2048 |
+
+Fragment threads are the engine's `RSX_SHADER_WORKERS`; vertex workers are processes whose per-process cap
+stays 512 MiB, with the aggregate job cap 1 GiB up to four workers and 256 MiB per worker beyond that
+(`MAX_WORKERS` 4 -> 12). Normal game worker policy is unchanged. The worker setting applies to the whole
+offline preparation (template stage included); only the enumeration stage was re-measured. Checkpoints
+remain per 256-job chunk, so a cancelled fragment launch loses at most one 4,096-job batch (about 35 s here).
+The report gains `compiler_workers`, `batch_jobs`, per-launch `batches` and `vertex_batches` (with
+`GT5P_PREPARE_SHADER_PROFILE=1` they carry the engine and worker timings).
+
+### Measured: jobs that could be skipped (step 3)
+
+Nothing worth skipping was found, and no job was dropped. In a 2,061-row sample, 288 jobs (14%) already had
+their source key from the template stage, and a further 276 shared a key with another job in the same run;
+the engine already compiles each distinct missing key exactly once (1,515 compiles for 1,785 distinct keys,
+270 of them on disk), and a skipped job would save only its translation (about 1.3 ms). Vertex GPU-fetch
+mode 0 variants were kept: their source differs from the mode 1 source, so they are not provably redundant.
+Priority ordering was not implemented: with tails of a second or two per launch it would not change wall time.
+
+### Measured: cheaper generated code (step 5, nothing defaulted)
+
+Single-thread `D3DCompile` over real generated sources (`scripts/test/hlsl_compile_bench.py`; sources from
+`RSX_SHADER_SRC_DUMP`, ignored storage only). Every rewrite changes the shader source key.
+
+| Fragment (200-300 sampled sources, mean 64-69 ms) | speed-up | output |
+| --- | ---: | --- |
+| compile flags: skip validation / opt level 0 / level 3 | 1.00 / 0.94 / 0.92 | bytes differ for all |
+| register arrays sized to the highest literal index | 1.18-1.27 | byte-identical for 199/200 and 245/250 |
+| explicit init of referenced registers only | 1.25 | 245/250 identical |
+| registers as scalar `float4` variables | 1.32 | 245/250 identical |
+| unused texture declarations removed | 1.00 | identical |
+| no zero-init at all (not semantics-preserving; bound only) | 2.00 | differs |
+
+| Vertex GPU fetch (78 real sources, mean 671 ms) | speed-up | DXBC mean |
+| --- | ---: | ---: |
+| default | 1.00 | 58.7 KB |
+| `RSX_VFETCH_LOOP=1` (4-component loop is a real loop) | 2.39 | 29.5 KB |
+| `RSX_VFETCH_LOOP=2` (plus one loop over the attribute mask) | 4.83 | 13.3 KB |
+
+CPU-fetch (mode 0) vertex sources average 65 ms and gain nothing from it. `patches/ps3recomp-vertex-fetch-loop.patch`
+implements the vertex switch in the decoder (default off; with it unset the generated text is byte-identical
+to the unpatched decoder for 150/150 sampled programs; a private decoder DLL was built from it and measured as
+above). `patches/ps3recomp-shader-source-dump.patch` (`RSX_SHADER_SRC_DUMP`, passed through by
+`GT5P_PREPARE_SHADER_SRC_DUMP`) is the diagnostic that produced the fragment sources. Developer pass-through:
+`GT5P_PREPARE_VFETCH_LOOP=1|2` (unit-tested with a fake pool; not run through a stage).
+
+**Projection, not measured end to end.** Scaling the 198 s vertex stage by the per-source factors gives about
+83 s (mode 1) or 41 s (mode 2); with fragment sources 1.3x cheaper (271 s -> about 210 s) the full list would
+be about 4.6 minutes. Defaulting any of these needs: the rewrite in the decoder and engine generators (the
+runtime shares them); a starter re-key (about 464 GPU-fetch vertex sources, every dependent native pipeline
+key, then the plan and warmup pins, via a generalised `pipeline_template_rekey.py`); an engine/renderer
+contract bump; and visual plus GPU-time validation, because the looped fetch indexes `v[]` dynamically.
+Old caches would not serve the new keys.
+
+### Not done
+
+- Frozen player acceptance with the new defaults (fresh private storage, original volume): cancellation and
+  resume, `reject`, `rollback`, and the two rollback switches through the helper. The unit tests below pass.
+- The template stage's time with the new worker default (it applies there too; not measured).
+- 2048-job launches, 12 workers, overlapping the vertex pool with the fragment launches, and overlapping the
+  19 s volume lookup were not tried.
+- A stage-level run of the vertex switch (queued and cancelled at wrap-up), and any change to the generators,
+  starter or defaults for step 5.
+- `docs/player-setup.md` states only the measured stage time; the full first preparation (template stage plus
+  enumeration) with the new defaults has not been measured.
+
+Focused tests passing at the final commit: `shader_vertex_batch`, `preparation_enumeration`,
+`shader_reconstruct`, `preparation_checkpoint`, `shader_fragment_batch`, `player_package`, `shader_enumerate`.
+Tools: `scripts/test/enumeration_speed.py` (`build`, `helper`, `stage`; `--overlay`, `--decoder`),
+`hlsl_compile_bench.py`, `vertex_hlsl_dump.py`.

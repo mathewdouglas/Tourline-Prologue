@@ -34,6 +34,15 @@ def sample_share(environ=None):
     return value == '1'
 
 
+def batch_jobs(environ=None):
+    """Jobs per compiler launch (a multiple of the 256-job checkpoint chunk). Checkpoints stay per chunk;
+    a larger group means fewer engine launches/worker pools and fewer idle tails."""
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_ENUMERATE_BATCH', '4096')
+    if value not in ('256', '512', '1024', '2048', '4096'):
+        raise ValueError('GT5P_PREPARE_ENUMERATE_BATCH must be 256, 512, 1024, 2048 or 4096')
+    return int(value)
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -170,38 +179,53 @@ def stage(metadata, output, elf, engine, decoder, game_root, checkpoint, volume=
     report = dict(plan_sha256=metadata['sha256'], sample_share=collapse, lookup=lookup,
                   requested=len(fragments_plan)+len(vertices_plan), prepared=0, failed=0, reused=0, chunks=0,
                   compile_seconds=0.0, failure_examples=[])
+    live = [0]  # vertex jobs finished inside the running worker pool, not yet in the report
     def poll():
         if checkpoint.progress:
-            checkpoint.progress('enumerating-shaders', dict(completed=report['prepared']+report['failed'],total=report['requested']))
+            checkpoint.progress('enumerating-shaders', dict(completed=report['prepared']+report['failed']+live[0],total=report['requested']))
+    group = batch_jobs()
+    report['batch_jobs'] = group
+    from preparation_workers import compiler_workers
+    report['compiler_workers'] = compiler_workers()
     for kind, jobs in (('fragment', fragments_plan), ('vertex', vertices_plan)):
-        for start in range(0,len(jobs),CHUNK):
+        starts = list(range(0,len(jobs),CHUNK))
+        # Fragment launches take `group` jobs. The vertex worker pool takes every remaining chunk at once (its
+        # workers are idle between pools) and saves each chunk's checkpoint the moment it completes.
+        width = len(starts) if kind == 'vertex' and group > 256 else max(1, group//256)
+        for first in range(0,len(starts),width):
             poll()
-            block = jobs[start:start+CHUNK]
-            result = root/f'{kind}-{start//CHUNK:04d}.json'
-            rows = None
-            if result.exists():
-                saved = json.loads(regular_read(result, 1024**2))
-                if saved.get('contract') != contract or saved.get('start') != start or len(saved.get('rows',[])) != len(block):
-                    raise ValueError('Enumeration checkpoint mismatch')
-                rows = saved['rows']
-                # Successful chunks resume only after verifying every cached file.
-                for row in rows:
-                    if row is not None:
-                        if not isinstance(row,list) or len(row)!=3 or not HEX.fullmatch(row[0]) or not SHA.fullmatch(row[1]) or type(row[2]) is not int:
-                            raise ValueError('Invalid enumeration checkpoint row')
-                        data = regular_read(cache/(row[0]+'.dxbc'), 4*1024**2)
-                        if not data.startswith(b'DXBC') or len(data)!=row[2] or digest(data)!=row[1]:
-                            raise ValueError('Enumeration cache verification failed')
-                report['reused'] += sum(row is not None for row in rows)
-            else:
+            window = [(start, jobs[start:start+CHUNK]) for start in starts[first:first+width]]
+            rows_of, saved_of, missing = {}, {}, []
+            for start, block in window:
+                result = root/f'{kind}-{start//CHUNK:04d}.json'
+                if result.exists():
+                    saved = json.loads(regular_read(result, 1024**2))
+                    if saved.get('contract') != contract or saved.get('start') != start or len(saved.get('rows',[])) != len(block):
+                        raise ValueError('Enumeration checkpoint mismatch')
+                    rows = saved['rows']
+                    # Successful chunks resume only after verifying every cached file.
+                    for row in rows:
+                        if row is not None:
+                            if not isinstance(row,list) or len(row)!=3 or not HEX.fullmatch(row[0]) or not SHA.fullmatch(row[1]) or type(row[2]) is not int:
+                                raise ValueError('Invalid enumeration checkpoint row')
+                            data = regular_read(cache/(row[0]+'.dxbc'), 4*1024**2)
+                            if not data.startswith(b'DXBC') or len(data)!=row[2] or digest(data)!=row[1]:
+                                raise ValueError('Enumeration cache verification failed')
+                    report['reused'] += sum(row is not None for row in rows)
+                    rows_of[start], saved_of[start] = rows, saved
+                else:
+                    missing.append((start, block))
+            if missing:
                 chunk_started = time.perf_counter()
                 work = root/'work'
                 work.mkdir(exist_ok=True)
+                flat = [job for _, block in missing for job in block]
                 try:
                     if kind == 'fragment':
                         batch = [dict(id=str(n), fragment=fragments[i], fragment_sha256=digest(fragments[i]),
-                                      state=state_of(p), used=p[8]) for n,(i,p) in enumerate(block)]
-                        compiled, failures = compile_batch(batch, work, cache, engine, game_root, batch_size=CHUNK, poll=poll)
+                                      state=state_of(p), used=p[8]) for n,(i,p) in enumerate(flat)]
+                        compiled, failures = compile_batch(batch, work, cache, engine, game_root,
+                                                           batch_size=min(4096,len(batch)), poll=poll)
                         batch_report=json.loads(regular_read(work/'fragment-preparation-report.json',4*1024**2))
                         process_errors=[r['error'] for r in batch_report['batches'] if 'error' in r]
                         if process_errors:
@@ -209,11 +233,14 @@ def stage(metadata, output, elf, engine, decoder, game_root, checkpoint, volume=
                             # guard, malformed process result or failed child is
                             # an interrupted stage, never a completed chunk.
                             raise ValueError('Enumeration fragment process failed: '+str(process_errors[0])[:500])
-                        rows = [[compiled[str(n)][0], digest(compiled[str(n)][1]), len(compiled[str(n)][1])]
-                                if str(n) in compiled else None for n in range(len(block))]
+                        flat_rows = [[compiled[str(n)][0], digest(compiled[str(n)][1]), len(compiled[str(n)][1])]
+                                     if str(n) in compiled else None for n in range(len(flat))]
+                        flat_failures = {n:failures.get(str(n)) for n in range(len(flat))}
+                        report.setdefault('batches',[]).extend(batch_report['batches'])
                     else:
-                        batch = [dict(sha256=i, gpu=g, program=vertices[i]) for i,g in block]
+                        batch = [dict(sha256=i, gpu=g, program=vertices[i]) for i,g in flat]
                         ready = {}
+                        early = {}
                         def accept(job, source, code_id, code):
                             try:save_code(cache/(source+'.dxbc'),code)
                             except (ValueError,OSError) as exc:
@@ -222,20 +249,43 @@ def stage(metadata, output, elf, engine, decoder, game_root, checkpoint, volume=
                                 # durable file belongs to the stage owner.
                                 raise RuntimeError('Enumeration vertex cache write failed') from exc
                             ready[(job['sha256'],job['gpu'])] = [source,digest(code),len(code)]
-                        compiled, failures, _ = compile_jobs(batch, decoder, work/'vertex', derive=True, on_ready=accept, poll=poll)
-                        rows = [ready.get(j) for j in block]
-                    saved = dict(contract=contract,start=start,rows=rows,
-                                 seconds=time.perf_counter()-chunk_started,
-                                 failures={str(k):str(v)[:500] for k,v in failures.items()})
-                    save_report(result, saved)
+                            live[0] = len(ready)
+                            if group > 256:
+                                for s0, b0 in missing:
+                                    if s0 not in early and all(j in ready for j in b0):
+                                        early[s0] = dict(contract=contract,start=s0,rows=[ready[j] for j in b0],
+                                                         seconds=(time.perf_counter()-chunk_started)*len(b0)/len(flat),failures={})
+                                        save_report(root/f'{kind}-{s0//CHUNK:04d}.json', early[s0])
+                        compiled, failures, vertex_report = compile_jobs(batch, decoder, work/'vertex', derive=True, on_ready=accept, poll=poll)
+                        flat_rows = [ready.get(j) for j in flat]
+                        flat_failures = {n:failures.get(j) for n,j in enumerate(flat)}
+                        report.setdefault('vertex_batches',[]).append({k:v for k,v in vertex_report.items() if k!='limits'})
+                    elapsed = time.perf_counter()-chunk_started
+                    offset = 0
+                    for start, block in missing:
+                        rows = flat_rows[offset:offset+len(block)]
+                        if kind == 'vertex' and start in early:
+                            rows_of[start], saved_of[start] = rows, early[start]
+                            offset += len(block)
+                            continue
+                        saved = dict(contract=contract,start=start,rows=rows,
+                                     seconds=elapsed*len(block)/len(flat),
+                                     failures={str(k):str(flat_failures[offset+k])[:500] for k in range(len(block))
+                                               if flat_failures[offset+k] is not None})
+                        save_report(root/f'{kind}-{start//CHUNK:04d}.json', saved)
+                        rows_of[start], saved_of[start] = rows, saved
+                        offset += len(block)
                 finally:
                     # Only the private transient workspace, after owned compilers exit.
                     shutil.rmtree(work)
-            report['chunks'] += 1
-            report['compile_seconds'] += saved.get('seconds',0.0)
-            report['failure_examples'].extend(list(saved.get('failures',{}).values())[:max(0,16-len(report['failure_examples']))])
-            report['prepared'] += sum(row is not None for row in rows)
-            report['failed'] += sum(row is None for row in rows)
+            live[0] = 0
+            for start, _ in window:
+                rows, saved = rows_of[start], saved_of[start]
+                report['chunks'] += 1
+                report['compile_seconds'] += saved.get('seconds',0.0)
+                report['failure_examples'].extend(list(saved.get('failures',{}).values())[:max(0,16-len(report['failure_examples']))])
+                report['prepared'] += sum(row is not None for row in rows)
+                report['failed'] += sum(row is None for row in rows)
             checkpoint.stage('enumerating-shaders',completed=report['prepared']+report['failed'],total=report['requested'])
     report['seconds'] = time.perf_counter()-started
     return report

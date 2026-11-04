@@ -1,0 +1,58 @@
+--- a/libs/video/rsx_vp_decompiler.c
++++ b/libs/video/rsx_vp_decompiler.c
+@@ -381,6 +381,34 @@ static const char k_vfetch_hlsl[] =
+     "    return float4(c[0], c[1], c[2], c[3]);\n"
+     "}\n";
+ 
++/* RSX_VFETCH_LOOP (developer experiment, default off; unset/0 leaves the generated text byte-identical):
++ *   1  the helper's 4-component loop is a real loop instead of [unroll]
++ *   2  as 1, and one loop over the literal attribute mask replaces the inlined fetch per attribute
++ * Either changes the shader source, so its source key and bytecode differ from the default. A cache or
++ * starter prepared with one setting does not serve the other: prepare and run with the same value. */
++static int vfetch_loop_mode(void)
++{
++    static int mode = -1;
++    if (mode < 0) {
++        const char* e = getenv("RSX_VFETCH_LOOP");
++        mode = (e && (e[0] == '1' || e[0] == '2') && !e[1]) ? e[0] - '0' : 0;
++    }
++    return mode;
++}
++
++static void emit_vfetch_helpers(Out* o)
++{
++    static const char unrolled[] = "[unroll] for (uint i = 0; i < 4u; i++) {";
++    const char* at = vfetch_loop_mode() ? strstr(k_vfetch_hlsl, unrolled) : NULL;
++    if (!at) { emit(o, k_vfetch_hlsl); return; }
++    char text[sizeof k_vfetch_hlsl + 8];
++    size_t head = (size_t)(at - k_vfetch_hlsl);
++    memcpy(text, k_vfetch_hlsl, head);
++    memcpy(text + head, "[loop]", 6);
++    strcpy(text + head + 6, at + 8);          /* skip "[unroll]" */
++    emit(o, text);
++}
++
+ static int rsx_vp_decompile_impl(
+     const u8* ucode, u32 max_bytes, u32 vtex_mask, int compact_inputs,
+     u32 input_mask, char* out, u32 out_size)
+@@ -724,12 +752,19 @@ static int rsx_vp_decompile_impl(
+         emit(&o, decl);
+     }
+ 
+-    if (compact_inputs == 2) emit(&o, k_vfetch_hlsl);
++    if (compact_inputs == 2) emit_vfetch_helpers(&o);
+     emit(&o, "VSOutput main(VSInput input) {\n");
+     if (compact_inputs == 2) {
+         emit(&o,
+             "    float4 v[16];\n"
+             "    [unroll] for (int _k=0;_k<16;_k++) v[_k]=float4(0,0,0,1);\n");
++        if (vfetch_loop_mode() == 2) {
++            char loop[200];
++            snprintf(loop, sizeof(loop),
++                     "    [loop] for (uint _a = 0; _a < 16u; _a++) if ((%uu >> _a & 1u) != 0u) v[_a] = rsx_vfetch(_a, input.vid);\n",
++                     input_mask & 0xFFFFu);
++            emit(&o, loop);
++        } else
+         for (u32 attr = 0; attr < 16; attr++) {
+             if (!(input_mask & (1u << attr))) continue;
+             char assignment[64];

@@ -323,7 +323,7 @@ assert not failures and set(compiled) == {(digest, 1), (other_digest, 0), (diges
 assert compiled[(digest, 1)][2] == dxbc and compiled[(digest, 0)][2] == dxbc
 assert report['launches'] == 2 and report['workers'] == 2 and launches == [2]
 assert report['inflight_jobs_max'] <= 2 and report['compiled_variants'] == 3
-assert report['limits']['workers'] == 4
+assert report['limits']['workers'] == 12
 assert report['limits']['worker_job_commit_bytes'] == 1024**3
 assert seen_kinds == ['exact', 'exact', 'exact']
 assert report['translation'] == 'default' and report['derive'] is False and report['duplicate_variants'] == 0
@@ -337,6 +337,33 @@ for count in (3,4):
     assert len(more) == 4 and not errors and launches == [count]
     assert stats['inflight_jobs_max'] <= count and stats['workers'] == count
     assert stats['limits']['worker_job_commit_bytes'] == 1024**3
+# Aggregate commit stays 1 GiB up to four workers (previous contract), then 256 MiB per worker; per-process cap unchanged.
+assert [batch.job_commit_limit(n) for n in (1, 2, 4)] == [1024**3] * 3
+assert batch.job_commit_limit(10) == 10 * 256 * 1024**2 and batch.job_commit_limit(12) == 12 * 256 * 1024**2
+assert batch.WORKER_MEMORY == 512 * 1024**2
+for count in (0, 13):
+    try:
+        batch.open_workers(count, 'decoder.dll', Path('unused'))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Vertex worker cap not enforced')
+
+# GT5P_PREPARE_VFETCH_LOOP (developer experiment): validated, default off, reaches the workers' environment only when set.
+assert batch.vfetch_loop({}) == '' and batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '0'}) == ''
+assert batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '1'}) == '1' and batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '2'}) == '2'
+for bad in ('', '3', 'yes', '1 '):
+    assert_raises(lambda: batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': bad}))
+seen_env = []
+class FakePool:
+    def __init__(self, count): self.count = count
+    def spawn(self, slot, decoder, work, environment):
+        seen_env.append(dict(environment)); return object()
+for value, expected in (('0', None), ('2', '2')):
+    seen_env.clear()
+    with patch.dict(os.environ, {'GT5P_PREPARE_VFETCH_LOOP': value, 'RSX_VFETCH_LOOP': '1'}), patch.object(batch, '_WinPool', FakePool):
+        batch.open_workers(2, 'decoder.dll', Path('unused-not-created'))
+    assert [env.get('RSX_VFETCH_LOOP') for env in seen_env] == [expected, expected]
 
 # Delay complete replies independently of the scheduler. Both intervals must
 # return identical verified results, with unchanged two-worker ownership/caps.
@@ -515,7 +542,7 @@ assert_raises(lambda: batch.compile_jobs(
     'decoder.dll', Path('unused'), derive=True, workers=1))
 assert_raises(lambda: batch.compile_jobs(
     [dict(sha256=digest, gpu=1, program=program)], 'decoder.dll', Path('unused')))
-for bad_workers in (0, 5, True):
+for bad_workers in (0, 13, True):
     assert_raises(lambda: batch.compile_jobs([derive_one], 'decoder.dll', Path('unused'), derive=True, workers=bad_workers))
 assert_raises(lambda: batch.compile_jobs(
     [derive_one], 'decoder.dll', Path('unused'), translation='1440p', derive=True, workers=1))

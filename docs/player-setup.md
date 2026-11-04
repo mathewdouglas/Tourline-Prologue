@@ -19,7 +19,11 @@ full first preparation took about 10.5 minutes for the template stages, and the
 enumeration step added about 24 minutes of shader compilation (36,473 of 36,595
 shaders; the rest are left to normal in-game compilation) and about 220 MiB of
 disk. Repeating the preparation re-checks rather than rebuilds. Your time depends
-on your CPU (four compiler workers on 8+ logical processors, otherwise two). Details:
+on your CPU. Development builds now default to logical processors minus two compiler workers
+(2 to 10, limited by free RAM; `GT5P_PREPARE_COMPILER_WORKERS=legacy` restores four or two) and larger
+compiler launches (`GT5P_PREPARE_ENUMERATE_BATCH=256` restores the old size). On the development machine the
+enumeration step alone then took about 8 minutes instead of about 17 (measured in isolation with the template
+stage's cache present; the full first preparation was not re-timed). Details:
 [player enumeration acceptance](coverage-enumeration.md#packed-player-acceptance-2026-11-04-12669-record-starter).
 Cancel/close/Escape retains completed chunks. Repeat preparation to resume;
 completed bytecode is checked before reuse. The previous selected cache stays

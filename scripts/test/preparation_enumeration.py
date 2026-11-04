@@ -1,5 +1,6 @@
 """Synthetic enumeration policy, failure, cancellation and verified resume checks."""
 import copy
+import os
 import json
 from pathlib import Path
 import shutil
@@ -71,7 +72,7 @@ def main():
                 raise KeyboardInterrupt('synthetic cancellation')
         with patch('game_volume.resolve',return_value=({vp:b'vertex'},{identity:b'fragment'},{})),\
              patch('shader_fragment_batch.compile_batch',side_effect=fragment),\
-             patch('shader_vertex_batch.compile_jobs',side_effect=vertex),patch.object(enum,'CHUNK',1):
+             patch('shader_vertex_batch.compile_jobs',side_effect=vertex),patch.object(enum,'CHUNK',1),patch.dict(os.environ,GT5P_PREPARE_ENUMERATE_BATCH='256'):
             try:
                 with Checkpoint(output,{},progress=progress) as checkpoint:
                     (output/'shadercache').mkdir()
@@ -108,6 +109,48 @@ def main():
                 rejected(lambda:enum.stage(small,conflicting,None,None,None,None,checkpoint,volume=Path('synthetic')),RuntimeError)
                 assert not list((conflicting/'enumeration').glob('vertex-*.json'))
                 assert pointer.read_text()=='old selection'
+    # Grouped launches: 512 jobs per launch = two 256-job checkpoint chunks per compiler call.
+    assert enum.batch_jobs({})==4096 and enum.batch_jobs({'GT5P_PREPARE_ENUMERATE_BATCH':'256'})==256
+    for bad in ('','0','100','8192','1024 '):
+        rejected(lambda:enum.batch_jobs({'GT5P_PREPARE_ENUMERATE_BATCH':bad}))
+    two=copy.deepcopy(small);two['plan']=dict(small['plan'],fragment_jobs=[[0,0],[0,1]],vertex_jobs=[[vp,0]])
+    sizes=[]
+    def grouped(batch,work,cache,*args,**kwargs):
+        sizes.append(len(batch))
+        (work/'fragment-preparation-report.json').write_text('{"batches": [{"requests": %d, "seconds": 0.0}]}'%len(batch))
+        out={}
+        for n,job in enumerate(batch):
+            code=b'DXBCgroup-%d'%n;key='%016x'%(n+1);(cache/(key+'.dxbc')).write_bytes(code);out[job['id']]=(key,code)
+        return out,{}
+    with tempfile.TemporaryDirectory(dir=ROOT/'scratch',prefix='enum-group-') as temp:
+        output=Path(temp)/'generation'
+        with patch('game_volume.resolve',return_value=({vp:b'vertex'},{identity:b'fragment'},{})),             patch('shader_fragment_batch.compile_batch',side_effect=grouped),             patch('shader_vertex_batch.compile_jobs',side_effect=vertex),patch.object(enum,'CHUNK',1),             patch.dict(os.environ,GT5P_PREPARE_ENUMERATE_BATCH='512'):
+            with Checkpoint(output,{}) as checkpoint:
+                (output/'shadercache').mkdir()
+                grouped_report=enum.stage(two,output,None,None,None,None,checkpoint,volume=Path('synthetic'))
+        assert sizes==[2] and grouped_report['prepared']==3 and grouped_report['failed']==0 and grouped_report['batch_jobs']==512
+        assert len(list((output/'enumeration').glob('fragment-*.json')))==2
+    # One vertex pool covers every remaining chunk, but each chunk's checkpoint is written the moment it
+    # completes, so a cancellation after the first chunk keeps it (resume granularity stays one chunk).
+    seen=[]
+    vertex_two=copy.deepcopy(small);vertex_two['plan']=dict(small['plan'],fragment_jobs=[[0,0]],vertex_jobs=[[vp,0],[vp,1]])
+    def pool(batch,decoder,work,**kwargs):
+        assert len(batch)==2
+        kwargs['on_ready'](batch[0],'abcdef1234567890','unused',b'DXBCvertex-0')
+        seen.append(sorted(p.name for p in (kwargs_output/'enumeration').glob('vertex-*.json')))
+        kwargs['poll']()
+        raise KeyboardInterrupt('synthetic cancellation inside the vertex pool')
+    with tempfile.TemporaryDirectory(dir=ROOT/'scratch',prefix='enum-early-') as temp:
+        output=Path(temp)/'generation';kwargs_output=output
+        with patch('game_volume.resolve',return_value=({vp:b'vertex'},{identity:b'fragment'},{})),             patch('shader_fragment_batch.compile_batch',side_effect=grouped),             patch('shader_vertex_batch.compile_jobs',side_effect=pool),patch.object(enum,'CHUNK',1),             patch.dict(os.environ,GT5P_PREPARE_ENUMERATE_BATCH='512'):
+            try:
+                with Checkpoint(output,{}) as checkpoint:
+                    (output/'shadercache').mkdir()
+                    enum.stage(vertex_two,output,None,None,None,None,checkpoint,volume=Path('synthetic'))
+            except KeyboardInterrupt:pass
+            else:raise AssertionError('Cancellation inside the vertex pool was swallowed')
+        assert seen==[['vertex-0000.json']],seen
+        assert sorted(p.name for p in (output/'enumeration').glob('vertex-*.json'))==['vertex-0000.json']
     print(json.dumps(dict(synthetic='passed',fragment_jobs=len(plan['fragment_jobs']),
                           collapsed_fragment_jobs=len(enum.fragment_jobs(plan,True)),vertex_jobs=len(plan['vertex_jobs']))))
 

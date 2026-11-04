@@ -32,15 +32,21 @@ for value in ('','2','true'):
         except ValueError:pass
         else:raise AssertionError('Invalid native profile setting accepted')
 
-for cpus, expected in ((None,2),(2,2),(4,2),(7,2),(8,4),(12,4),(64,4)):
-    with patch('preparation_workers.os.cpu_count',return_value=cpus):
-        assert compiler_workers({}) == expected
+# Default: logical processors minus two, 2..10, no RAM limit applied when unknown; `legacy` is the old 4-or-2 rule.
+for cpus, expected, legacy in ((None,2,2),(2,2,2),(4,2,2),(7,5,2),(8,6,4),(12,10,4),(64,10,4)):
+    with patch('preparation_workers.os.cpu_count',return_value=cpus), patch('preparation_workers._available_memory',return_value=None):
+        assert compiler_workers({}) == compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':'auto'}) == expected
+        assert compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':'legacy'}) == legacy
+with patch('preparation_workers.os.cpu_count',return_value=12):
+    for memory, expected in ((64*1024**3,10),(6*1024**3,10),(3*1024**3,8),(2*1024**3,4),(1024**3,2),(1,2)):
+        with patch('preparation_workers._available_memory',return_value=memory):
+            assert compiler_workers({}) == expected
 os.environ['GT5P_PREPARE_COMPILER_WORKERS'] = '2'  # Controlled fixture for existing environment checks.
-for count in ('2','3','4'):
+for count in ('2','3','4','6','10','12'):
     assert compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count}) == int(count)
     with patch.dict(os.environ, {'GT5P_PREPARE_COMPILER_WORKERS':count, 'RSX_SHADER_WORKERS':'32'}):
         assert m.offline_env(Path('game'),Path('cache'))['RSX_SHADER_WORKERS'] == count
-for count in ('','1','5','32',True):
+for count in ('','1','13','32','02','4 ','-3','x',True):
     try:compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count})
     except ValueError:pass
     else:raise AssertionError('Unbounded compiler count accepted')

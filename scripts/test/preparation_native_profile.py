@@ -19,7 +19,7 @@ sys.path.insert(0,str(ROOT/'scripts/test'))
 from preparation_speed_acceptance import build_engine
 
 
-def build_backend(reference,runtime,fresh):
+def build_backend(reference,runtime,fresh,overlays=()):
     source=fresh/'runtime-source';video=source/'libs/video';video.mkdir(parents=True)
     name='libs/video/rsx_d3d12_backend.c'
     original=subprocess.check_output(['git','-C',str(runtime),'show','HEAD:'+name])
@@ -36,6 +36,7 @@ def build_backend(reference,runtime,fresh):
     assert (source/name).read_bytes().replace(b'\r\n',b'\n')==(runtime/name).read_bytes().replace(b'\r\n',b'\n'),'Reference runtime differs from tracked baseline'
     (source/name).write_bytes(original)
     apply(ROOT/'patches/ps3recomp-4e8f3ca8-local.patch',True)
+    for overlay in overlays:apply(Path(overlay))
     for path in (runtime/'libs/video').glob('*.h'):shutil.copyfile(path,video/path.name)
     obj=r'ps3recomp\CMakeFiles\ps3recomp_runtime.dir\libs\video\rsx_d3d12_backend.c.obj'
     command=subprocess.check_output(['ninja','-t','commands',obj],cwd=reference,text=True).splitlines()[-1]

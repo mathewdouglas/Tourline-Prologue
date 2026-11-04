@@ -188,6 +188,8 @@ def offline_env(game_root, cache):
                GT5P_PREPARE_OFFLINE_WARMUP=offline_warmup(),
                RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS=str(compiler_workers()), RSX_PSO_PROVENANCE='0')
     if profile == '1':env['RSX_PSO_PREPARE_PROFILE']='1'
+    dump = os.environ.get('GT5P_PREPARE_SHADER_SRC_DUMP')
+    if dump:env['RSX_SHADER_SRC_DUMP'] = dump  # developer diagnostic (needs the source-dump engine overlay)
     if shader_profile:env['RSX_PREPARE_SHADER_PROFILE']='1'
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'

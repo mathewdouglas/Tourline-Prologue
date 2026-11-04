@@ -104,6 +104,14 @@ workers retain their 512 MiB per-process and 1 GiB aggregate job caps, private
 kill-on-close jobs, queue ownership and existing timeouts. Normal game shader
 worker selection and async draw policy are unchanged.
 
+Later development (enumeration speed work, see
+[coverage-enumeration](coverage-enumeration.md#enumeration-speed-work)) changes the
+default: unset or `auto` selects logical processors minus two, between 2 and 10, and
+never more workers than the available RAM can hold (256 MiB each after a 1 GiB
+reserve). `legacy` restores the four-or-two rule above, and any explicit count from 2
+to 12 is accepted. Vertex workers keep the 512 MiB per-process cap; the aggregate job
+cap stays 1 GiB up to four workers and grows by 256 MiB per worker beyond that.
+
 Final cache verification groups metadata reads in batches of 32, checks shared
 bytecode dependencies once per identity, and sizes read requests from the opened
 file handle rather than the maximum permitted payload. Oversize, short, growing

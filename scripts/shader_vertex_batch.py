@@ -37,7 +37,7 @@ MAX_PROGRAM = MAX_FP
 MAX_SOURCE = 262144  # NativeCompiler decoder output buffer
 MAX_BYTECODE = 4 * 1024 * 1024
 MAX_TOTAL = 128 * 1024 * 1024
-MAX_WORKERS = 4
+MAX_WORKERS = 12
 MAX_JOBS = 4096
 JOB_SECONDS = 180
 START_SECONDS = 60
@@ -54,6 +54,7 @@ JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
 JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
 WORKER_MEMORY = 512 * 1024 * 1024
+WORKER_JOB_SHARE = 256 * 1024 * 1024  # aggregate commit allowance per worker (1 GiB floor)
 JOB_OBJECT_EXTENDED_LIMIT = 9
 PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 HEX16 = re.compile(r'[0-9a-f]{16}')
@@ -794,11 +795,27 @@ class _WinWorker:
         self.stdin_write = self.stdout_read = self.process = None
 
 
+def vfetch_loop(environ=None):
+    """Developer experiment, default off: GT5P_PREPARE_VFETCH_LOOP=1|2 asks a decoder built with
+    patches/ps3recomp-vertex-fetch-loop.patch for cheaper-to-compile GPU-fetch vertex HLSL. It changes the
+    shader source key, so the resulting cache serves only a game run with the same RSX_VFETCH_LOOP."""
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_VFETCH_LOOP', '0')
+    if value not in ('0', '1', '2'):
+        raise ValueError('GT5P_PREPARE_VFETCH_LOOP must be unset, 0, 1, or 2')
+    return value if value != '0' else ''
+
+
+def job_commit_limit(count):
+    """1 GiB for up to four workers (unchanged); 256 MiB each beyond that. Per-process cap stays 512 MiB."""
+    return max(LIMITS['worker_job_commit_bytes'], count * WORKER_JOB_SHARE)
+
+
 class _WinPool:
-    def __init__(self):
+    def __init__(self, count=4):
         import ctypes
         self.ctypes = ctypes
         self.kernel = ctypes_kernel()
+        self.job_limit = job_commit_limit(count)
         self.job = self.kernel.CreateJobObjectW(None, None)
         if not self.job:
             raise ValueError('Could not own vertex compiler workers')
@@ -806,7 +823,7 @@ class _WinPool:
         info.BasicLimitInformation.LimitFlags = (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
             JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY)
         info.ProcessMemoryLimit = WORKER_MEMORY
-        info.JobMemoryLimit = LIMITS['worker_job_commit_bytes']
+        info.JobMemoryLimit = self.job_limit
         if not self.kernel.SetInformationJobObject(self.job, JOB_OBJECT_EXTENDED_LIMIT, ctypes.byref(info), ctypes.sizeof(info)):
             self.kernel.CloseHandle(self.job)
             raise ValueError('Could not own vertex compiler workers')
@@ -1033,7 +1050,9 @@ def open_workers(count, decoder, work, translation='default'):
     environment = shader_translation.environment(translation)
     from preparation_profile import enabled
     if enabled():environment['GT5P_PREPARE_SHADER_PROFILE']='1'
-    pool = _WinPool()
+    loop = vfetch_loop()
+    if loop:environment['RSX_VFETCH_LOOP'] = loop
+    pool = _WinPool(count)
     workers = []
     try:
         for slot in range(count):
