@@ -9,6 +9,90 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 213 - Fragment sample sharing by default, with a re-keyed starter (2026-11-04)
+
+`RSX_FP_SAMPLE_SHARE` (Phase 212's coverage experiment, previously opt-in `=1`)
+is now **on unless it is exactly `0`**. A one-sample and a multisample profile
+of one fragment program compile to one pixel shader; `SampleDesc.Count` and
+everything else about the pipeline is unchanged. The separate overlay patch is
+folded into `patches/ps3recomp-4e8f3ca8-local.patch`, so CI/setup apply one
+patch. See [coverage-sample-share](coverage-sample-share.md) for the design.
+
+**Patch.** The fold is a surgical 18-line edit to the existing patch (hunk
+counts/offsets adjusted), not a regenerated diff: an earlier regeneration with
+`git diff` rewrote ~19,000 lines and, through a blanket string replacement, had
+also flipped the `RSX_CLEAR_TRACE` and `RSX_TEX_DIMDBG` diagnostics to
+default-on; it was discarded. Applying the old and new patches to fresh trees
+at `4e8f3ca8` differs only in `libs/video/rsx_d3d12_backend.c`, by the two
+intended hunks (20 diff lines, no CR changes). `ps3recomp-shader-interp.patch`
+still applies. A private engine (the v0.2.3 reference objects with only the
+patched backend recompiled and relinked, SHA-256 `26ce6760...`) is built from
+it. `fp_sample_share_native.py` proves the switch (unset/`1`/`2`/empty/`00`
+share, `0` does not; units 17/18 are not cube units).
+
+**Re-key.** The renderer contract moves `e266e6af...` -> `2250280f...`. One
+fresh full preparation with the new engine (624.9 s) proposes new fragment
+identifiers and native keys; `scripts/pipeline_template_rekey.py` accepts them
+only for one-sample records and only if each native `actual` key equals the
+proposal. Result: 6,172 of 12,669 records change (6,151 new keys; 21 changed
+fragment text only, same DXBC and key); 6,497 multisample records, all vertex
+fields, the four maps and (remapped old to new key) warmup membership are
+unchanged. Distinct fragment sources 6,990 -> 3,604, pixel-shader bytecodes
+6,965 -> 3,592. The plan (1,466 menu / 2,113 race, 3,546 distinct) is re-pinned
+to template digest `d603d90d...`. `pipeline_rekey_contract.py --baseline cf08d79`
+and the synthetic `pipeline_template_rekey.py` (scope, MSAA/vertex preservation,
+creation/actual, collision, plan pin) pass.
+
+**Strict acceptance of the re-keyed starter** (private engine, cache/outputs
+removed afterwards; original game files read-only):
+
+| Check | Result |
+| --- | --- |
+| Frozen helper, direct from the game volume, clean PATH, fresh storage; cancel once native input starts | exit 2, old selection and old cache snapshot unchanged, 4,231 shader files retained, state `interrupted` (320.5 s) |
+| Resume the same generation | all 12,669 prepared; 12,669 recipes / valid driver blobs, 0 rejected; both shader packs written (555 menu / 1,092 race shaders); warmup indices written; 382.4 s wall (371.6 s internal); pointer switched only after success |
+| Same starter, old `=0` engine behaviour (old starter, non-frozen path) | 12,669 prepared, 0 rejected (723.8 s): the rollback reproduces every old record |
+| Incremental run from that pre-re-key generation (frozen helper) | 12,669 prepared in 379.4 s; reuse copied 4,013 shaders and 3,488 driver blobs (268 MB), 0 rejected, but the existing 60 s / byte budget skipped 3,500 blobs, so it is no faster than the fresh resume |
+| `ultrawide-native` and `native-scaled` additional translations, first 64 records (all one-sample) | default 64/64 and extra 64/64 prepared (39.1 s / 28.9 s) |
+
+**In game** (private engine, fresh copies of the prepared cache per run,
+`PS3_VERBOSE=0`, `GT5P_PRESENT_PROF=1`, PrintWindow shots inspected). A =
+default sharing + re-keyed cache. B = `RSX_FP_SAMPLE_SHARE=0` + the pre-re-key
+cache (previous behaviour). C = `=0` + the re-keyed cache (rollback). GPU is the
+mean of `[present-prof]` 5-second averages (first sample dropped); "new DXBC" is
+files the run added to its cache copy. No PSO failure or device-removed line in
+any log.
+
+| Scene | A GPU ms / new DXBC | B | C |
+| --- | ---: | ---: | ---: |
+| Dealership 720p, 1x MSAA | 4.30 / 10 | 4.16 / 10 | 4.47 / 250 |
+| Dealership 1080p, 2x MSAA | 6.22 / 8 | 6.05 / 8 | 6.38 / 248 |
+| HSR 720p, 1x (60 s frame test) | 4.83 / 12 | 5.09 / 12 | 5.19 / 1,721 |
+| HSR 1080p, 2x | 5.36 / 8 | 6.00 / 8 | not run |
+
+HSR frame test (FPS / median / p99 / late share): 720p A 58.2 / 16.7 / 24.1 ms /
+2.8%; B 59.1 / 16.7 / 20.5 / 1.6%; C 55.2 / 16.7 / 59.1 / 6.7%. 1080p/2x A 59.6 /
+16.7 / 20.2 / 1.1%; B 58.9 / 16.7 / 18.8 / 0.8%. All dealership runs: 30 fps,
+2,150-2,225 draws. Dealer and race frames show the same showroom (cars vary per
+visit) and the same track, HUD, crowd, shadows and mirror. These are single runs
+on one GPU/save/route: the A/B GPU and frame-time differences are inside
+run-to-run variation, shots are not phase-locked pixel-identical pairs (HSR A/B
+frames differ by mean absolute channel sum 34-36 at 1080p, with the car at a
+slightly different place), and the large C counts are the effect to note:
+with the re-keyed cache `=0` has no prepared one-sample entries, so it compiles
+them on demand and the 720p race shows more late frames (p99 59 ms). Cold
+driver-cache, other tracks/cars/settings and ultrawide in-game were not run.
+
+**Not changed.** Published v0.2.3, main, tags and releases; vertex state and
+maps; observed membership. Old ordinary player caches are left alone; recipes
+learned before this phase may still replay old-key one-sample shaders until the
+14-day pruning removes them. No whole-game, all-settings or stutter claim.
+
+Evidence/tools: `scripts/pipeline_template_rekey.py`,
+`scripts/test/{pipeline_template_rekey,pipeline_rekey_contract,player_rekey_frozen_native,fp_sample_share_native,fp_sample_share_build,fp_sample_share_batch}.py`.
+Every run used `C:\tmp\gt5p-testlock\run_locked.py` one at a time; private
+builds, caches and game copies are removed, and timing metadata stays in this
+document.
+
 ## Phase 212 - Verified content-sweep starter expansion (2026-11-04)
 
 The 1080p/2x MSAA/default-16:9 content sweep contributes **7,000 verified

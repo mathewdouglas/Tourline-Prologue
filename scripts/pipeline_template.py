@@ -582,7 +582,7 @@ def _prepare_vertex_batch(document, vertices, fragments, reused, decoder, cache,
 
 
 def prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None,vertex_mode='batch'):
+                     asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report=None,hash_before=None,volume=None,volume_map=None,vertex_mode='batch',rekey=False):
     cache=output/'shadercache';cache.mkdir(exist_ok=True)
     checkpoint.stage('lookup')
     lookup_started=time.perf_counter()
@@ -667,6 +667,11 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
     checkpoint.stage('native-input',requested=len(jobs))
     handoff = NativeRequests(engine,cache)
     requests = []
+    rekey_originals = {}
+    if rekey:
+        from pipeline_template_rekey import propose
+        from native_pipeline_key import root_signature_hash
+        rekey_root = root_signature_hash()
     for number,job in enumerate(jobs):
         if checkpoint.progress and number%32==0:
             checkpoint.progress('native-input',dict(completed=number,total=len(jobs)))
@@ -675,6 +680,10 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
             if job['id'] in failures:
                 raise ValueError(failures[job['id']])
             key, ps = compiled[job['id']]
+            if rekey:
+                rekey_originals[job['id']] = r
+                r = propose(r, r['vp_source'], vs, key, ps, rekey_root)
+                by_id[job['id']] = (r, vs)
             if key != r['fp_source'] or f'{fnv64(ps):016x}' != r['ps']:
                 raise ValueError('Rebuilt fragment identifier differs')
             proof = root / job['id'] / 'pipeline'
@@ -700,7 +709,10 @@ def prepare_document(document,template,catalog,elf,engine,decoder,game_root,outp
         r = by_id[identity][0]
         result = handoff.result(root,identity)
         passed = result.get('created') and result.get('actual') == result.get('expected') == r['key']
-        report['records'].append(dict(key=r['key'], status='prepared' if passed else 'key-rejected', result=result))
+        row = dict(key=r['key'], status='prepared' if passed else 'key-rejected', result=result)
+        if rekey:
+            row.update(template_key=rekey_originals[identity]['key'], rekey_record=r)
+        report['records'].append(row)
     handoff.finish()
     report['native_result_seconds']=time.perf_counter()-result_started
     checkpoint.stage('verifying-cache')

@@ -44,6 +44,23 @@ has the evidence, newest phase first (Phase 212 is the latest).
 
 ### What works now
 
+- **Fragment sample sharing is the default (Phase 213, development):**
+  `RSX_FP_SAMPLE_SHARE` is now on unless it is exactly `0`; the one-sample and
+  multisample profiles of a program compile to one pixel shader (the separate
+  overlay patch is folded into `patches/ps3recomp-4e8f3ca8-local.patch`; the
+  renderer contract moves to `2250280f...`). The shipped starter was re-keyed:
+  6,172 of 12,669 one-sample records change fragment identity (distinct fragment
+  sources 6,990 -> 3,604, pixel-shader bytecodes 6,965 -> 3,592); 6,497 multisample
+  records, all vertex state, maps and warmup membership (remapped) are unchanged.
+  Fresh strict preparation of all 12,669 records passes (frozen helper, cancel/
+  resume; 64-record ultrawide-native and native-scaled subsets); `=0` with the old starter still
+  reproduces every old record. With the re-keyed cache, `=0` leaves the 1x prepared
+  entries unused (about 250 runtime shader compiles in one dealership visit versus
+  about 10). Old ordinary player caches are untouched. See progress Phase 213.
+  Pipeline/translation rule: a change to the main runtime patch changes the
+  renderer contract; re-key via `scripts/pipeline_template_rekey.py`, never edit
+  records by hand.
+
 - **Verified content sweep (Phase 212, development):** 7,000 of 7,790 candidates
   pass fresh shader/native/persistence proof; 790 depending on 185 unresolved FP
   identities stay out, as do 47 previously quarantined keys. The starter is

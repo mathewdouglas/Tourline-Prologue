@@ -5,6 +5,19 @@ remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
 
+Development Phase 213 makes fragment sample sharing the default
+(`RSX_FP_SAMPLE_SHARE=0` rolls it back; see
+[coverage-sample-share](coverage-sample-share.md)). One-sample and multisample
+profiles of one program now compile to one pixel shader, so the starter's
+one-sample records were re-keyed (`scripts/pipeline_template_rekey.py`; 6,172 of
+12,669 records, new renderer contract). Preparation is unchanged in shape: a
+fresh application cache compiles 3,604 distinct fragment sources instead of
+6,990 for the full starter. Offline preparation ignores inherited `RSX_*`
+settings, so prepared caches always match the default game; a player who sets
+`RSX_FP_SAMPLE_SHARE=0` for the game gets demand compiles for the one-sample
+pipelines. An older prepared cache (previous starter) still serves multisample
+entries and is not deleted.
+
 Development Phase 211 adds opt-in shader-stage profiling with
 `GT5P_PREPARE_SHADER_PROFILE=1` (unset/`=0` is off). Vertex worker summaries
 separate translation and D3DCompile elapsed time; owner summaries separate

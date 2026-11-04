@@ -1,9 +1,13 @@
 # Fragment sample-count sharing
 
-`RSX_FP_SAMPLE_SHARE=1` makes a one-sample fragment profile and a multisample
-profile of the same program compile to one pixel shader. Unset, or any value
-other than `1`, leaves the compiled text as it is today. The pipeline sample
-count is unchanged either way.
+**Status (Phase 213): on by default.** A one-sample fragment profile and a
+multisample profile of the same program compile to one pixel shader unless
+`RSX_FP_SAMPLE_SHARE=0` is set (any other value, or unset, shares). The change
+lives in `patches/ps3recomp-4e8f3ca8-local.patch`; the separate experimental
+overlay patch is gone. The pipeline sample count is unchanged either way. The
+shipped starter was re-keyed for it; see "Default and re-key" at the end. The
+sections up to that one record the earlier opt-in (`=1`) investigation and use
+that era's wording.
 
 This is the specialization behind starter `state.cube` bits 17 and 18. Those
 bits are a sample count, not a cube-versus-2D texture shape. A second SRV for
@@ -63,8 +67,8 @@ key is the HLSL source hash (`fp_source`). `ps` is the FNV-1a of the DXBC.
 
 ## What the switch does
 
-`patches/ps3recomp-fp-sample-share.patch` adds `fp_sample_qualifier`. With
-`RSX_FP_SAMPLE_SHARE=1` the `sample` rewrite runs for every count, including
+The (then overlay, now main-patch) function `fp_sample_qualifier` is added. With
+`RSX_FP_SAMPLE_SHARE=1` (opt-in era; now the default) the `sample` rewrite runs for every count, including
 one sample, still gated by `RSX_SSAA`. `SampleDesc.Count` still follows bits
 16–19. The root signature, sampler registers `s0`–`s15`, and texture
 declarations are untouched.
@@ -163,20 +167,51 @@ Sebring Silver, so the frames are not pixel-equal (mean absolute channel sum
 supported by that picture and by the matching draw count. It is not proven by
 a locked pixel diff.
 
-## If this became the default
+## Default and re-key (Phase 213)
 
-Do not regenerate `gt5p-disc-v2`. Turning the switch on changes `fp_source`
-and `ps` for the one-sample rows. Multisample rows keep their keys (1,831 of
-3,696 profiles still matched). Any pipeline key that includes the bytecode
-changes with those rows. The sample-count nibble, `SampleDesc.Count`, and
-`root_signature_keyed` stay. The renderer contract hashes
-`patches/ps3recomp-4e8f3ca8-local.patch` only; this overlay is a separate
-file, so the shipped contract does not move until the behaviour is folded
-into that patch.
+`RSX_FP_SAMPLE_SHARE` is on unless the variable is exactly `0`; `getenv` is
+read once, so a game must be launched with the variable set. The overlay is now
+part of `patches/ps3recomp-4e8f3ca8-local.patch` (an 18-line net edit; a fresh
+tree with the new patch differs from the old-patch tree only in
+`rsx_d3d12_backend.c`, by the two intended hunks). `ps3recomp-shader-interp.patch`
+still applies on top and the backend compiles and links.
+`scripts/test/fp_sample_share_native.py` compiles the helpers: unset, `1`, `2`,
+empty and `00` share; `0` restores "sample count > 1 only". Offline preparation
+strips every `RSX_*` variable (`offline_env`), so a prepared cache always matches
+the default game.
 
-Preparation would then treat one-sample and multisample profiles of one
-program as one fragment compile. The cube word stored on the template can
-keep the real sample count for the pipeline object.
+The renderer contract hashes the main patch, so it moved
+(`e266e6af...` -> `2250280f...`). Records whose sample count (`state.cube` bits
+16-19) is one change fragment text, so `fp_source`, `ps`, the native ps length
+and the pipeline `key` change; multisample records, vertex fields and numeric
+state do not. `scripts/pipeline_template_rekey.py` takes one fresh full
+preparation with the new engine in a permissive mode and rewrites the starter:
+
+| | Before | After |
+| --- | ---: | ---: |
+| Records | 12,669 | 12,669 |
+| One-sample records changed | | 6,172 (6,151 new keys; 21 changed source text only, same DXBC and key) |
+| Multisample records | 6,497 | 6,497, unchanged |
+| Distinct fragment sources | 6,990 | 3,604 |
+| Distinct pixel-shader bytecodes | 6,965 | 3,592 |
+
+The tool rejects any multisample change, any vertex change, any missing or failed
+record, any key collision, and a native `actual` key that differs from the
+proposed one. The rewrite pass took 624.9 s. The warmup plan's menu/race
+membership is remapped old to new key (1,466 menu / 2,113 race, 3,546 distinct,
+same order) and re-pinned to the new template digest; maps are byte-identical.
+`scripts/test/pipeline_rekey_contract.py --baseline cf08d79` audits the shipped
+files against the previous starter.
+
+**Rollback (`=0`).** With the old starter, `=0` reproduces all 12,669 old
+records: shaders, native keys and persisted blobs (723.8 s, non-frozen path).
+With the re-keyed starter and its prepared cache, `=0` makes the one-sample
+pipelines miss: the game compiles them on demand (see the tables in Phase 213
+of [progress](progress.md): about 250 new shaders in a dealership visit and
+1,721 in one High Speed Ring run, against 8-12). Old ordinary caches are never
+deleted. A cache prepared before the re-key still serves multisample records;
+one-sample entries in it are no longer requested by the default game. Old
+warmup recipes may still replay old-key shaders until they age out.
 
 ## What is left
 
