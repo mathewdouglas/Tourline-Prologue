@@ -37,7 +37,9 @@ def translate(fn, data, cube):
 
 
 def disasm_key(blob):
-    """Disassembly with the comment header dropped and r# temporaries renumbered by first appearance."""
+    """Disassembly with the comment header dropped, r# temporaries renumbered by first appearance and the sizes of
+    indexable temporary arrays (the register files, when the compiler keeps them indexed) blanked: the sized
+    declaration is the one intended difference, and every access in the text is a literal inside it."""
     import re
     d3d = ctypes.WinDLL('d3dcompiler_47.dll')
     fn = d3d.D3DDisassemble
@@ -49,7 +51,8 @@ def disasm_key(blob):
     import hlsl_compile_bench as bench
     text = bench.blob_bytes(out).decode('latin1')
     bench.blob_size(out)[1](out)
-    lines = [l for l in text.splitlines() if not l.startswith('//') and l.strip() and not l.startswith('dcl_temps')]
+    lines = [re.sub(r'(dcl_indexableTemp x\d+)\[\d+\]', r'\1[n]', l) for l in text.splitlines()
+             if not l.startswith('//') and l.strip() and not l.startswith('dcl_temps')]
     seen = {}
     def rename(m):
         return 'r%d' % seen.setdefault(m.group(1), len(seen))

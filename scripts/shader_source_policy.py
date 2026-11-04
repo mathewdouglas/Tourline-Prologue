@@ -11,6 +11,8 @@ does not serve the other, because the text is the cache key):
                              register files)
   GT5P_PREPARE_FP_GAMMA_LAZY unset or 1 = renderer default; 0 -> RSX_FP_GAMMA_LAZY=0 (the sRGB helper
                              functions are added to every program that has a gamma bit, called or not)
+  GT5P_PREPARE_FP_MASK_ENCODE unset or 1 = renderer default; 0 -> RSX_FP_MASK_ENCODE=0 (a stencil-mask pass
+                             whose colour is forced to 1.0 still gets the sRGB encode text)
 """
 import os
 
@@ -41,6 +43,12 @@ def fp_gamma_lazy(environ=None):
     return '0' if value == '0' else ''
 
 
+def fp_mask_encode(environ=None):
+    """'' (renderer default) or '0' for RSX_FP_MASK_ENCODE."""
+    value = _setting(environ, 'GT5P_PREPARE_FP_MASK_ENCODE', ('0', '1'))
+    return '0' if value == '0' else ''
+
+
 def overlay(environ=None):
     """RSX_* variables to add to an offline environment; empty for the renderer defaults."""
     fields = {}
@@ -51,6 +59,8 @@ def overlay(environ=None):
         fields['RSX_FP_REG_SIZE'] = '0'
     if fp_gamma_lazy(environ) == '0':
         fields['RSX_FP_GAMMA_LAZY'] = '0'
+    if fp_mask_encode(environ) == '0':
+        fields['RSX_FP_MASK_ENCODE'] = '0'
     return fields
 
 
