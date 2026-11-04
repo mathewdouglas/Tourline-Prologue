@@ -9,6 +9,8 @@ does not serve the other, because the text is the cache key):
                              GPU vertex fetch)
   GT5P_PREPARE_FP_REG_SIZE   unset or 1 = renderer default; 0 -> RSX_FP_REG_SIZE=0 (48-entry fragment
                              register files)
+  GT5P_PREPARE_FP_GAMMA_LAZY unset or 1 = renderer default; 0 -> RSX_FP_GAMMA_LAZY=0 (the sRGB helper
+                             functions are added to every program that has a gamma bit, called or not)
 """
 import os
 
@@ -33,6 +35,12 @@ def fp_reg_size(environ=None):
     return '0' if value == '0' else ''
 
 
+def fp_gamma_lazy(environ=None):
+    """'' (renderer default) or '0' for RSX_FP_GAMMA_LAZY."""
+    value = _setting(environ, 'GT5P_PREPARE_FP_GAMMA_LAZY', ('0', '1'))
+    return '0' if value == '0' else ''
+
+
 def overlay(environ=None):
     """RSX_* variables to add to an offline environment; empty for the renderer defaults."""
     fields = {}
@@ -41,6 +49,8 @@ def overlay(environ=None):
         fields['RSX_VFETCH_LOOP'] = loop
     if fp_reg_size(environ) == '0':
         fields['RSX_FP_REG_SIZE'] = '0'
+    if fp_gamma_lazy(environ) == '0':
+        fields['RSX_FP_GAMMA_LAZY'] = '0'
     return fields
 
 

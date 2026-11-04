@@ -59,6 +59,23 @@ def saving(jobs, rows, project):
     return len(parent) - components, len(groups)
 
 
+def same_bytecode(jobs, rows):
+    """Sources of one program that compile to identical bytecode: which profile axes differ between them.
+
+    Returns {axes tuple: count} over (program, bytecode) groups with several distinct sources, comparing each
+    extra source's first profile with the group's first. An axis that only shows up here adds text, not code."""
+    groups = collections.defaultdict(dict)
+    for (program, profile), row in zip(jobs, rows):
+        if row is not None:
+            groups[(program, row[1])].setdefault(row[0], profile)
+    tally = collections.Counter()
+    for sources in groups.values():
+        profiles = list(sources.values())
+        for other in profiles[1:]:
+            tally[tuple(NAMES[i] + ('' if i != 1 else '') for i, (a, b) in enumerate(zip(profiles[0], other)) if a != b)] += 1
+    return tally
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--run', type=Path, required=True)
@@ -104,6 +121,12 @@ def main():
         saved, groups = saving(jobs, rows, project)
         result['combinations'][label] = dict(saved=saved, groups=groups)
         print(f'{label:36} saved <= {saved:6} ({100 * saved / len(sources):.1f}%), groups {groups}')
+    tally = same_bytecode(jobs, rows)
+    result['same_bytecode_extra_sources'] = sum(tally.values())
+    result['same_bytecode_axes'] = {'+'.join(k) or 'none': v for k, v in tally.most_common(12)}
+    print(f"extra sources with identical bytecode inside a program: {sum(tally.values())}")
+    for axes, count in tally.most_common(8):
+        print(f"  {count:6} differ in {'+'.join(axes) or 'nothing'}")
     if a.json:
         a.json.write_text(json.dumps(result, indent=2) + '\n')
 
