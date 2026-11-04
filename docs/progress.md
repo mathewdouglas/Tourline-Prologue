@@ -9,6 +9,97 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 208 - Dealership logo loading stall: Windows PPU join lifetime (2026-11-05)
+
+Investigation branch `investigate/dealership-logo-freeze` starts at main
+37a696f in `../Tourline-Prologue-dealer-freeze`. The user supplied
+`gt5p-debug-20261105-085802-060-37360-1.zip` after Mazda stopped on its logo
+on approximately the fifth entry; audio continued. The private export and
+reproduction evidence stay under `scratch/dealer-freeze/`.
+
+### The supplied export identifies thread creation starvation
+
+All 64 guest thread-table slots are occupied: 34 RUNNING and 30 FINISHED.
+Thread 24 is sleeping for 2,000 microseconds at `0x00B442A0`, returning to
+`0x00B44624`. Original-disc disassembly identifies that as the retry branch
+following failed thread creation at `0x00B44648`, not an SPU ring-space wait.
+The runtime returns CELL_EAGAIN when no FREE table slot exists. The proposed
+worker has entry `0x0132A3E0`, argument `0x400CE8C0`, priority 256 and flags 1.
+
+The renderer still presents: the last present is 28 ms old; the last four
+completed frames each contain only two logo draws. The shader worker is idle,
+all 691 queued native pipelines have completed, and device_lost is zero. The
+FIFO has get=put=`00011080`; render workloads 0/1 are idle with no remaining
+jobs. These observations differ from the older ring/profiling-corruption stalls.
+The two remaining temporary workers' condition waits alone do not establish a
+lost notification. The busy guest `Main Thread` is in its timer-service loop;
+the same loop is busy in the reproduction before exhaustion, so its CPU use
+alone does not identify the cause.
+
+### Measured host join/epilogue race and correction
+
+`sys_ppu_thread_exit` publishes FINISHED and signals `finish_event` before
+longjmp unwinds to `ppu_host_thread_proc`. Windows `sys_ppu_thread_join`
+previously waited only for that event, closed the host handle and marked the
+slot FREE. The old procedure subsequently takes the table lock and writes
+FINISHED again. This can resurrect an already joined slot; early slot reuse
+can also let the old epilogue touch a new thread's descriptor. The latter is a
+structural risk, not a separately observed failure in the user's export.
+
+The compatibility overlay now waits for the host thread handle before join
+cleanup. The wait is outside the table lock, allowing the old epilogue to
+finish. The 64-slot limit, guest scheduling, shader/draw behavior and POSIX
+join path are unchanged. The shared runtime checkouts are not modified.
+
+`scripts/test/ppu_join_lifetime.py` extracts the actual pinned runtime exit,
+host procedure and join functions, with a host-profiler-exit stub holding the
+old procedure before its final table update. The unmodified source reproduces
+premature FREE followed by resurrected FINISHED on the first case. The fixed
+source passes 128 delayed exits/joins, verifying slot ownership until host
+completion and big-endian guest exit status. No game code/data is required.
+
+The original released executable also exhausts its table during a private
+315-second headless repeated-dealership route: its final dump has 32 RUNNING
+and 32 FINISHED slots and the same 2-ms creation retry. This provides an
+in-game counterpart to the deterministic native race. The fixed 315-second
+headless route completes 87 successful thread creations across 63 distinct
+created IDs, ending with 34 RUNNING slots and no retained FINISHED slots.
+The loader is no longer in the creation-retry loop. This verifies recycling
+beyond the baseline exhaustion point, without raising the table capacity.
+
+### Build, reproduction and limits
+
+The candidate recompiles only `sys_ppu_thread.c` against a private copy of
+pinned v0.18.0 plus this branch's compatibility overlay, replaces that member
+in a private runtime library and relinks the retained release object files.
+The cache's baseline executable is byte-identical to the public v0.2.3 engine
+(SHA256 `960f8ec2534b6c03f7305bcbc197ce58469411f4f59754d00fb7dd078deba887`),
+and the baseline thread source matches the release runtime cache after newline
+normalization. Candidate SHA256:
+`576d4c94f2ddc61b46164ab2f24fcafe7379c9c30dba6f48252065c99c82288f`.
+This is a private incremental candidate, not a fresh full release build.
+
+Live tests hold `Local\Tourline-Prologue-Isolated-Validation`, run sequentially,
+read the existing disc assets, and use copied saves and private cache/storage.
+The automated route schedules ten entries into the initially selected dealer,
+with right/left input and Circle between entries. It does not claim Mazda was
+selected, and scheduled button presses alone are not ten visually accepted
+visits. PS3_HEADLESS disables the D3D12 backend, so the blank window captures
+are not visual acceptance. A rendered Mazda/repeated-dealer acceptance run
+remains required before publication; the user's exact session was not replayed.
+No main/tag/release/CI change or general loading-reliability claim is made.
+
+Reproduce the native checks with the repository Python environment, inside
+`scripts/test/isolated_validation.ps1`, passing:
+
+- `scripts/test/ppu_join_lifetime.py --runtime <private-patched-runtime>`;
+- add `--source <unmodified-sys_ppu_thread.c> --expect-legacy` to verify the
+  original race. The source override still uses the selected runtime's headers.
+
+The full overlay reverse-application check passes against the isolated runtime.
+Build identities, logs, fixture output and the candidate remain private under
+`scratch/dealer-freeze/` and `scratch/ppu-join-*/`.
+
 ## Phase 207 - v0.2.3 publication (2026-11-03)
 
 After accepting the candidate, the user explicitly authorized main integration

@@ -35480,7 +35480,20 @@ index 41d5721c..9afe939c 100644
      return CELL_OK;
  }
  
-@@ -1266,6 +1517,9 @@ int64_t sys_ppu_thread_set_priority(ppu_context* ctx)
+@@ -708,5 +959,10 @@
+-    /* Clean up */
+-#ifdef _WIN32
++    /* The guest exit event is signalled inside sys_ppu_thread_exit, before
++     * the host procedure unwinds and stamps FINISHED. Reusing the slot at
++     * that event lets the old epilogue resurrect a freed slot (or overwrite
++     * a new thread). Join the host outside the table lock, as on POSIX. */
++#ifdef _WIN32
++    if (WaitForSingleObject(t->host_thread, INFINITE) != WAIT_OBJECT_0)
++        return (int64_t)(int32_t)CELL_EAGAIN;
+     table_lock();
+     CloseHandle(t->host_thread);
+     CloseHandle(t->finish_event);
+@@ -1266,6 +1522,9 @@ int64_t sys_ppu_thread_set_priority(ppu_context* ctx)
      }
  
      t->priority = priority;
@@ -35490,7 +35503,7 @@ index 41d5721c..9afe939c 100644
      table_unlock();
      return CELL_OK;
  }
-@@ -1425,3 +1679,14 @@ void sys_ppu_thread_init(lv2_syscall_table* tbl)
+@@ -1425,3 +1684,14 @@ void sys_ppu_thread_init(lv2_syscall_table* tbl)
      lv2_syscall_register(tbl, SYS_PPU_THREAD_GET_STACK_INFORMATION, sys_ppu_thread_get_stack_information);
      lv2_syscall_register(tbl, SYS_PPU_THREAD_RENAME,              sys_ppu_thread_rename);
  }
