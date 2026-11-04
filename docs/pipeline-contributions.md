@@ -256,8 +256,10 @@ rules and additional settings/context work remain separate roadmap items.
 converts identifier/numeric metadata only. Add `--warmup-plan <old plan>
 --output-plan <new plan>` to preserve observed membership as input identities.
 The converter preserves the four program/location maps byte for byte. Re-pin
-an enumeration plan's `template_sha256` to the new bundle index; its program/job
-membership does not change. The shipped path retains `gt5p-disc-v2` for package
+an enumeration plan's `template_sha256` to the new bundle index with
+`scripts/release/build_enumeration.py` (see coverage-enumeration); for the shipped
+migration it reproduced the existing plan apart from a trailing newline, so program,
+profile and job membership did not change. The shipped path retains `gt5p-disc-v2` for package
 compatibility; its index and shards declare format 3.
 
 For maintainer regression checks, `pipeline_template.py prepare` accepts

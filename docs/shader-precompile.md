@@ -33,6 +33,11 @@ normal drawing and runtime patches are unchanged.
 
 Maintainers can compare a private reference run using `--reference-report`, or an old
 format-2 reference using `--reference-template`. Neither becomes a shipped expectation.
+Phase 214 acceptance (full 12,669 fresh, cancel/resume, format-2 -> format-3 reuse,
+growth, comment probe, strict reference, pack reader) is summarised in
+[progress](progress.md) and [template-input-format](template-input-format.md#validation).
+After any starter change, re-pin the enumeration plan as described in
+[coverage-enumeration](coverage-enumeration.md#re-pinning-after-any-starter-change).
 See [format and evidence](template-input-format.md) and the
 [contribution contract](pipeline-contributions.md#file-contract).
 

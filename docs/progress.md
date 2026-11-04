@@ -86,9 +86,71 @@ See [format design, migration and limits](template-input-format.md),
 [preparation workflow](shader-precompile.md). Focused template/contribution/coverage,
 plan/pack/reuse/enumeration/package/collection/re-key/runtime-coverage regressions
 pass sequentially under `C:\tmp\gt5p-testlock\run_locked.py`. Native evidence is
-`scratch/if3/{smoke32,full}/validation.json`; remaining acceptance and cleanup are
-recorded below before this phase is finalized. No whole-game/settings, GT5,
-other-GPU or stutter claim follows. Push only the feature branch with `[skip ci]`.
+`scratch/if3/{smoke32,full}/validation.json` (private; removed after this phase,
+small summaries kept).
+
+**Remaining acceptance (all frozen helper, direct original-volume, enumeration
+disabled, one locked run each).**
+
+- *Format-2 generation -> format-3 incremental reuse (32 records).* A real format-2
+  seed (`GT5P_PREPARE_INPUT_TEMPLATE=0`) feeds a format-3 run: 32 driver blobs copied
+  (963,688 bytes), zero shaders copied (format-2 generations lack input-keyed
+  derivation manifests, so shaders compile again), none rejected. All 32 outputs
+  exactly match the reference; native 32/32/32/32, runtime lookup 32/32/32/32;
+  the old selection and cache are unchanged. 19.9 s.
+- *Format-3 growth (33 records from the 32-record cache).* Input-keyed derivation
+  manifest reuse plus one new record: 33/33 exact, native 33/33/33 with 32 driver
+  calls reusing blobs, one blob missing (the new record) and created; runtime lookup
+  33/33/33/33; old cache unchanged. 12.4 s.
+- *Renderer-source comment probe.* A harmless source change (private engine built
+  with one extra comment line, plus the helper's patch-resource) gives the **same
+  template digest** (`378f0016...`) and a **different engine hash**
+  (`8673bc00...` -> `a8011517...`); no template, plan or gate change is needed, and
+  32/32 exact outputs, native 32/32/32 and runtime lookup pass. Under format 2 this
+  change invalidated the source-contract gate.
+- *Maintainer strict reference comparison* (`--reference-template`, native
+  regression driver, 32-record fixture): 32/32 prepared against the reference with
+  native 32/32/32/32 and lookup 32/32/32/32, zero vertex/fragment workers (all
+  derivations reused), the renderer source fingerprint never read, an incorrect
+  reference rejected without a report, a corrupted derived shader refused at resume,
+  and the source cache/selection preserved. *Native pack reader* against the full
+  12,669-record generation: PASS disabled reader and production lookups (menu 555 /
+  race 1,092 entries), bytecode identities, miss fallback and blob ownership.
+
+**Defect found and fixed.** Growth from a cache with usable input-keyed hints failed
+with `'total'`: `pipeline_translation.py` reported `reusing-cache` progress with
+`completed` but no `total`, and the player's status formatter indexed `counts['total']`.
+Reuse progress now carries a total, and the formatter tolerates a missing total.
+A first reuse attempt also failed once with Windows error 1450 (insufficient system
+resources) creating vertex workers while the machine was short of memory (about
+1.7 GiB physical free at the time); the identical run alone through the lock passed
+(twice, including after the fix), so it is attributed to the environment. Job
+objects and handles are released per pool; no leak was observed, but none was
+measured directly.
+
+**Rebase onto `feature/shader-coverage-scaling` (69dcaa0).** Clean, no textual
+conflicts (the enumeration speed work touches `preparation_enumeration.py`,
+`preparation_workers.py`, `shader_vertex_batch.py` and adds opt-in overlay patches).
+The official `scripts/release/build_enumeration.py` re-pin against the format-3
+starter reproduces the shipped `plan.json` byte for byte except one trailing
+newline (kept as committed); fragment jobs 34,355 / profiles 1,540 are unchanged.
+After the rebase the focused regressions (template, inputs, contribution, coverage,
+warmup plan, shader pack, reuse, enumeration, vertex batch, package, collection x3,
+re-key, runtime coverage) pass, and the helper was rebuilt from the rebased tree for
+a repeat frozen 32-record smoke (exact 32/32, native/lookup 32/32, cancel at native
+input in 14.4 s with 38 shaders retained, resume reuses 16 vertex programs and 32
+fragment jobs, both packs written). The 12,669-record fresh run predates the rebase
+and was not repeated (hypothesis: unaffected, since the rebase only adds the
+enumeration/worker-count speed work and enumeration is disabled in that run; the
+new automatic worker default can change worker counts, not outputs).
+Two test-harness items surfaced: the 32-record cancel trigger raced the status
+debounce once native input became faster (the subset run now cancels on any
+`Native input` status and polls at 5 ms; the full run keeps the strict trigger), and
+`collection_search_map` lacked the enumeration asset the packager now requires
+(fixture fixed).
+
+No whole-game/settings, GT5, other-GPU or stutter claim follows. Push only the
+feature branch with `[skip ci]`.
 
 ## Phase 213 - Fragment sample sharing by default, with a re-keyed starter (2026-11-04)
 

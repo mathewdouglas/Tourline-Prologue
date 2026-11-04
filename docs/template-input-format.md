@@ -144,3 +144,20 @@ shader enumeration to isolate the complete starter/native proof, compares agains
 a private format-2 reference, and checks old-cache/selection preservation. Live
 routes, additional GPUs, whole-game/settings coverage and stutter improvements are
 outside this format migration.
+
+Modes of `pipeline_inputs_frozen_native.py` (each its own locked run, private
+output): `fresh` (default; cancels at native input and resumes, `--limit N` runs a
+subset), `legacy-seed` (builds a format-2 generation with
+`GT5P_PREPARE_INPUT_TEMPLATE=0`) and `incremental` (`--previous-cache` from a
+legacy seed or a smaller format-3 run). `--source-comment-probe` appends a harmless
+comment to the helper's source resource and expects the same template digest with a
+different engine hash. Accepted evidence: full 12,669 fresh with cancel/resume (all
+outputs equal the format-2 reference; native and fresh-process lookup 12,669 each);
+frozen 32-record smoke after the rebase onto the enumeration speed work; format-2 ->
+format-3 incremental reuse (32 blobs copied, shaders recompiled); format-3 growth
+(32 -> 33 records, 32 blobs reused, one created); the comment probe; the strict
+`--reference-template` regression; and the native pack reader on the full generation.
+In a subset the 100 ms status debounce can hide non-zero native-input counts, so
+subset runs cancel on any `Native input` status; the full run requires published
+inputs. A 32-record format-3 run with a progress callback caught a reuse progress
+payload that lacked `total`; it is fixed and the formatter no longer requires it.

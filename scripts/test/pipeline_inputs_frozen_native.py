@@ -135,10 +135,13 @@ def main():
                 while child.poll() is None:
                     try:text=(storage/'prepare-status.txt').read_text()
                     except OSError:text=''
-                    if text.startswith('Native input ') and not text.startswith('Native input 0/'):
+                    # A subset finishes native input inside the status debounce, so
+                    # its nonzero counts may never be written; the full run keeps
+                    # the strict published-inputs trigger.
+                    if text.startswith('Native input ') and (a.limit or not text.startswith('Native input 0/')):
                         (storage/'prepare.cancel').write_text('cancel');break
                     if time.monotonic()>deadline:raise TimeoutError('Native input never started')
-                    time.sleep(.05)
+                    time.sleep(.005)
                 assert child.wait(timeout=120)==2,(out/'cancel.log').read_text(errors='replace')[-3000:]
             finally:
                 if child.poll() is None:child.terminate();child.wait(timeout=15)

@@ -12,6 +12,7 @@ package=importlib.util.module_from_spec(spec);spec.loader.exec_module(package)
 with tempfile.TemporaryDirectory() as folder:
     fixture=Path(folder);bundle=fixture/'assets/pipeline-templates/gt5p-disc-v2'
     shutil.copytree(root/'assets/pipeline-templates/gt5p-disc-v2',bundle)
+    shutil.copytree(root/'assets/shader-enumeration/gt5p-disc-v1',fixture/'assets/shader-enumeration/gt5p-disc-v1')
     search=bundle/'search-map.json';original=json.loads(search.read_text())
     baseline=json.loads((bundle/'volume-map.json').read_text())
     with patch.object(package,'ROOT',fixture):

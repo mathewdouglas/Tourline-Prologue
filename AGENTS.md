@@ -36,13 +36,28 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-04, Phase 212)
+## Start here: state of play (2026-11-04, Phase 214)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 212 is the latest).
+has the evidence, newest phase first (Phase 214 is the latest).
 
 ### What works now
+
+- **Input-only pipeline templates (Phase 214, development):** the 12,669-record
+  starter is now template format 3: canonical program/state inputs only, with
+  SHA-256 input identities and no shader/native-key/renderer-source expectations, so
+  a renderer source change no longer requires reissuing it. Format 2 converts on
+  load (`scripts/pipeline_template_inputs.py`); warmup plan v2 and enumeration pin
+  the input digest (index `aa2e1ea6...`). Local preparation derives outputs, creates
+  and persists native pipelines, then proves every one through fresh-process runtime
+  lookup. A full frozen 12,669-record fresh run with cancel/resume matches the
+  format-2 reference exactly; format-2 -> 3 reuse, 32 -> 33 growth, the source
+  comment probe, the strict reference check and the pack reader pass too (32-record
+  smoke repeated after the rebase onto 69dcaa0). A reuse progress defect (`total`)
+  was fixed. `GT5P_PREPARE_INPUT_TEMPLATE=0` restores the format-2 gates (needs a
+  format-2 template). Old helpers cannot read format 3. See docs/template-input-format.md;
+  published v0.2.3 is unchanged; push `[skip ci]`.
 
 - **Fragment sample sharing is the default (Phase 213, development):**
   `RSX_FP_SAMPLE_SHARE` is now on unless it is exactly `0`; the one-sample and
