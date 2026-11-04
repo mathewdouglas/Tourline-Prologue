@@ -9,13 +9,18 @@ not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x6
 
 Optional **Prepare shaders**, the first-run **Prepare now** choice and F1
 **Debug > Prepare shaders** now also prepare asset shaders after the existing
-template stages. The new **Enumerating shaders** step handles 30,112 fragment
+template stages. The new **Enumerating shaders** step handles 36,595 fragment
 and vertex jobs using your original GT.VOL and ELF. No catalogue, unpacker or
-extra asset copy is needed. The package includes 2.54 MiB of metadata before ZIP compression;
+extra asset copy is needed. The package includes 2.62 MiB of metadata before ZIP compression;
 shader bytecode is generated locally. Published v0.2.3 is unchanged.
 
-This adds preparation time and local cache space; measured costs are recorded in
-[player enumeration acceptance](coverage-enumeration.md#default-player-enumeration-development-2026-11-04).
+This adds preparation time and local cache space. On the development machine a
+full first preparation took about 10.5 minutes for the template stages, and the
+enumeration step added about 24 minutes of shader compilation (36,473 of 36,595
+shaders; the rest are left to normal in-game compilation) and about 220 MiB of
+disk. Repeating the preparation re-checks rather than rebuilds. Your time depends
+on your CPU (four compiler workers on 8+ logical processors, otherwise two). Details:
+[player enumeration acceptance](coverage-enumeration.md#packed-player-acceptance-2026-11-04-12669-record-starter).
 Cancel/close/Escape retains completed chunks. Repeat preparation to resume;
 completed bytecode is checked before reuse. The previous selected cache stays
 available until preparation succeeds. Individual shader rejections are reported
