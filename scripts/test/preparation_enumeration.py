@@ -24,7 +24,8 @@ def main():
     metadata=enum.load(ROOT/'assets/shader-enumeration/gt5p-disc-v1',ROOT/'assets/pipeline-templates/gt5p-disc-v2')
     assert enum.enabled({}) and not enum.enabled({'GT5P_PREPARE_ENUMERATE':'0'})
     rejected(lambda:enum.enabled({'GT5P_PREPARE_ENUMERATE':'yes'}))
-    assert not enum.sample_share({})
+    assert enum.sample_share({}) and not enum.sample_share({'GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE':'0'})
+    rejected(lambda:enum.sample_share({'GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE':'yes'}))
     plan=metadata['plan']
     assert len(enum.fragment_jobs(plan,True)) < len(enum.fragment_jobs(plan))
     for mutate in (lambda p:p.update(version=True),lambda p:p['profiles'][0].__setitem__(4,2**64),

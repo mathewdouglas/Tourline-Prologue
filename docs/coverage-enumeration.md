@@ -275,13 +275,14 @@ jobs (GPU-fetch modes 0/1), 36,595 total. It retains 1x and 2x and never repeats
 the equivalent 4x shader. The 69 fragment identities with no projected candidate
 remain without a job; runtime demand is still necessary.
 
-`GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE=1` is an explicit integration option for a
-renderer whose **offline default** enables `RSX_FP_SAMPLE_SHARE`. It clears the
+Since Phase 213 the renderer's offline default enables `RSX_FP_SAMPLE_SHARE`,
+so `GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE` now defaults to `1`: the stage clears the
 sample nibble and deduplicates (identity, profile), reducing fragment jobs to
-22,282. The historical renderer rejects this option because it lacks the switch.
-This flag does not enable renderer source sharing itself. Keep it unset/0 with
-the current engine, or when renderer sample sharing is disabled. Changing the
-flag changes both the generation token and checkpoint contract.
+22,282. `=0` restores compiling both sample classes (34,355 jobs); use it only
+with an engine that lacks sharing. An engine without the `RSX_FP_SAMPLE_SHARE`
+switch rejects the collapsed mode. This flag does not enable renderer source
+sharing itself. Changing the flag changes both the generation token and
+checkpoint contract.
 
 Loading checks schema/version, exact fields, numeric widths, duplicate jobs,
 program/profile indices, program/container bounds, file SHA-256 pins, the ELF,
@@ -394,9 +395,9 @@ the renderer's offline default is `RSX_FP_SAMPLE_SHARE=1` (1x and multisampled
 sources identical), set `GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE=1`. The stage then
 clears the nibble and deduplicates, with no regeneration: 34,355 -> 22,282
 fragment jobs. The flag is refused (cache selection preserved) if the engine
-binary lacks the `RSX_FP_SAMPLE_SHARE` switch. When sample sharing becomes the
-renderer's default, make this flag default-on in `preparation_enumeration.sample_share()`
-in the same change, and re-key/re-pin the starter first (its source keys change).
+binary lacks the `RSX_FP_SAMPLE_SHARE` switch. Phase 213 made sample sharing the
+renderer's default, re-keyed the starter, and this flag is now default-on in
+`preparation_enumeration.sample_share()` (`=0` rolls back).
 
 Reproducible checks use `scripts/test/preparation_enumeration.py`,
 `scripts/test/player_package.py`, `scripts/test/preparation_shader_pack.py`,

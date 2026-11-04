@@ -25,9 +25,10 @@ def enabled(environ=None):
 
 
 def sample_share(environ=None):
-    # Explicit integration seam: only use after the renderer makes sample source
-    # sharing its offline default as well. The historical engine has no switch.
-    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE', '0')
+    # Default on since Phase 213: the renderer's default RSX_FP_SAMPLE_SHARE makes
+    # 1x and multisampled fragment sources identical, so one class is compiled.
+    # =0 compiles both classes (needed only for an engine without sharing).
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE', '1')
     if value not in ('0', '1'):
         raise ValueError('GT5P_PREPARE_ENUMERATE_SAMPLE_SHARE must be 0 or 1')
     return value == '1'
