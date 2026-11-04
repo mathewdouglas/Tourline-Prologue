@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 
+import shader_source_policy
 import shader_translation
 from preparation_workers import compiler_workers
 from shader_coverage import MAX_FP, fnv64
@@ -795,16 +796,6 @@ class _WinWorker:
         self.stdin_write = self.stdout_read = self.process = None
 
 
-def vfetch_loop(environ=None):
-    """Developer experiment, default off: GT5P_PREPARE_VFETCH_LOOP=1|2 asks a decoder built with
-    patches/ps3recomp-vertex-fetch-loop.patch for cheaper-to-compile GPU-fetch vertex HLSL. It changes the
-    shader source key, so the resulting cache serves only a game run with the same RSX_VFETCH_LOOP."""
-    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_VFETCH_LOOP', '0')
-    if value not in ('0', '1', '2'):
-        raise ValueError('GT5P_PREPARE_VFETCH_LOOP must be unset, 0, 1, or 2')
-    return value if value != '0' else ''
-
-
 def job_commit_limit(count):
     """1 GiB for up to four workers (unchanged); 256 MiB each beyond that. Per-process cap stays 512 MiB."""
     return max(LIMITS['worker_job_commit_bytes'], count * WORKER_JOB_SHARE)
@@ -1050,8 +1041,7 @@ def open_workers(count, decoder, work, translation='default'):
     environment = shader_translation.environment(translation)
     from preparation_profile import enabled
     if enabled():environment['GT5P_PREPARE_SHADER_PROFILE']='1'
-    loop = vfetch_loop()
-    if loop:environment['RSX_VFETCH_LOOP'] = loop
+    environment.update(shader_source_policy.overlay())
     pool = _WinPool(count)
     workers = []
     try:

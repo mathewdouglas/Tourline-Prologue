@@ -45,6 +45,9 @@ def preparation_token(metadata, engine_hash, decoder_hash, packs, plan=None, enu
         marker='shader-packs-v1:'+plan_hash
     if enumeration is not None:
         marker+='enumeration-v1:'+enumeration
+    import shader_source_policy
+    policy=shader_source_policy.marker()
+    if policy:marker+='source-policy:'+policy
     return hashlib.sha256((metadata+engine_hash+decoder_hash+marker).encode()).hexdigest()[:24]
 
 

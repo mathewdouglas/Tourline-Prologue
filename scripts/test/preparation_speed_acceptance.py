@@ -42,7 +42,8 @@ def build_engine(reference, fresh, backend=None):
     linker = r'C:\Program Files\LLVM\bin\lld-link.exe'
     args = [linker, '/nologo', '/machine:x64', '/INCREMENTAL:NO', '/subsystem:console']
     args += [str(objects/'src/gt5p_present.cpp.obj') if item == obj else str(reference/item) for item in inputs]
-    if backend is not None:args.append(str(backend))  # Resolve backend symbols before the read-only archive.
+    if backend is not None:  # Resolve these symbols before the read-only archive (one object, or several)
+        args += [str(item) for item in (backend if isinstance(backend,(list,tuple)) else [backend])]
     args += [str(reference/name) if '\\' in name else name for name in libraries]
     args += ['/out:'+str(runtime/'gt5p.exe'), '/pdb:'+str(fresh/'gt5p.pdb'), '/implib:'+str(fresh/'gt5p.lib')]
     subprocess.run(args, cwd=fresh, check=True)

@@ -349,21 +349,27 @@ for count in (0, 13):
     else:
         raise AssertionError('Vertex worker cap not enforced')
 
-# GT5P_PREPARE_VFETCH_LOOP (developer experiment): validated, default off, reaches the workers' environment only when set.
-assert batch.vfetch_loop({}) == '' and batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '0'}) == ''
-assert batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '1'}) == '1' and batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '2'}) == '2'
+# GT5P_PREPARE_VFETCH_LOOP (rollback switch, scripts/shader_source_policy.py): unset leaves the renderer default,
+# 0/1/2 reach the workers' environment explicitly, overriding any inherited RSX_VFETCH_LOOP.
+import shader_source_policy as policy
+assert policy.vfetch_loop({}) == '' and policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '0'}) == '0'
+assert policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '1'}) == '1' and policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '2'}) == '2'
 for bad in ('', '3', 'yes', '1 '):
-    assert_raises(lambda: batch.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': bad}))
+    assert_raises(lambda: policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': bad}))
 seen_env = []
 class FakePool:
     def __init__(self, count): self.count = count
     def spawn(self, slot, decoder, work, environment):
         seen_env.append(dict(environment)); return object()
-for value, expected in (('0', None), ('2', '2')):
+for value, expected in (('0', '0'), ('2', '2'), (None, None)):
     seen_env.clear()
-    with patch.dict(os.environ, {'GT5P_PREPARE_VFETCH_LOOP': value, 'RSX_VFETCH_LOOP': '1'}), patch.object(batch, '_WinPool', FakePool):
+    inherited = {'RSX_VFETCH_LOOP': '1', 'RSX_FP_REG_SIZE': '0'}
+    if value is not None: inherited['GT5P_PREPARE_VFETCH_LOOP'] = value
+    with patch.dict(os.environ, inherited), patch.object(batch, '_WinPool', FakePool):
+        if value is None: os.environ.pop('GT5P_PREPARE_VFETCH_LOOP', None)
         batch.open_workers(2, 'decoder.dll', Path('unused-not-created'))
     assert [env.get('RSX_VFETCH_LOOP') for env in seen_env] == [expected, expected]
+    assert all('RSX_FP_REG_SIZE' not in env for env in seen_env)
 
 # Delay complete replies independently of the scheduler. Both intervals must
 # return identical verified results, with unchanged two-worker ownership/caps.

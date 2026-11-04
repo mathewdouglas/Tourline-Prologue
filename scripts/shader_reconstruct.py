@@ -191,6 +191,8 @@ def offline_env(game_root, cache):
     dump = os.environ.get('GT5P_PREPARE_SHADER_SRC_DUMP')
     if dump:env['RSX_SHADER_SRC_DUMP'] = dump  # developer diagnostic (needs the source-dump engine overlay)
     if shader_profile:env['RSX_PREPARE_SHADER_PROFILE']='1'
+    import shader_source_policy
+    env.update(shader_source_policy.overlay())  # renderer text rollbacks; unset keeps the defaults
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'
     return env
