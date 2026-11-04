@@ -252,6 +252,40 @@ float4 rsx_i_unnorm(float4 c, uint unit, uint shape, uint unnorm) {
     return c;
 }
 
+// Depth-copy unit (RSX_FP depth read as a colour texture): the 24-bit depth arrives as bytes A = high, R = middle,
+// G = low (B is stencil), then goes through the unit's crossbar. Matches the specialized rsx_dz<u> wrapper.
+float rsx_i_pick(float4 v, uint i) {
+    return i == 0u ? v.x : i == 1u ? v.y : i == 2u ? v.z : i == 3u ? v.w : (i == 5u ? 1.0 : 0.0);
+}
+float4 rsx_i_dz(float4 s, uint ds) {
+    float d = floor(saturate(s.x) * 16777215.0 + 0.5);
+    float hi = floor(d / 65536.0);
+    float mid = floor((d - hi * 65536.0) / 256.0);
+    float lo = d - hi * 65536.0 - mid * 256.0;
+    float4 v = float4(mid, lo, 0.0, hi) / 255.0;
+    return float4(rsx_i_pick(v, ds & 7u), rsx_i_pick(v, (ds >> 3) & 7u),
+                  rsx_i_pick(v, (ds >> 6) & 7u), rsx_i_pick(v, (ds >> 9) & 7u));
+}
+
+// Unit whose mip levels are stacked in one render target (TXL only; matches the specialized rsx_mip<u>).
+float2 rsx_i_mipuv(uint unit, float2 uv, float l) {
+    float k = exp2(-l);
+    float2 e = float2(0.0008, 0.0014) * exp2(l);
+    uv = clamp(uv, e, 1.0 - e);
+    float2 sc = rsx_texscale[unit].xy;
+    float2 o = rsx_texscale[unit].zw;
+    return float2(uv.x * sc.x * k + o.x, o.y + sc.y * (2.0 - 2.0 * k) + uv.y * sc.y * k);
+}
+float4 rsx_i_mip(uint unit, uint samp, float2 uv, float lod, uint gamma) {
+    float l = clamp(lod, 0.0, 5.0);
+    float l0 = floor(l);
+    float l1 = min(l0 + 1.0, 5.0);
+    float4 a = rsx_i_s2d(unit, samp, rsx_i_mipuv(unit, uv, l0), 2u, 0.0);
+    float4 b = rsx_i_s2d(unit, samp, rsx_i_mipuv(unit, uv, l1), 2u, 0.0);
+    if (gamma != 0u) { a = rsx_i_s2l(a); b = rsx_i_s2l(b); }
+    return lerp(a, b, l - l0);
+}
+
 void rsx_i_atest(float a) {
     if (rsx_alphatest.x > 0.5) {
         float r = rsx_alphatest.y;
@@ -313,6 +347,8 @@ float4 main(RSXInterpIn input) : SV_TARGET {
     uint shadow = rsx_iprog.Load(hdr + 24u);
     uint samp0 = rsx_iprog.Load(hdr + 28u);
     uint samp1 = rsx_iprog.Load(hdr + 32u);
+    uint dzword = rsx_iprog.Load(hdr + 36u);   // bits 0-3 depth-copy units, 8-19 crossbar
+    uint mipmask = rsx_iprog.Load(hdr + 40u);   // bits 0-3 stacked-mip units
     uint half = flags & 1u;
     uint lg2abs = (flags & 256u) != 0u;
     float4 wpos = input.position;
@@ -536,10 +572,14 @@ float4 main(RSXInterpIn input) : SV_TARGET {
                 if (gd == 0u) {
                     coord = rsx_i_unnorm(coord, texu, shp, unnorm);
                     uint sm = texu < 8u ? (samp0 >> (texu * 4u)) & 15u : (samp1 >> ((texu - 8u) * 4u)) & 15u;
+                    uint dzu = (texu < 4u && shp == 0u) ? (dzword >> texu) & 1u : 0u;
+                    uint mpu = (texu < 4u && shp == 0u && kind == 2u) ? (mipmask >> texu) & 1u : 0u;
                     if (shp == 1u) v = rsx_i_scu(texu, sm, coord.xyz, kind, lod);
                     else if (shp == 2u) v = rsx_i_s3d(texu, sm, coord.xyz, kind, lod);
+                    else if (mpu != 0u) v = rsx_i_mip(texu, sm, a.xy, lod, (srgb >> texu) & 1u);
                     else v = rsx_i_s2d(texu, sm, coord.xy, kind, lod);
-                    if ((srgb & (1u << texu)) != 0u) v = rsx_i_s2l(v);
+                    if (dzu != 0u) v = rsx_i_dz(v, (dzword >> 8) & 0xFFFu);
+                    else if (mpu == 0u && (srgb & (1u << texu)) != 0u) v = rsx_i_s2l(v);
                     if (bx2 != 0u) v = v * 2.0 - 1.0;
                 }
             }
@@ -582,6 +622,7 @@ float4 main(RSXInterpIn input) : SV_TARGET {
     }
     if (killed != 0u) discard;
     float4 o0 = (steps >= RSX_FP_INTERP_STEPS && pc < instr_count) ? (float4)0 : rsx_i_export(half, 0u, r, h);
+    if ((flags & 2048u) != 0u) o0 = (float4)1;   // redirected stencil-mask pass: colour forced to 1 (FP_ONE)
     if ((flags & 16u) != 0u) rsx_i_atest(o0.a);
     if ((flags & 128u) != 0u && (flags & 1024u) == 0u) {
         uint2 dq = (uint2)input.position.xy;
