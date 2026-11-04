@@ -36,6 +36,10 @@ def main():
     ap.add_argument('--limit',type=int,default=0)
     ap.add_argument('--no-cancel',action='store_true')
     ap.add_argument('--source-comment-probe',action='store_true')
+    ap.add_argument('--env',action='append',default=[],metavar='NAME=VALUE',
+        help='Extra GT5P_*/RSX_* variable for the helper (for example a rollback switch)')
+    ap.add_argument('--expect-new-outputs',action='store_true',
+        help='The engine intentionally emits different shader text than the reference: do not require equal outputs')
     a=ap.parse_args()
     for name in ('helper_dir','runtime','elf','game','reference_template','output','previous_cache'):
         if getattr(a,name) is not None:setattr(a,name,getattr(a,name).resolve())
@@ -121,10 +125,12 @@ def main():
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
     env.update(PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',
         PATH=str(Path(os.environ['SystemRoot'])/'System32'))
+    for item in a.env:
+        name,_,value=item.partition('=');env[name]=value
     command=[str(install/'preparation/GT5P-Prepare.exe'),'--install',str(install),
              '--storage',str(storage),'--game',str(a.game)]
     if a.mode=='fresh':command.append('--no-reuse')
-    summary=dict(mode=a.mode,records=len(document['records']))
+    summary=dict(mode=a.mode,records=len(document['records']),env=a.env)
     if a.mode=='fresh' and not a.no_cancel:
         tick=time.perf_counter()
         with (out/'cancel.log').open('wb') as stream:
@@ -163,7 +169,12 @@ def main():
     assert report['counts']=={'prepared':len(document['records'])}
     expected=reference_outputs(old)
     actual={r['input_key']:{k:r[k] for k in OUTPUTS} for r in report['derived_records']}
-    assert actual==expected,'Format-3 outputs differ from format-2 reference'
+    if a.expect_new_outputs:
+        assert set(actual)==set(expected)
+        for field in OUTPUTS:
+            summary['outputs_differing_'+field]=sum(1 for k in actual if actual[k][field]!=expected[k][field])
+    else:
+        assert actual==expected,'Format-3 outputs differ from format-2 reference'
     assert set(parsed['default_keys'])==set(report['inventory']['valid_driver_blobs'])
     assert snapshot(target)==before
     if a.mode=='incremental':assert report['cache_reuse']['driver_blobs_copied']>0
