@@ -21,7 +21,7 @@ def template_files():
     from pipeline_asset_map import read as read_map
     folder=ROOT/'assets/pipeline-templates/gt5p-disc-v2'
     document=read(folder)
-    if document['compatibility']['renderer_sha256']!=renderer_contract():
+    if document['version'] == 2 and document['compatibility']['renderer_sha256']!=renderer_contract():
         raise ValueError('Template renderer contract differs from this release')
     wanted={(s,r[s]['sha256'],r[s]['size']) for r in document['records'] for s in ('vp','fp')}
     locations=read_map(folder/'player-map.json')

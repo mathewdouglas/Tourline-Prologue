@@ -13,10 +13,11 @@ import pipeline_collection as p
 import pipeline_contribution as c
 import pipeline_template as t
 from pipeline_runtime_coverage import RESULT_BOOLS
+from pipeline_template_inputs import identity
 
 source=t.read(Path(__file__).parents[2]/'assets/pipeline-templates/gt5p-disc-v2')
-first=copy.deepcopy(source['records'][0]);second=copy.deepcopy(first);second['key']='e'*16
-unknown=copy.deepcopy(first);unknown['key']='d'*16;unknown['vp']['sha256']='f'*64
+first=copy.deepcopy(source['records'][0]);second=copy.deepcopy(first);second['state']['ghi']^=1;second['key']=identity(second)
+unknown=copy.deepcopy(first);unknown['vp']['sha256']='f'*64;unknown['key']=identity(unknown)
 document=dict(source,records=[first,second,unknown]);value=c.encode(document)
 original_map=p.locations.read(Path(__file__).parents[2]/'assets/pipeline-templates/gt5p-disc-v2/player-map.json')
 wanted={(s,first[s]['sha256']) for s in ('vp','fp')}
@@ -50,11 +51,11 @@ with tempfile.TemporaryDirectory() as folder:
     def prepare(path,*args,**kwargs):
         rows=t.read(path)['records'];calls.append((rows,kwargs))
         result={name:False for name in RESULT_BOOLS}
-        result.update(expected=first['key'],actual=first['key'],created=True,hresult='00000000')
-        return dict(schema=1,template_sha256=t.template_digest(path),engine_sha256='a'*64,decoder_sha256='b'*64,
-            requested=2,counts={'prepared':1,'incompatible':1},preparation_seconds=1,
-            records=[dict(key=first['key'],status='prepared',result=result),dict(key=second['key'],status='incompatible',reason='unsupported')],
-            inventory=dict(valid_driver_blobs=[first['key']],rejected=[]))
+        result.update(expected='1'*16,actual='1'*16,created=True,hresult='00000000')
+        return dict(schema=1,template_format=3,template_sha256=t.template_digest(path),engine_sha256='a'*64,decoder_sha256='b'*64,
+            requested=2,counts={'prepared':1,'incompatible':1},preparation_seconds=1,runtime_lookup_counts=[1]*4,
+            records=[dict(key='1'*16,input_key=first['key'],status='prepared',result=result),dict(key=second['key'],input_key=second['key'],status='incompatible',reason='unsupported')],
+            inventory=dict(valid_driver_blobs=['1'*16],rejected=[]))
     empty=dict(schema=p.locations.SCHEMA,version=1,records=[])
     patches=[patch.object(p,'idle'),patch.object(p,'storage_lease',return_value=nullcontext()),
         patch.object(p,'configured_volume',return_value=root/'original-volume'),

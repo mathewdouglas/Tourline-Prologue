@@ -67,11 +67,14 @@ def link_engine(reference, fresh, backend):
     return runtime / 'gt5p.exe'
 
 
-def build(reference, fresh):
+def build(reference, fresh, comment_probe=False):
     if os.environ.get('VSCMD_ARG_TGT_ARCH', '').lower() != 'x64':
         raise ValueError('Use an x64 VS environment (vcvars64.bat)')
     source_root = fresh / 'runtime-source'
     source = patched_source(source_root)
+    if comment_probe:
+        with source.open('a',encoding='utf-8',newline='\n') as stream:
+            stream.write('\n/* Input-template compatibility: harmless private source edit. */\n')
     obj = r'ps3recomp\CMakeFiles\ps3recomp_runtime.dir\libs\video\rsx_d3d12_backend.c.obj'
     command = subprocess.check_output(['ninja', '-t', 'commands', obj], cwd=reference, text=True).splitlines()[-1]
     runtime_source = str(RUNTIME / NAME)
@@ -95,8 +98,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--reference-build', type=Path, required=True)
     ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--comment-probe', action='store_true')
     args = ap.parse_args()
-    engine = build(args.reference_build.resolve(), args.output.resolve())
+    engine = build(args.reference_build.resolve(), args.output.resolve(), args.comment_probe)
     print(f'engine {engine}')
 
 

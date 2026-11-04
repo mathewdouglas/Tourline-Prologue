@@ -285,13 +285,26 @@ def parse_report(document):
     blob_ids = {_hex16(item, 'driver blob id') for item in blobs}
     prepared, seen = [], set()
     observed = {}
+    input_seen = set()
+    inputs = document.get('template_format') == 3
     for row in records:
         if not isinstance(row, dict) or not isinstance(row.get('status'),str):
             raise Rejected('unsupported preparation record; coverage ratio withheld')
         status = row['status']
         observed[status] = observed.get(status, 0) + 1
+        if inputs:
+            input_key = row.get('input_key')
+            if not isinstance(input_key, str) or not HEX64.fullmatch(input_key) or input_key in input_seen:
+                raise Rejected('invalid or duplicate preparation input identity')
+            input_seen.add(input_key)
+            row = {k:v for k,v in row.items() if k != 'input_key'}
+            if status != 'prepared':
+                if row.get('key') != input_key or status not in ('unresolved-program','incompatible'):
+                    raise Rejected('invalid failed input preparation')
+                _failure_row(dict(row, key='1'*16))
+                continue
         key = _hex16(row.get('key'), 'preparation record key')
-        if key in seen:
+        if key in seen and not inputs:
             raise Rejected('duplicate preparation record key; coverage ratio withheld')
         seen.add(key)
         if status == 'prepared':
@@ -306,6 +319,8 @@ def parse_report(document):
             _failure_row(row)
     if observed != counts:
         raise Rejected('preparation counts do not match its rows; coverage ratio withheld')
+    if inputs and document.get('runtime_lookup_counts') != [len(set(prepared))] * 4:
+        raise Rejected('runtime lookup did not confirm every persisted input pipeline')
     translation = None
     translated = set()
     if 'additional_translation' in document:

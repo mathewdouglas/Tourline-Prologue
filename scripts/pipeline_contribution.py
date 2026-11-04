@@ -67,7 +67,8 @@ def read_json(path, max_bytes=None):
 
 def encode(document):
     _session_bound(document)
-    document=template.validate(copy.deepcopy(document))
+    from pipeline_template_inputs import convert
+    document=convert(document)
     if not document['records'] or len(document['records']) > SESSION_RECORDS:raise ValueError('No supported pipeline records to share')
     document['records'].sort(key=lambda r:r['key'])
     result=dict(schema=SCHEMA,version=VERSION,template_sha256=digest(document),template=document)
@@ -80,16 +81,23 @@ def _session_bound(document):
         raise ValueError('Contribution session record limit exceeded')
 
 
-def decode(value):
+def decode(value, *, quarantine=False):
     if (not isinstance(value,dict) or set(value)!={'schema','version','template_sha256','template'}
             or value['schema']!=SCHEMA or type(value['version']) is not int or value['version']!=VERSION
             or not isinstance(value['template_sha256'],str) or not re.fullmatch('[0-9a-f]{64}',value['template_sha256'])):
         raise ValueError('Unsupported contribution format/version')
     _session_bound(value['template'])
-    document=template.validate(copy.deepcopy(value['template']))
+    if not isinstance(value['template'],dict):
+        raise ValueError('Unsupported contribution template')
+    if quarantine and value['template'].get('version') == 3:
+        from pipeline_template_inputs import review_inputs
+        document=review_inputs(value['template'])
+    else:
+        document=template.validate(copy.deepcopy(value['template']))
     if not document['records'] or len(document['records']) > SESSION_RECORDS or digest(document)!=value['template_sha256']:
         raise ValueError('Contribution checksum or record count rejected')
-    return document
+    from pipeline_template_inputs import convert
+    return document if quarantine and document['version'] == 3 else convert(document)
 
 
 def write_json(path, value, max_bytes=None):
@@ -137,7 +145,7 @@ def review(baseline, submissions):
     if sum(len(canonical(value)) for value in submissions)>MAX_BYTES:
         raise ValueError('Combined contribution byte limit exceeded')
     from pipeline_template_coverage import analyze
-    sessions={f'submission-{i+1:02d}':decode(value) for i,value in enumerate(submissions)}
+    sessions={f'submission-{i+1:02d}':decode(value,quarantine=True) for i,value in enumerate(submissions)}
     report,candidates=analyze(copy.deepcopy(baseline),sessions,quarantine_conflicts=True)
     report['submission_sha256']={name:digest(document) for name,document in sessions.items()}
     report['policy']='Untrusted contribution candidates only. Locate programs and validate both shaders/native keys locally before accepting.'
@@ -149,10 +157,11 @@ def accept(baseline, candidates, candidate_path, proof):
     candidate_keys={r['key'] for r in candidates['records']}
     if not candidate_keys:raise ValueError('No candidates to accept')
     successful=parse_report(proof)
+    from preparation_template_inputs import successful_inputs
     if (proof.get('template_sha256')!=template.template_digest(candidate_path)
             or proof.get('requested')!=len(candidate_keys)
             or proof.get('counts')!={'prepared':len(candidate_keys)}
-            or set(successful['default_keys'])!=candidate_keys):
+            or set(successful_inputs(proof))!=candidate_keys):
         raise ValueError('Local preparation proof does not verify these exact candidates')
     return template.merge([copy.deepcopy(baseline),copy.deepcopy(candidates)])
 

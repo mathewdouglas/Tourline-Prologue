@@ -24,7 +24,7 @@ msaa = copy.deepcopy(record);msaa['state']['cube']=2<<16;msaa['key']='8'*16
 compat = dict(abi='windows-x64-recipe-v1',key_version=1,root_signature_keyed=True,
     renderer_sha256='a'*64,renderer_settings=SETTINGS.copy(),elf_sha256='b'*64,
     translation_policy='default-constbuf-v1')
-document=validate(dict(schema=SCHEMA,version=VERSION,compatibility=compat,records=[record,msaa]))
+document=validate(dict(schema=SCHEMA,version=2,compatibility=compat,records=[record,msaa]))
 changed=propose(record,record['vp_source'],vs,'9'*16,new_ps,123)
 assert changed['key']!=record['key'] and changed['native']['words'][8]==len(new_ps)
 

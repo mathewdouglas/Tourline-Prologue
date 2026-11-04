@@ -12,8 +12,15 @@ from pipeline_native_batch import run_batches
 
 baseline = t.read(Path(__file__).parents[2]/'assets/pipeline-templates/gt5p-disc-v2')
 record = baseline['records'][0]
-# Unique synthetic keys exercise catalogue transport, not native-key validity.
-document = dict(baseline, records=[dict(record, key=f'{i+1:016x}') for i in range(8193)])
+# Distinct numeric inputs exercise canonical catalogue identities, not native keys.
+from pipeline_template_inputs import identity
+records = []
+for i in range(8193):
+    row = copy.deepcopy(record)
+    row['state']['ghi'] = i
+    row['key'] = identity(row)
+    records.append(row)
+document = dict(baseline, records=records)
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     t.bundle(copy.deepcopy(document), root/'bundle')

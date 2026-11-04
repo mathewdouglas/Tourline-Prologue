@@ -164,6 +164,7 @@ with tempfile.TemporaryDirectory() as tmp:
     expect_error(cs.load_state, tmp, fragment='Unrecognised')
 
 # ---- link attribution and saturation -----------------------------------------------------------------
+assert cs.input_attribution(['n1','n2','missing'],{'n1':['a'*64],'n2':['b'*64,'c'*64]}) == (['a'*64],2)
 links = [(0.5, 'k0'), (1.0, 'k1'), (3.2, 'k2'), (3.3, 'k0'), (7.0, 'k3'), (9.9, 'k4')]
 owned = cs.attribute_links(links, [('boot', 0.9), ('a', 3.0), ('b', None), ('c', 7.0)])
 assert owned == {'boot': ['k1'], 'a': ['k2', 'k0'], 'b': [], 'c': ['k3', 'k4'], None: ['k0']}, owned

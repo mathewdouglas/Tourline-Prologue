@@ -9,6 +9,87 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 214 - Renderer-independent pipeline input templates (2026-11-04)
+
+Format 3 replaces shipped renderer-output expectations with canonical inputs.
+The starter remains **12,669 records / 3,446 original program identities**;
+all program identities/sizes, numeric translation/native state, GPU-fetch modes
+and ATTR layouts are preserved. Shader/source/native identifiers are removed,
+and compiled shader-length descriptor words are zero until preparation. Each
+64-character `key` is a domain-separated SHA-256 of the complete canonical
+input record. ELF, key/root-signature ABI, translation policy and default settings
+stay pinned. The renderer source fingerprint is no longer a template gate.
+There is no renderer/runtime behavior or patch change in this phase.
+
+The converter `scripts/pipeline_template_inputs.py` reads format 2, drops outputs,
+computes input identities and remaps observed phase membership. Format-2 envelopes
+keep their original checksum validation before conversion. Output-only differences
+collapse to one input; review quarantines claimed identity/content conflicts.
+The 99-shard starter/index and plan are migrated together. All four program/location
+maps remain byte-identical. Enumeration only re-pins its input-template digest;
+program/profile/job membership is unchanged. Current input bundle index SHA-256:
+`aa2e1ea6e686b9133386446e057bcb895de0414aa4d64de52df578cc02030fbc`.
+
+Preparation uses the existing bounded derive workers, actual installed engine/decoder
+and native request ABI. The host derives a proposed key from locally produced
+shaders and the pinned ABI; the engine independently computes its actual key,
+creates the pipeline and persists the result. Fresh native processes then repeat
+every unique request through the runtime's normal driver-blob lookup. Every request
+must use its persisted blob, and all final recipe/shader/driver inventory checks
+remain mandatory. Outputs exist only in local reports/checkpoints. Maintainer-only
+`--reference-report` / `--reference-template` optionally compare every local source,
+bytecode and native identifier with a private reference before publication.
+
+Warmup plan version 2 stores input identities. Successful local results supply
+native membership and shader-pack dependencies, including standalone pack generation.
+Observed membership remains **1,466 menu / 2,113 race / 3,546 distinct**; no new
+phase ownership is inferred. The plan byte ceiling grows to 1 MiB for SHA-256
+identities; its target ceiling remains 4,096. Player generations pin actual engine/
+decoder hashes and saved settings, independently of the shipped source fingerprint.
+Cancellation/failure preserves the previous selection and cache. Format-2 generations
+can supply bounded driver hints after outputs are derived; their shaders are compiled
+again because they lack input-keyed derivation manifests. Engine-matched format-3
+generations can also reuse checked shader derivations. No learned recipes, packs or
+membership are imported. Existing worker, memory, native chunk and ownership limits stay.
+
+**Full frozen proof.** A private engine recompiles only the current backend and
+links read-only reference objects; engine SHA-256 is
+`8673bc002af3aec7bc8481b643cb84a76d4599a518b9ecde2696ded3b029e0e6`.
+`scripts/release/build_preparer.py` builds the frozen helper. Direct original-volume
+preparation starts in fresh private storage with a clean PATH and no reuse. At
+native input, controlled cancellation exits 2 in 354.82 s, preserving the old
+selection/cache and retaining 4,231 shader files. Resume reuses all 627 vertex
+variants and 12,669 fragment jobs and completes in 563.32 s wall / 520.45 s internal.
+All **12,669** source/bytecode/native outputs exactly match the current format-2
+reference from `ab77487`. First native requests/created/driver calls/cached calls:
+**12,669 / 12,669 / 12,669 / 0**. Fresh-process runtime lookup:
+**12,669 / 12,669 / 12,669 / 12,669**. Inventory has 12,669 recipes, 12,669 valid
+driver blobs and zero rejected entries. Both packs publish (555 menu / 1,092 race
+source entries), and native phase indices have the unchanged observed membership.
+The separate frozen fresh 32-record smoke proof passes the same reference and
+runtime lookup checks. Shader enumeration is explicitly disabled in these native
+proofs to isolate starter preparation; its plan-load/pin/checkpoint tests run separately.
+These are application-cache-fresh/cancel-resume proofs with OS/driver caches preserved,
+not driver-cold timings, speed claims or live-draw/stutter measurements.
+
+**Compatibility and controls.** New exports use format 3; format 2 converts on load,
+including contributions in the wild and native-key plans with their original bundle.
+The directory remains `gt5p-disc-v2` for package-path compatibility. Old frozen helpers
+need updating. `GT5P_PREPARE_INPUT_TEMPLATE=0` requires a separate format-2 template
+and restores its source/output gates; it safely rejects format 3. Format 3 uses
+bounded fragment batches with existing `GT5P_PREPARE_FRAGMENT_CHUNK=1..4096`
+(default 256); legacy fragment rollback requires the format-2 path. Published
+v0.2.3, main, tags, releases, normal draw/async policy and runtime patches stay unchanged.
+
+See [format design, migration and limits](template-input-format.md),
+[contribution contract](pipeline-contributions.md#file-contract) and
+[preparation workflow](shader-precompile.md). Focused template/contribution/coverage,
+plan/pack/reuse/enumeration/package/collection/re-key/runtime-coverage regressions
+pass sequentially under `C:\tmp\gt5p-testlock\run_locked.py`. Native evidence is
+`scratch/if3/{smoke32,full}/validation.json`; remaining acceptance and cleanup are
+recorded below before this phase is finalized. No whole-game/settings, GT5,
+other-GPU or stutter claim follows. Push only the feature branch with `[skip ci]`.
+
 ## Phase 213 - Fragment sample sharing by default, with a re-keyed starter (2026-11-04)
 
 `RSX_FP_SAMPLE_SHARE` (Phase 212's coverage experiment, previously opt-in `=1`)

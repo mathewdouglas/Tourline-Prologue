@@ -23,7 +23,7 @@ from pipeline_catalogue_limits import MAX_RECORDS, MAX_FILE, MAX_PARTS, MAX_INDE
 from pipeline_native_batch import run_batches
 
 SCHEMA = 'gt5p-pipeline-template'
-VERSION = 2
+VERSION = 3
 SETTINGS = {'RSX_ANISO': '16', 'RSX_PSO_KEY_RS': '1', 'FP_CONSTBUF': '1'}
 STATE = {'blend', 'nrt', 'rtfmt', 'exp32', 'cmask', 'cull', 'stencil',
          'unnorm', 'cube', 'vmask', 'samplers', 'ghi', 'shd', 'unhi'}
@@ -43,12 +43,12 @@ def renderer_contract():
 
 
 def compatibility(engine, decoder, elf):
-    # Pin the distributable renderer source contract, not per-install executable
-    # or DLL timestamps. Exact source/bytecode/native hashes still gate reuse.
+    # Portable input ABI/settings/game identity. The actual engine and decoder
+    # bytes pin local generations; renderer source is not a template gate.
     if not engine.is_file() or not decoder.is_file():
         raise ValueError('Engine/decoder missing')
     return dict(abi='windows-x64-recipe-v1', key_version=1, root_signature_keyed=True,
-                renderer_sha256=renderer_contract(), renderer_settings=SETTINGS.copy(),
+                renderer_settings=SETTINGS.copy(),
                 elf_sha256=sha(bounded_read(elf,64*1024**2)), translation_policy='default-constbuf-v1')
 
 
@@ -73,11 +73,11 @@ def native_state(data):
 
 
 def _validate(document):
-    if set(document) != {'schema', 'version', 'compatibility', 'records'} or document['schema'] != SCHEMA or document['version'] != VERSION:
+    if set(document) != {'schema', 'version', 'compatibility', 'records'} or document['schema'] != SCHEMA or type(document['version']) is not int or document['version'] != 2:
         raise ValueError('Incompatible template schema/version')
     c = document['compatibility']
     if (set(c) != {'abi', 'key_version', 'root_signature_keyed', 'renderer_sha256', 'renderer_settings', 'elf_sha256', 'translation_policy'} or
-            c['abi'] != 'windows-x64-recipe-v1' or c['key_version'] != 1 or c['root_signature_keyed'] is not True or
+            c['abi'] != 'windows-x64-recipe-v1' or type(c['key_version']) is not int or c['key_version'] != 1 or c['root_signature_keyed'] is not True or
             c['translation_policy'] != 'default-constbuf-v1' or c['renderer_settings'] != SETTINGS or
             any(not isinstance(c[k], str) or not SHA.fullmatch(c[k]) for k in ('renderer_sha256', 'elf_sha256'))):
         raise ValueError('Incompatible template key/translator ABI')
@@ -118,16 +118,26 @@ def _validate(document):
     return document
 
 
-def validate(document):
+def validate_legacy(document):
     try:
         return _validate(document)
     except (TypeError, KeyError, struct.error, OverflowError) as exc:
         raise ValueError('Malformed template record') from exc
 
 
+def validate(document):
+    if isinstance(document, dict) and document.get('version') == 3:
+        from pipeline_template_inputs import validate as validate_inputs
+        return validate_inputs(document)
+    return validate_legacy(document)
+
+
 def merge(documents):
     if not documents:
         raise ValueError('No templates supplied')
+    if any(isinstance(d,dict) and d.get('version') == 3 for d in documents) and any(not isinstance(d,dict) or d.get('version') != 3 for d in documents):
+        from pipeline_template_inputs import convert
+        documents = [convert(d) for d in documents]
     first = validate(documents[0])
     records = {}
     for document in documents:
@@ -141,14 +151,29 @@ def merge(documents):
             records[key] = record
             if len(records) > MAX_RECORDS:
                 raise ValueError('Merged template record limit exceeded')
-    return validate(dict(first, records=list(records.values())))
+    # Every record and contract was checked above; union changes only membership.
+    return dict(first, records=list(records.values()))
 
 
-def read(path):
+def decode_json(payload):
+    def object_pairs(pairs):
+        out = {}
+        for key,value in pairs:
+            if key in out:raise ValueError('Duplicate template JSON field')
+            out[key] = value
+        return out
+    try:
+        return json.loads(payload,object_pairs_hook=object_pairs,
+            parse_constant=lambda _:(_ for _ in ()).throw(ValueError('Nonfinite template JSON value')))
+    except (RecursionError,UnicodeError) as exc:
+        raise ValueError('Malformed template JSON') from exc
+
+
+def read(path, *, legacy=False):
     if path.is_dir():
-        index = json.loads(bounded_read(path / 'index.json', MAX_INDEX))
-        if (set(index) != {'schema','version','parts'} or index['schema'] != SCHEMA + '-bundle' or
-                index['version'] != VERSION or not isinstance(index['parts'],list) or not 1 <= len(index['parts']) <= MAX_PARTS):
+        index = decode_json(bounded_read(path / 'index.json', MAX_INDEX))
+        if (not isinstance(index,dict) or set(index) != {'schema','version','parts'} or index['schema'] != SCHEMA + '-bundle' or
+                type(index['version']) is not int or index['version'] not in (2, 3) or not isinstance(index['parts'],list) or not 1 <= len(index['parts']) <= MAX_PARTS):
             raise ValueError('Incompatible template bundle')
         documents, seen, total = [], set(), 0
         for part in index['parts']:
@@ -159,9 +184,17 @@ def read(path):
             total += len(payload)
             if total > MAX_FILE or sha(payload) != part['sha256']:
                 raise ValueError('Template bundle size/checksum mismatch')
-            documents.append(validate(json.loads(payload)))
-        return merge(documents)
-    return validate(json.loads(bounded_read(path, MAX_FILE)))
+            part_document = decode_json(payload)
+            if not isinstance(part_document,dict) or part_document.get('version') != index['version']:
+                raise ValueError('Mixed template bundle versions')
+            documents.append(part_document)
+        document = merge(documents)
+    else:
+        document = validate(decode_json(bounded_read(path, MAX_FILE)))
+    if legacy or document['version'] == 3:
+        return document
+    from pipeline_template_inputs import convert
+    return convert(document)
 
 
 def template_digest(path):
@@ -190,7 +223,7 @@ def bundle(document, output):
     output.mkdir(parents=True)
     for name,data in payloads:
         (output/name).write_bytes(data)
-    index=dict(schema=SCHEMA+'-bundle',version=VERSION,parts=parts)
+    index=dict(schema=SCHEMA+'-bundle',version=document['version'],parts=parts)
     (output/'index.json').write_bytes((json.dumps(index,indent=2)+'\n').encode())
 
 
@@ -217,8 +250,9 @@ def has_flow(code):
     raise ValueError('Vertex program lacks bounded END')
 
 
-def export(trace, cache, compat):
+def export(trace, cache, compat, *, input_map=None):
     records, rejected, codes, conflicts = {}, Counter(), set(), set()
+    joins = {}
     for path in sorted(trace.glob('links_*.jsonl')):
         with path.open() as stream:
             for line in stream:
@@ -244,6 +278,12 @@ def export(trace, cache, compat):
                              fp=dict(sha256=f['identity'], size=f['size']), vs=c['vs'], ps=c['ps'],
                              vp_source=c['vp_cache'], fp_source=c['fp_cache'], vp_gpu=c['vp_gpu'],
                              state=c['state'], native=native_state(data))
+                    from pipeline_template_inputs import convert
+                    # Structural adapter only; source fingerprints are not an
+                    # input-format gate, including during new collection export.
+                    legacy_compat = dict(compat,renderer_sha256='0'*64)
+                    r = convert(dict(schema=SCHEMA,version=2,compatibility=legacy_compat,records=[r]))['records'][0]
+                    key = r['key']
                     if key in conflicts:
                         raise ValueError('Conflicting provenance for pipeline key')
                     if key in records and records[key] != r:
@@ -251,13 +291,18 @@ def export(trace, cache, compat):
                         conflicts.add(key)
                         raise ValueError('Conflicting provenance for pipeline key')
                     records[key] = r
+                    joins.setdefault(c['pipeline'],set()).add(key)
                     if len(records) > SESSION_RECORDS:
                         raise ValueError('Template record limit exceeded')
                 except (ValueError, OSError, KeyError) as exc:
                     rejected[str(exc).split(':')[0]] += 1
     if len(records) > SESSION_RECORDS:
         raise ValueError('Template exceeds record cap')
-    return validate(dict(schema=SCHEMA, version=VERSION, compatibility=compat, records=list(records.values()))), dict(rejected)
+    from pipeline_template_inputs import input_contract
+    if input_map is not None:
+        input_map.update({native:sorted(values & records.keys()) for native,values in joins.items()
+                          if values & records.keys()})
+    return validate(dict(schema=SCHEMA, version=3, compatibility=input_contract(compat), records=list(records.values()))), dict(rejected)
 
 
 def locate(records, catalog, elf, asset_map=None, assets=None, volume=None, volume_map=None, progress=None):
@@ -355,7 +400,7 @@ def packs_enabled(choice, warmup_plan):
     return choice
 
 
-def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False, enumeration=None, enumeration_sample_share=False):
+def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_fallback=False, asset_map=None, assets=None, fragment_mode='batch', resume=False, output_validator=isolated, progress=None, reuse_cache=None, volume=None, volume_map=None, vertex_mode='batch', translation='default', warmup_plan=None, shader_packs=False, enumeration=None, enumeration_sample_share=False, reference_template=None, reference_report=None):
     from shader_reconstruct import offline_warmup, native_profile
     from shader_vertex_batch import poll_seconds
     offline_warmup()
@@ -381,9 +426,20 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     if output.exists() and not resume:
         raise ValueError('Use a fresh ignored output or --resume; existing caches are preserved')
     try:
-        document = read(template)
-        if document['compatibility'] != compatibility(engine, decoder, elf):
+        import os
+        inputs = os.environ.get('GT5P_PREPARE_INPUT_TEMPLATE', '1')
+        if inputs not in ('0', '1'):
+            raise ValueError('GT5P_PREPARE_INPUT_TEMPLATE must be 0 or 1')
+        document = read(template, legacy=inputs == '0')
+        if document['version'] == 3 and fragment_mode != 'batch':
+            raise ValueError('Format 3 uses bounded renderer batches; legacy fragment rollback requires a format-2 template and GT5P_PREPARE_INPUT_TEMPLATE=0')
+        if inputs == '0' and document['version'] != 2:
+            raise ValueError('Format 3 disabled; use a format-2 reference template for rollback')
+        from pipeline_template_inputs import input_contract
+        if input_contract(document['compatibility']) != compatibility(engine, decoder, elf):
             raise ValueError('Template renderer/game/settings mismatch')
+        if document['version'] == 2 and document['compatibility']['renderer_sha256'] != renderer_contract():
+            raise ValueError('Legacy template renderer source mismatch')
     except (ValueError,OSError,TypeError,KeyError) as exc:
         if not demand_fallback or resume:
             raise
@@ -403,6 +459,10 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     contract=dict(template=sha(json.dumps(document,sort_keys=True,separators=(',',':')).encode()),
                   engine=sha(engine.read_bytes()),decoder=sha(decoder.read_bytes()),
                   asset_map=map_id)
+    if reference_template is not None and reference_report is not None:
+        raise ValueError('Choose one maintainer reference')
+    if reference_template is not None or reference_report is not None:
+        contract['strict_reference'] = template_digest(reference_template or reference_report)
     if enumeration is not None:
         if type(enumeration_sample_share) is not bool:
             raise ValueError('Enumeration sample sharing must be explicit')
@@ -411,8 +471,8 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
     if warmup_plan is not None:
         if translation != 'default':
             raise ValueError('Observed phase plans currently support default translation only')
-        from pipeline_warmup_plan import read as read_plan
-        phase_plan = read_plan(warmup_plan)
+        from pipeline_warmup_plan import read as read_plan, load as load_plan
+        phase_plan = load_plan(warmup_plan,template) if document['version'] == 3 else read_plan(warmup_plan)
         keys = set(phase_plan['phases']['menu']) | set(phase_plan['phases']['race'])
         if phase_plan['template_sha256'] != template_digest(template) or not keys <= {r['key'] for r in document['records']}:
             raise ValueError('Warmup plan does not match this template')
@@ -435,7 +495,7 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
         checkpoint.stage('checking-cache')
         reused={}
         seed_report=None
-        if reuse_cache is not None:
+        if reuse_cache is not None and document['version'] == 2:
             checkpoint.stage('reusing-cache')
             cache=output/'shadercache';cache.mkdir(exist_ok=True)
             if use_handoff:
@@ -449,17 +509,23 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
             seed_report['shader_handoff']=use_handoff
         else:
             checked=time.perf_counter()
-            if resume:reused=cached_shaders(document,output/'shadercache')
+            if resume and document['version'] == 2:reused=cached_shaders(document,output/'shadercache')
         cache_seconds=time.perf_counter()-checked
-        report=prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
-                                asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report,hash_before,volume,volume_map,vertex_mode)
+        if document['version'] == 3:
+            from preparation_template_inputs import prepare as prepare_inputs
+            report, resolved = prepare_inputs(document,template,catalog,elf,engine,decoder,game_root,output,
+                asset_map,assets,checkpoint,started,volume,volume_map,vertex_mode,reuse_cache,reference_template,reference_report)
+        else:
+            resolved = document
+            report=prepare_document(document,template,catalog,elf,engine,decoder,game_root,output,
+                                    asset_map,assets,fragment_mode,checkpoint,reused,started,cache_seconds,seed_report,hash_before,volume,volume_map,vertex_mode)
         if translation != 'default':
             if report['counts'] != {'prepared':len(document['records'])}:
                 raise ValueError('Default preparation must succeed before additional translation')
             reused.clear()
             from pipeline_translation import prepare as prepare_translation
             vertices,fragments,_=locate(document['records'],catalog,elf,asset_map,assets,volume,volume_map,progress)
-            report['additional_translation']=prepare_translation(document,decoder,engine,game_root,output,
+            report['additional_translation']=prepare_translation(resolved,decoder,engine,game_root,output,
                 contract,vertices,fragments,translation,run_offline,progress,vertex_mode)
             report['default_preparation_seconds']=report['preparation_seconds']
             report['preparation_seconds']=time.perf_counter()-started
@@ -472,7 +538,7 @@ def prepare(template, catalog, elf, engine, decoder, game_root, output, demand_f
             checkpoint.stage('phase-warmup')
             if shader_packs:
                 from preparation_shader_pack import stage as stage_packs
-                report['shader_packs'] = stage_packs(phase_plan,document,report,output/'shadercache',
+                report['shader_packs'] = stage_packs(phase_plan,resolved,report,output/'shadercache',
                     resume=resume,progress=checkpoint.progress)
             report['warmup_plan'] = dict(stage(phase_plan,report,output/'shadercache/warmup-v1',resume=resume),
                 sha256=contract['warmup_plan'])
@@ -752,6 +818,8 @@ def main():
                    help='Add one explicit translation to the default prepared set')
     p.add_argument('--resume',action='store_true',help='Resume a matching checkpoint and revalidate native pipelines')
     p.add_argument('--reuse-cache',type=Path,help='Read verified shader/driver hints from an earlier cache without changing it')
+    p.add_argument('--reference-template',type=Path,help='Maintainer-only strict format-2 reference output comparison')
+    p.add_argument('--reference-report',type=Path,help='Maintainer-only strict local format-3 reference-run output comparison')
     p.add_argument('--warmup-plan',type=Path,help='Explicit observed menu/race membership; default translation only, existing worker consumes it')
     p.add_argument('--shader-packs',action=argparse.BooleanOptionalAction,default=None,
                    help='Build verified local menu/race bytecode packs for --warmup-plan. On when a plan is set; --no-shader-packs rolls back. Default translation only')
@@ -772,7 +840,7 @@ def main():
         return
     if args.command == 'prepare':
         result = prepare(*(getattr(args, k).resolve() if getattr(args,k) is not None else None for k in ('template', 'catalog', 'elf', 'engine', 'decoder', 'game_root', 'output')),
-                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode,translation=args.translation,warmup_plan=args.warmup_plan,shader_packs=packs_enabled(args.shader_packs,args.warmup_plan))
+                         demand_fallback=args.demand_fallback,asset_map=args.asset_map,assets=args.assets,fragment_mode=args.fragment_mode,resume=args.resume,reuse_cache=args.reuse_cache,volume=args.volume,volume_map=args.volume_map,vertex_mode=args.vertex_mode,translation=args.translation,warmup_plan=args.warmup_plan,shader_packs=packs_enabled(args.shader_packs,args.warmup_plan),reference_template=args.reference_template,reference_report=args.reference_report)
         print(json.dumps(dict(counts=result['counts'], lookup=result['lookup'], seconds=result['preparation_seconds'])))
         return
     if args.output.exists():

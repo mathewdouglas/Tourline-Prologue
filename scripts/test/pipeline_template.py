@@ -21,7 +21,7 @@ r['state']['samplers'] = '0'*16
 c = dict(abi='windows-x64-recipe-v1', key_version=1, root_signature_keyed=True,
          renderer_sha256='a'*64, renderer_settings=SETTINGS.copy(), elf_sha256='c'*64,
          translation_policy='default-constbuf-v1')
-d = dict(schema=SCHEMA, version=VERSION, compatibility=c, records=[r])
+d = dict(schema=SCHEMA, version=2, compatibility=c, records=[r])
 assert validate(copy.deepcopy(d)) == d
 assert native_state(envelope(r,b'DXBC',b'DXBC')) == r['native']
 x=copy.deepcopy(d);x['records'].append(copy.deepcopy(r));assert len(validate(x)['records'])==1
@@ -71,7 +71,9 @@ print('Multi-session merge deduplicates before enforcing the union cap')
 with tempfile.TemporaryDirectory() as temporary:
     path=Path(temporary)/'bundle'
     bundle(copy.deepcopy(d),path)
-    assert read(path)==d
+    from pipeline_template_inputs import convert
+    assert read(path)==convert(d)
+    assert read(path, legacy=True)==d
     part=path/'part-0000.json'
     part.write_bytes(part.read_bytes()+b' ')
     try:
@@ -98,9 +100,9 @@ print('Incompatible-header fallback writes no recipes and starts no compiler')
 starter=ROOT/'assets/pipeline-templates/gt5p-disc-v2'
 if starter.exists():
     metadata=read(starter)
-    assert metadata['compatibility']['renderer_sha256']==renderer_contract()
+    assert metadata['version']==3 and 'renderer_sha256' not in metadata['compatibility']
     assert len(metadata['records'])<=MAX_RECORDS
-    print('Bundled starter metadata matches the current renderer contract')
+    print('Bundled starter pins inputs and ABI independently of renderer source')
     if (starter/'asset-map.json').exists():
         from pipeline_asset_map import read as read_map
         locations=read_map(starter/'asset-map.json')

@@ -394,7 +394,7 @@ def template_rows(records, fragments, materials):
         if identity not in fragments:
             continue
         used = fragments[identity][0]['textures']
-        rows.append((identity, profile_of(r['state'], used), r['fp_source'], r['key']))
+        rows.append((identity, profile_of(r['state'], used), r.get('fp_source'), r.get('input_key',r['key'])))
     return rows
 
 
@@ -414,11 +414,13 @@ def evaluate(train_rows, test_rows, infos, key_of=None, msaa=None, context_cap=N
     observed = defaultdict(lambda: (set(), set()))
     for identity, profile, key, _ in test_rows:
         observed[identity][0].add(profile)
-        observed[identity][1].add(key)
+        if key is not None:
+            observed[identity][1].add(key)
     result = Counter()
     misses = Counter()
     wasted = 0
     unresolved = 0
+    result['missing_reference_keys'] = sum(row[2] is None for row in test_rows)
     for identity, (profiles, keys) in observed.items():
         generated = candidates(infos[identity], cs, fallback_locals, msaa, context_cap, local_cap)
         new = identity not in train_programs
@@ -446,10 +448,10 @@ def evaluate(train_rows, test_rows, infos, key_of=None, msaa=None, context_cap=N
             result['key_hits_new'] += len(keys & produced) * new
             result['distinct_candidate_keys'] += len(produced)
             wasted += len(produced - keys)
-            result['programs_fully_covered'] += keys <= produced
+            result['programs_fully_covered'] += bool(keys) and keys <= produced
     out = dict(result)
     out['unresolved_candidates'] = unresolved
-    out['wasted_keys'] = wasted
+    out['wasted_keys'] = wasted if not result['missing_reference_keys'] else None
     out['misses'] = dict(misses)
     return out
 
@@ -654,6 +656,13 @@ def vertex_recall(records, memo):
     among the enumerated ones; a program shorter than its wrapper (prefix upload) is still found by key.
     """
     produced = {source for source, _ in memo.values()}
+    if any('vp_source' not in r for r in records):
+        variants = {(r['vp']['sha256'],r['vp_gpu']) for r in records}
+        return dict(observed_variants=len(variants),covered_same_program=len(variants & set(memo)),
+            covered_by_key=None,bytecode_matches=None,
+            by_gpu={str(g):[sum(k in memo for k in variants if k[1]==g),sum(k[1]==g for k in variants)] for g in (0,1)},
+            enumerated_variants=len(memo),enumerated_distinct_sources=len(produced),
+            limitation='Input-identity coverage only; use a local preparation reference report for output-key recall.')
     seen = {}
     for r in records:
         seen[(r['vp']['sha256'], r['vp_gpu'])] = (r['vp_source'], r['vs'])
@@ -757,6 +766,11 @@ def cmd_recall(a):
     out, index = _paths(a)
     fragments, materials = _load_inventories(a)
     records = _template(a)
+    if getattr(a,'reference_report',None):
+        from preparation_template_inputs import resolved_document
+        from pipeline_template import read
+        records = resolved_document(read(Path(a.template)),
+            json.loads(bounded_read(Path(a.reference_report),128*1024**2)))['records']
     msaa = _parse_msaa(a.msaa)
     rows = template_rows(records, fragments, materials)
     infos = _make_infos(fragments, materials, {identity for identity, *_ in rows})
@@ -815,6 +829,7 @@ def main(argv=None):
     p = sub.add_parser('recall'); common(p); model(p)
     p.add_argument('--seed', type=int, default=0x47543550)
     p.add_argument('--keys', action='store_true', help='Also score exact ps keys from finished compile chunks')
+    p.add_argument('--reference-report',help='Local format-3 preparation report for output-key regression recall; never shipped expectations')
     p.add_argument('--vertex', action='store_true', help='Also score observed vertex variants against finished vertex chunks')
     p.add_argument('--provenance', help='JSON: record key -> label (content splits)')
     p.add_argument('--content-splits', default='[]', help='JSON [[name,[train labels],[test labels]],...]')

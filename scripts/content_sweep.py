@@ -1254,6 +1254,8 @@ def merge_quarantining(documents):
     """Union of same-contract templates; a key with two different records is dropped and reported."""
     records, conflicts = {}, set()
     for document in documents:
+        if document['compatibility'] != documents[0]['compatibility']:
+            raise ValueError('Cannot merge sweep input contracts')
         for record in document['records']:
             key = record['key']
             if key in conflicts:
@@ -1264,6 +1266,12 @@ def merge_quarantining(documents):
             else:
                 records[key] = record
     return dict(documents[0], records=list(records.values())), sorted(conflicts)
+
+
+def input_attribution(keys, input_map):
+    """A native output alone cannot disambiguate multiple numeric inputs."""
+    return ([input_map[key][0] for key in keys if len(input_map.get(key,())) == 1],
+            sum(len(input_map.get(key,())) != 1 for key in keys))
 
 
 def cmd_report(args):
@@ -1297,6 +1305,12 @@ def cmd_report(args):
             document, rejected = pt.export(attempt / 'provenance', cache, compat)
             save_report(template_path, document)
             (attempt / 'export-rejected.json').write_text(json.dumps(rejected))
+        # Unit logs carry native output keys. Bridge only unambiguous local
+        # provenance joins; portable catalogue comparisons use input identities.
+        input_map = {}
+        pt.export(attempt / 'provenance',cache,compat,input_map=input_map)
+        for unit in result['units']:
+            unit['input_identities'],unit['unresolved_input_joins'] = input_attribution(unit['keys'],input_map)
         keys = {r['key'] for r in document['records']}
         exportable_all |= keys
         per_chunk.append(dict(chunk=cid, status=entry['status'], attempts=entry['attempts'], links=result['links_total'],
@@ -1306,14 +1320,15 @@ def cmd_report(args):
         for unit in result['units']:
             if unit['kind'] == 'boot':
                 if first_boot:
-                    sequence.append(('menu-boot', unit['keys'], unit))
+                    sequence.append(('menu-boot', unit['input_identities'], unit))
                     first_boot = False
                 continue
-            sequence.append((f"{cid}:{unit['id']}", unit['keys'], unit))
+            sequence.append((f"{cid}:{unit['id']}", unit['input_identities'], unit))
     rows = saturation([(label, keys) for label, keys, _ in sequence], starter, exportable_all)
     for row, (_, _, unit) in zip(rows, sequence):
         row.update(kind=unit['kind'], verified=unit['ok'], last_link_s=unit['last_link_s'],
-                   late_links=unit.get('late_links'))
+                   late_links=unit.get('late_links'),unresolved_input_joins=unit['unresolved_input_joins'],
+                   observed_native_links=len(set(unit['keys'])))
     grouped, conflicts = {}, {}
     for label, documents in sessions.items():
         grouped[label], conflicts[label] = merge_quarantining(documents)

@@ -1,5 +1,42 @@
 # Offline game shader preparation
 
+### Input templates (format 3, development)
+
+The 12,669-record starter now describes renderer inputs. Records contain program
+SHA-256 identities/sizes, GPU-fetch selection, complete numeric translation/native
+state and ATTR input layout. Their 64-character `key` is a canonical input identity.
+Shader/source hashes, native keys, shader bytecode lengths and the renderer source
+fingerprint are absent from the shipped expectations. ELF, key/root-signature ABI,
+translation policy and default settings remain pinned.
+
+Preparation derives outputs with the installed engine/decoder, creates each native
+pipeline, checks persistence, then starts fresh native processes that must find every
+pipeline through the runtime's own driver-cache lookup. Menu/race membership is stored
+as input identities and resolved from successful local results; shader packs use those
+results' source/code identifiers. Local reports/checkpoints retain output metadata.
+Actual engine/decoder hashes and saved settings still select separate generations.
+No renderer source edit requires reissuing the starter.
+
+Format-2 templates and contributions convert on load after their original integrity
+checks. Older prepared caches remain intact. A format-2 cache can supply bounded
+verified driver hints after the current outputs are derived; its shaders are compiled
+again because it lacks an input-keyed derivation manifest. Engine-matched format-3
+generations can also reuse checked shader derivations. Different engines rederive
+shaders. No recipes, learned membership or packs are imported from an older cache.
+
+`GT5P_PREPARE_INPUT_TEMPLATE=0` requires an explicitly supplied format-2 template and
+restores its strict source/output gate; it rejects a format-3 starter safely. Format 3
+uses bounded fragment batches and existing `GT5P_PREPARE_FRAGMENT_CHUNK=1..4096`
+(default 256) checkpoints. `--fragment-mode legacy` requires the format-2 rollback.
+Preparation remains optional. Native process/worker/memory limits, cache formats,
+normal drawing and runtime patches are unchanged.
+
+Maintainers can compare a private reference run using `--reference-report`, or an old
+format-2 reference using `--reference-template`. Neither becomes a shipped expectation.
+See [format and evidence](template-input-format.md) and the
+[contribution contract](pipeline-contributions.md#file-contract).
+
+
 For measured asset/raw-program coverage, recipe dependency checks and the
 remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 

@@ -15,7 +15,7 @@ from pipeline_runtime_coverage import parse_report, MAX_REPORT, require_output
 
 SCHEMA = 'gt5p-pipeline-warmup-plan'
 VERSION = 1
-MAX_PLAN = 256 * 1024
+MAX_PLAN = 1024 * 1024  # SHA-256 input identities, still at most 4,096 targets.
 MAX_INDEX = 1024 * 1024
 MAX_LINES = 32768
 MAX_KEYS = 4096
@@ -62,8 +62,8 @@ def index(data):
 def validate(plan):
     fields = {'schema', 'version', 'template_sha256', 'context', 'scope', 'phases', 'evidence'}
     if (not isinstance(plan, dict) or set(plan) != fields or plan['schema'] != SCHEMA
-            or type(plan['version']) is not int or plan['version'] != VERSION
-            or plan['context'] != CONTEXT or plan['scope'] != SCOPE
+            or type(plan['version']) is not int or plan['version'] not in (1, 2)
+            or plan['context'] != (CONTEXT if plan['version'] == 1 else 'default-template-inputs-v3') or plan['scope'] != SCOPE
             or not isinstance(plan['template_sha256'], str) or not SHA.fullmatch(plan['template_sha256'])):
         raise ValueError('Incompatible warmup plan')
     phases = plan['phases']
@@ -72,7 +72,7 @@ def validate(plan):
     total = set()
     for keys in phases.values():
         if (not isinstance(keys, list) or len(keys) > MAX_KEYS
-                or any(not isinstance(k, str) or not HEX.fullmatch(k) or int(k, 16) == 0 for k in keys)):
+                or any(not isinstance(k, str) or not (HEX if plan['version'] == 1 else SHA).fullmatch(k) or int(k, 16) == 0 for k in keys)):
             raise ValueError('Malformed or oversized phase keys')
         if len(set(keys)) != len(keys):
             raise ValueError('Duplicate phase key')
@@ -93,6 +93,22 @@ def validate(plan):
 
 def read(path):
     return validate(json.loads(bounded(path, MAX_PLAN).decode('utf-8')))
+
+
+def load(path, template):
+    """Convert a format-2 bundle's historical key membership on load."""
+    plan = read(path)
+    if plan['version'] == 2:
+        return plan
+    from pipeline_template import read as read_template, template_digest
+    from pipeline_template_inputs import convert
+    from pipeline_template_rekey import remap_plan
+    old = read_template(template,legacy=True)
+    if old['version'] != 2:
+        raise ValueError('A native-key plan needs its original format-2 template')
+    mapping = {r['key']:convert(dict(old,records=[r]))['records'][0]['key'] for r in old['records']}
+    pin = template_digest(template)
+    return remap_plan(plan,mapping,pin,pin,inputs=True)
 
 
 def report_keys(document):
@@ -149,7 +165,7 @@ def export(session_path, tag, report_path):
     plan = validate(dict(schema=SCHEMA, version=VERSION, template_sha256=document['template_sha256'],
         context=CONTEXT, scope=SCOPE, phases=phases, evidence=[dict(source_kind='completed-indexed-benchmark',
         source_sha256=digest(session_bytes), report_sha256=digest(report_bytes), **hashes)]))
-    return plan, dict(excluded_unprepared_keys=rejected, phase_counts={p:len(k) for p,k in phases.items()})
+    return input_plan(plan,document), dict(excluded_unprepared_keys=rejected, phase_counts={p:len(k) for p,k in phases.items()})
 
 
 def export_local(cache, report_path):
@@ -174,7 +190,7 @@ def export_local(cache, report_path):
     plan = validate(dict(schema=SCHEMA, version=VERSION, template_sha256=document['template_sha256'],
         context=CONTEXT, scope=SCOPE, phases=phases, evidence=[dict(source_kind='local-notifier-indices',
         source_sha256=source, report_sha256=digest(raw), **hashes)]))
-    return plan, dict(phases=audit, scope=SCOPE,
+    return input_plan(plan,document), dict(phases=audit, scope=SCOPE,
         limitation='Historical phase membership only; no completed route, draw readiness or stutter measurement is inferred.')
 
 
@@ -196,6 +212,7 @@ def merge(plans):
 
 
 def validate_preparation(plan, document):
+    plan = native_plan(plan, document)
     validate(plan)
     if document.get('template_sha256') != plan['template_sha256']:
         raise ValueError('Warmup plan template changed')
@@ -206,8 +223,36 @@ def validate_preparation(plan, document):
     return keys
 
 
+def native_plan(plan, report):
+    """Resolve portable input membership only through successful native proof."""
+    validate(plan)
+    if plan['version'] == 1:
+        return plan
+    from preparation_template_inputs import successful_inputs
+    mapping = successful_inputs(report)
+    if any(key not in mapping for values in plan['phases'].values() for key in values):
+        raise ValueError('Warmup plan references an unprepared input identity')
+    return dict(plan,version=1,context=CONTEXT,
+                phases={phase:list(dict.fromkeys(mapping[k] for k in values)) for phase,values in plan['phases'].items()})
+
+
+def input_plan(plan, report):
+    """Export observed native membership as portable identities for new reports."""
+    if report.get('template_format') != 3:
+        return plan
+    from preparation_template_inputs import successful_inputs
+    mapping = successful_inputs(report)
+    reverse = {}
+    for identity,key in mapping.items():
+        reverse.setdefault(key,[]).append(identity)
+    return validate(dict(plan,version=2,context='default-template-inputs-v3',
+        phases={p:list(dict.fromkeys(i for key in keys for i in reverse.get(key,[])))
+                for p,keys in plan['phases'].items()}))
+
+
 def stage(plan, document, folder, resume=False):
     """Stage into an idle private cache copy, never replace learned membership."""
+    plan = native_plan(plan, document)
     keys = validate_preparation(plan, document)
     folder = Path(folder)
     if not folder.is_dir() or folder.is_symlink() or folder.is_junction():

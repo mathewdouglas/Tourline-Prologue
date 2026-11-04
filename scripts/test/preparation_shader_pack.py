@@ -185,7 +185,8 @@ def main():
         result = {name:False for name in RESULT_BOOLS}
         result.update(expected=f'{n:016x}', actual=f'{n:016x}', created=True, hresult='00000000')
         rows.append(dict(key=f'{n:016x}', status='prepared', result=result))
-    document = dict(records=records, compatibility={})
+    import pipeline_template as template
+    document = dict(version=2, records=records, compatibility={'renderer_sha256':template.renderer_contract()})
     report = dict(schema=1, template_sha256='a'*64, engine_sha256='b'*64, decoder_sha256='c'*64,
         requested=2, records=rows, counts={'prepared':2}, preparation_seconds=1,
         inventory=dict(valid_driver_blobs=[r['key'] for r in rows], rejected=[]))

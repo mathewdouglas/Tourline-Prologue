@@ -29,10 +29,19 @@ warmup membership are unchanged. The renderer contract is reissued explicitly.
 Fresh frozen-helper preparation of all 12,669 re-keyed records passes. See
 [Phase 213](../../../docs/progress.md).
 
-`index.json` verifies the 99 metadata shards. Format 2 pins the renderer source
-contract, Windows x64 recipe/key ABI, default settings and original ELF. The
-preparer checks rebuilt shader/source identifiers, native keys and persisted
-driver blobs locally; unavailable or incompatible entries stay on demand.
+`index.json` verifies the 99 **format-3** metadata shards. The bundle pins
+Windows x64 recipe/key/root-signature ABI, default settings, translation policy
+and original ELF, independently of renderer source. Each record's `key` is a
+64-character canonical input SHA-256, not a native pipeline hash. Program
+identities/sizes, `vp_gpu`, numeric translation/native state and input layout
+are the complete record inputs. Shader length words are zero until preparation;
+no shader/source/native output hashes are shipped.
+
+Preparation derives both shaders and native keys locally, requires creation and
+persistence, then confirms every driver blob through a fresh-process runtime
+lookup. A maintainer can compare a private reference for regressions. Format-2
+contributions still convert on load; older helpers need updating for this starter.
+See [input format](../../../docs/template-input-format.md).
 
 `player-map.json` covers exactly all 3,446 bundled original programs.
 `volume-map.json` covers their 297 archive members plus parameter locations in
@@ -47,7 +56,7 @@ the optional player helper can read the packed game without a developer catalogu
 or another unpacked asset copy. The separate 592-container `search-map.json`
 supports post-play verification and adds no pipeline coverage by itself.
 
-The warmup plan retains 1,466 menu / 2,113 race keys (3,546 distinct), including
+The warmup plan retains 1,466 menu / 2,113 race input identities (3,546 distinct), including
 previously observed prepass requests. Its new template digest does not infer
 material/pass ownership or phase membership for the additions.
 
@@ -55,7 +64,8 @@ See [the preparation workflow](../../../docs/shader-precompile.md) and
 [contribution acceptance](../../../docs/pipeline-contributions.md). Preparation
 remains optional. `--resume` verifies matching retained work and revalidates native
 pipelines; `--reuse-cache` reads verified hints into a separately owned output.
-`--fragment-mode legacy` restores the older fragment path. Driver blobs and
+`GT5P_PREPARE_INPUT_TEMPLATE=0` with a separate format-2 template restores strict
+legacy preparation; it does not reinterpret format-3 inputs as output expectations. Driver blobs and
 shader bytecode remain local to the user's GPU/cache and never ship here.
 
 Historical expansions and their narrower controls remain in the progress log:

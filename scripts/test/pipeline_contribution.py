@@ -12,6 +12,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pipeline_contribution as contribution
 import pipeline_template as template
 from pipeline_runtime_coverage import RESULT_BOOLS, Rejected
+from pipeline_template_inputs import identity
 
 
 def rejected(call):
@@ -71,7 +72,8 @@ def main():
     assert not (work/'too-large').exists()
     conflict=copy.deepcopy(document)
     conflict['records'][1]['state']['ghi']^=1
-    report,quarantined=contribution.review(baseline,[shared,contribution.encode(conflict)])
+    bad_shared=copy.deepcopy(shared);bad_shared['template']=conflict;bad_shared['template_sha256']=contribution.digest(conflict)
+    report,quarantined=contribution.review(baseline,[shared,bad_shared])
     assert len(report['quarantined_conflicts'])==1 and len(quarantined['records'])==1
     assert all(r['key']!=document['records'][1]['key'] for r in quarantined['records'])
     incompatible=copy.deepcopy(document);incompatible['compatibility']['elf_sha256']='f'*64
@@ -79,14 +81,16 @@ def main():
     rejected(lambda:contribution.review(baseline,[shared]*17))
     candidate_path=work/'candidates.json';contribution.write_json(candidate_path,candidates)
     rows=[]
-    for r in candidates['records']:
+    for number,r in enumerate(candidates['records'],1):
         result={name:False for name in RESULT_BOOLS}
-        result.update(expected=r['key'],actual=r['key'],created=True,hresult='00000000')
-        rows.append(dict(key=r['key'],status='prepared',result=result))
-    proof=dict(schema=1,template_sha256=template.template_digest(candidate_path),
+        native=f'{number:016x}'
+        result.update(expected=native,actual=native,created=True,hresult='00000000')
+        rows.append(dict(key=native,input_key=r['key'],status='prepared',result=result))
+    proof=dict(schema=1,template_format=3,template_sha256=template.template_digest(candidate_path),
         engine_sha256='a'*64,decoder_sha256='b'*64,requested=len(rows),records=rows,
         counts={'prepared':len(rows)},preparation_seconds=1,
         inventory=dict(valid_driver_blobs=[r['key'] for r in rows],rejected=[]))
+    proof['runtime_lookup_counts']=[len(rows)]*4
     assert len(contribution.accept(baseline,candidates,candidate_path,proof)['records'])==3
     for field,value in (('template_sha256','e'*64),('counts',{'prepared':1}),('requested',1)):
         bad=copy.deepcopy(proof);bad[field]=value
@@ -105,7 +109,7 @@ def main():
         assert not exporter.called
     # A conflict inside one recorder session must quarantine the first row too.
     raw=b'local-test-bytes!'
-    row=document['records'][0]
+    row=dict(document['records'][0],key='1'*16,vs='2'*16,ps='3'*16,vp_source='4'*16,fp_source='5'*16)
     recorder=dict(pipeline=row['key'],vs=row['vs'],ps=row['ps'],fp_flags=0,
         vp_raw=f'{template.fnv64(raw):016x}',fp_raw=f'{template.fnv64(raw):016x}',
         vp_identity_bytes=16,vp_cache=row['vp_source'],fp_cache=row['fp_source'],
@@ -119,7 +123,7 @@ def main():
             patch.object(template,'fp_identity',return_value={'identity':row['fp']['sha256'],'size':16}), \
             patch.object(template,'native_state',return_value=row['native']):
         exported,excluded=template.export(trace,cache,document['compatibility'])
-        assert exported['records']==[] and excluded=={'Conflicting provenance for pipeline key':2}
+        assert len(exported['records'])==2 and not excluded
     # Collect starts only its launcher with a private opt-in recorder. It never
     # changes async settings, sends data or copies raw files into the share file.
     from types import SimpleNamespace

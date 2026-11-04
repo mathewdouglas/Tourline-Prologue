@@ -75,7 +75,7 @@ def reissue(document, report, contract):
     return validate(out), mapping
 
 
-def remap_plan(plan, mapping, old_digest, new_digest):
+def remap_plan(plan, mapping, old_digest, new_digest, inputs=False):
     from pipeline_warmup_plan import validate as validate_plan
     out = copy.deepcopy(validate_plan(plan))
     if out['template_sha256'] != old_digest:
@@ -85,6 +85,8 @@ def remap_plan(plan, mapping, old_digest, new_digest):
             raise ValueError('Warmup plan contains an unknown source key')
         out['phases'][phase] = [mapping[key] for key in keys]
     out['template_sha256'] = new_digest
+    if inputs:
+        out.update(version=2, context='default-template-inputs-v3')
     return validate_plan(out)
 
 
@@ -101,9 +103,9 @@ def main():
     work = isolated(a.work)
     if work.exists() or a.output.exists() or a.output_plan.exists():
         raise ValueError('Use fresh private work and export paths')
-    document = read(a.template)
+    document = read(a.template, legacy=True)
     from pipeline_template import compatibility
-    current = compatibility(a.engine, a.decoder, a.elf)
+    current = dict(compatibility(a.engine, a.decoder, a.elf), renderer_sha256=renderer_contract())
     previous = dict(document['compatibility'], renderer_sha256=current['renderer_sha256'])
     if previous != current:
         raise ValueError('Only the renderer contract may be explicitly reissued')

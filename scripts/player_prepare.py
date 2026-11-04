@@ -69,6 +69,8 @@ def learned_metadata_changed(output, plan, progress=None):
     # rather than treating an unpublished generation as a learned play cache.
     if report.get('shader_packs') is None or report.get('warmup_plan') is None:
         return False
+    from pipeline_warmup_plan import native_plan
+    plan = native_plan(plan, report)
     for phase, keys in plan['phases'].items():
         if progress:progress('checking-learned-cache',{})
         path=cache/'warmup-v1'/(phase+'-v1.txt')
@@ -168,11 +170,14 @@ def main():
     template.idle=idle_for_player
     engine=install/'runtime/gt5p.exe';decoder=install/'preparation/decoder.dll'
     bundle=install/'assets/pipeline-templates/gt5p-disc-v2'
-    document=template.read(bundle)
-    if document['compatibility']!=template.compatibility(engine,decoder,storage/'input/EMAIN.ELF'):
+    document=template.read(bundle,legacy=os.environ.get('GT5P_PREPARE_INPUT_TEMPLATE')=='0')
+    from pipeline_template_inputs import input_contract
+    if input_contract(document['compatibility'])!=template.compatibility(engine,decoder,storage/'input/EMAIN.ELF'):
         raise ValueError('This template does not match the installed game/renderer')
     location_map=bundle/'player-map.json'
     metadata_items=[document,read_map(location_map)]
+    if document.get('version') == 3:
+        metadata_items.append(selection)
     volume=volume_map=None
     if a.game:
         from game_volume import read as read_volume
@@ -183,8 +188,8 @@ def main():
     metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
     plan=shader_pack_plan(translation)
     packs=plan is not None
-    from pipeline_warmup_plan import read as read_plan
-    plan_document=read_plan(plan) if packs else None
+    from pipeline_warmup_plan import read as read_plan, load as load_plan
+    plan_document=(load_plan(plan,bundle) if document.get('version') == 3 else read_plan(plan)) if packs else None
     from preparation_enumeration import enabled as enumerate_enabled, load as load_enumeration, sample_share
     enumeration=load_enumeration(install/'assets/shader-enumeration/gt5p-disc-v1',bundle) if enumerate_enabled() else None
     collapse=sample_share() if enumeration is not None else False
