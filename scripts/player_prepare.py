@@ -206,7 +206,8 @@ def main():
     def progress(phase,counts):
         if cancel.exists():raise KeyboardInterrupt('Preparation cancelled; completed files kept')
         text=phase.replace('-',' ').capitalize()
-        if 'completed' in counts:text+=f" {counts['completed']}/{counts['total']}"
+        if 'completed' in counts:
+            text+=f" {counts['completed']}/{counts['total']}" if 'total' in counts else f" {counts['completed']}"
         now=time.monotonic()
         if phase==last_status[0] and now-last_status[1]<.1:return
         status.write_text(text,encoding='utf-8')

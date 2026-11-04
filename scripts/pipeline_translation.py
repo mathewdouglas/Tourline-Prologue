@@ -131,7 +131,7 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
                                 if identity in allowed:
                                     if time.monotonic()-copy_started > 60:
                                         break
-                                    if progress:progress('reusing-cache',dict(completed=sum(imported.values())))
+                                    if progress:progress('reusing-cache',dict(completed=sum(imported.values()),total=len(allowed_v)+len(allowed_f)))
                                     pair = (entry.get('code'),entry.get('length'))
                                     if entry.get('source') in copied:
                                         if copied[entry['source']] != pair:
