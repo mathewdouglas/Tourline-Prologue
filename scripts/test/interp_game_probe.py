@@ -27,6 +27,9 @@ def main() -> None:
     p.add_argument("--ab", action="store_true")
     p.add_argument("--cold", action="store_true", help="require a completely empty cache")
     p.add_argument("--paired-prewarm", action="store_true", help="interpret both stages together while either is pending; precreate starter native classes")
+    p.add_argument("--engine", type=Path, default=ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe",
+                   help="private engine to launch (default: the latest private build)")
+    p.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra game environment variable")
     p.add_argument("--gamma-read-off", action="store_true", help="diagnostic: bypass only interpreter texture gamma decoding")
     a = p.parse_args()
     cache = a.cache.resolve()
@@ -63,6 +66,7 @@ def main() -> None:
         env += ["RSX_SHADER_INTERP_PAIR=1", "RSX_SHADER_INTERP_PREWARM=1"]
     if a.gamma_read_off:
         env += ["RSX_SHADER_INTERP_GAMMA_READ=0"]
+    env += a.env
     if a.ab:
         dumps = owned / "dumps"
         dumps.mkdir()
@@ -73,13 +77,13 @@ def main() -> None:
     if a.route == "dealer":
         args += [str(ROOT / "scripts" / "test" / "winshot.ps1"), "-Tag", a.tag,
                  "-Settle", "0" if a.cold else "15", "-Shots", "12" if a.cold else "1", "-Gap", "1",
-                 "-Engine", str(ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe"),
+                 "-Engine", str(a.engine.resolve()),
                  "-GameRoot", str(game), "-TimeoutSec", "180", "-MenuDelaySec", "30" if a.cold else "0"]
     else:
         args += [str(ROOT / "scripts" / "test" / "race.ps1"), "-Track", "HighSpeedRing",
                  "-Tag", a.tag, "-Seconds", str(a.seconds or (60 if a.frame_test else 35)),
                  "-SampleDelay", "12", "-RaceShots", "12",
-                 "-Engine", str(ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe"),
+                 "-Engine", str(a.engine.resolve()),
                  "-GameRoot", str(game), "-GridTimeoutSec", "240", "-MenuDelaySec", "30" if a.cold else "0"]
         if a.frame_test:
             args += ["-FrameTest", "-SampleDelay", "45", "-RequireForeground", "-IntroShots"]
