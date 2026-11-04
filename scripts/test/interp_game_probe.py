@@ -31,6 +31,8 @@ def main() -> None:
     p.add_argument("--engine", type=Path, default=ROOT / "scratch" / "interp-engine" / "install" / "runtime" / "gt5p.exe",
                    help="private engine to launch (default: the latest private build)")
     p.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="extra game environment variable")
+    p.add_argument("--menu-delay", type=int, help="seconds to wait before menu navigation (default 30 with --cold, else 0)")
+    p.add_argument("--settle", type=int, help="dealer settle seconds (default 0 with --cold, else 15)")
     p.add_argument("--gamma-read-off", action="store_true", help="diagnostic: bypass only interpreter texture gamma decoding")
     a = p.parse_args()
     cache = a.cache.resolve()
@@ -77,15 +79,15 @@ def main() -> None:
     args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
     if a.route == "dealer":
         args += [str(ROOT / "scripts" / "test" / "winshot.ps1"), "-Tag", a.tag,
-                 "-Settle", "0" if a.cold else "15", "-Shots", "12" if a.cold else "1", "-Gap", "1",
+                 "-Settle", str(a.settle if a.settle is not None else (0 if a.cold else 15)), "-Shots", "12" if a.cold else "1", "-Gap", "1",
                  "-Engine", str(a.engine.resolve()),
-                 "-GameRoot", str(game), "-TimeoutSec", "180", "-MenuDelaySec", "30" if a.cold else "0"]
+                 "-GameRoot", str(game), "-TimeoutSec", "240", "-MenuDelaySec", str(a.menu_delay if a.menu_delay is not None else (30 if a.cold else 0))]
     else:
         args += [str(ROOT / "scripts" / "test" / "race.ps1"), "-Track", a.track,
                  "-Tag", a.tag, "-Seconds", str(a.seconds or (60 if a.frame_test else 35)),
                  "-SampleDelay", "12", "-RaceShots", "12",
                  "-Engine", str(a.engine.resolve()),
-                 "-GameRoot", str(game), "-GridTimeoutSec", "240", "-MenuDelaySec", "30" if a.cold else "0"]
+                 "-GameRoot", str(game), "-GridTimeoutSec", "240", "-MenuDelaySec", str(a.menu_delay if a.menu_delay is not None else (30 if a.cold else 0))]
         if a.frame_test:
             args += ["-FrameTest", "-SampleDelay", "45", "-RequireForeground", "-IntroShots"]
             # PowerShell accepts each named parameter only once.
