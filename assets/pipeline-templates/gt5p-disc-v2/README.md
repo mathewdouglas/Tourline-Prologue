@@ -21,6 +21,14 @@ new keys remain on demand. A representative HSR replay is checked; this does not
 establish every car/camera/state, whole-game, arbitrary-settings, GT5 or stutter
 coverage. Published v0.2.3 is unchanged. See [Phase 212](../../../docs/progress.md).
 
+Phase 213 makes fragment sample sharing the default renderer behaviour
+(`RSX_FP_SAMPLE_SHARE=0` rolls it back) and re-keys the 6,172 one-sample records:
+their fragment source/bytecode identifiers and pipeline keys change, while the
+6,497 multisample records, all vertex state, the maps and the (remapped) observed
+warmup membership are unchanged. The renderer contract is reissued explicitly.
+Fresh frozen-helper preparation of all 12,669 re-keyed records passes. See
+[Phase 213](../../../docs/progress.md).
+
 `index.json` verifies the 99 metadata shards. Format 2 pins the renderer source
 contract, Windows x64 recipe/key ABI, default settings and original ELF. The
 preparer checks rebuilt shader/source identifiers, native keys and persisted

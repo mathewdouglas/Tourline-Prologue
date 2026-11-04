@@ -41,6 +41,7 @@ def main():
     ap.add_argument('--mode', choices=('fresh', 'incremental'), default='fresh')
     ap.add_argument('--previous-cache', type=Path, help='Earlier-generation shadercache directory (incremental mode)')
     ap.add_argument('--translation', default=None, help='GT5P_PREPARE_TRANSLATION override')
+    ap.add_argument('--no-cancel', action='store_true', help='Fresh run without the cancellation leg (translation subsets)')
     ap.add_argument('--limit', type=int, default=0, help='Use only the first N records (subset install)')
     a = ap.parse_args()
     idle()
@@ -100,7 +101,9 @@ def main():
         summary[name + '_seconds'] = round(seconds, 2)
         return result.returncode
 
-    if a.mode == 'fresh':
+    if a.mode == 'fresh' and a.no_cancel:
+        run('prepare')
+    elif a.mode == 'fresh':
         begin = time.perf_counter()
         with (out / 'cancel.log').open('wb') as log:
             child = subprocess.Popen(command, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -153,7 +156,9 @@ def main():
                    inventory={k: (v if isinstance(v, (int, float, str)) else len(v))
                               for k, v in report['inventory'].items()},
                    shader_packs=report.get('shader_packs'),
-                   warmup_plan=report.get('warmup_plan'))
+                   warmup_plan=report.get('warmup_plan'),
+                   additional_translation={k: v for k, v in (report.get('additional_translation') or {}).items()
+                                           if isinstance(v, (int, float, str, dict)) and k != 'records'})
     if report.get('native_timings'):
         summary['native_batches'] = [dict(requested=t.get('requested'), created=t.get('created'),
                                           driver_calls=t.get('driver_calls'), cached=t.get('cached_blob_calls'))

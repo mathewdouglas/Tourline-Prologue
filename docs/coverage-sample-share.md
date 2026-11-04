@@ -167,7 +167,52 @@ Sebring Silver, so the frames are not pixel-equal (mean absolute channel sum
 supported by that picture and by the matching draw count. It is not proven by
 a locked pixel diff.
 
-@@DEFAULT@@
+## Default and re-key (Phase 213)
+
+`RSX_FP_SAMPLE_SHARE` is on unless the variable is exactly `0`; `getenv` is
+read once, so a game must be launched with the variable set. The overlay is now
+part of `patches/ps3recomp-4e8f3ca8-local.patch` (an 18-line net edit; a fresh
+tree with the new patch differs from the old-patch tree only in
+`rsx_d3d12_backend.c`, by the two intended hunks). `ps3recomp-shader-interp.patch`
+still applies on top and the backend compiles and links.
+`scripts/test/fp_sample_share_native.py` compiles the helpers: unset, `1`, `2`,
+empty and `00` share; `0` restores "sample count > 1 only". Offline preparation
+strips every `RSX_*` variable (`offline_env`), so a prepared cache always matches
+the default game.
+
+The renderer contract hashes the main patch, so it moved
+(`e266e6af...` -> `2250280f...`). Records whose sample count (`state.cube` bits
+16-19) is one change fragment text, so `fp_source`, `ps`, the native ps length
+and the pipeline `key` change; multisample records, vertex fields and numeric
+state do not. `scripts/pipeline_template_rekey.py` takes one fresh full
+preparation with the new engine in a permissive mode and rewrites the starter:
+
+| | Before | After |
+| --- | ---: | ---: |
+| Records | 12,669 | 12,669 |
+| One-sample records changed | | 6,172 (6,151 new keys; 21 changed source text only, same DXBC and key) |
+| Multisample records | 6,497 | 6,497, unchanged |
+| Distinct fragment sources | 6,990 | 3,604 |
+| Distinct pixel-shader bytecodes | 6,965 | 3,592 |
+
+The tool rejects any multisample change, any vertex change, any missing or failed
+record, any key collision, and a native `actual` key that differs from the
+proposed one. The rewrite pass took 624.9 s. The warmup plan's menu/race
+membership is remapped old to new key (1,466 menu / 2,113 race, 3,546 distinct,
+same order) and re-pinned to the new template digest; maps are byte-identical.
+`scripts/test/pipeline_rekey_contract.py --baseline cf08d79` audits the shipped
+files against the previous starter.
+
+**Rollback (`=0`).** With the old starter, `=0` reproduces all 12,669 old
+records: shaders, native keys and persisted blobs (723.8 s, non-frozen path).
+With the re-keyed starter and its prepared cache, `=0` makes the one-sample
+pipelines miss: the game compiles them on demand (see the tables in Phase 213
+of [progress](progress.md): about 250 new shaders in a dealership visit and
+1,721 in one High Speed Ring run, against 8-12). Old ordinary caches are never
+deleted. A cache prepared before the re-key still serves multisample records;
+one-sample entries in it are no longer requested by the default game. Old
+warmup recipes may still replay old-key shaders until they age out.
+
 ## What is left
 
 A dual `Texture2D` / `TextureCube` binding, selected by a root constant, for
