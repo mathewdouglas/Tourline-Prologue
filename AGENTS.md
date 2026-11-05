@@ -45,7 +45,7 @@ has the evidence, newest phase first (Phase 219 is the latest).
 ### What works now
 
 - **0.2.4 RC UX (Phase 219, branch t3/rc024-ux):** Preload known shaders is On by default
-  (new settings files only; an explicit `shader_warmup = false` stays). "Compiling shaders" now
+  (pre-0.2.4 settings files switched on once via `[meta] defaults_version`; a later explicit false stays; `GT5P_SETTINGS_MIGRATE=0` skips). "Compiling shaders" now
   counts draws that wait; background preload (startup warmup, race prewarm) is counted apart
   (`g_rsx_shader_preload_busy/_total`, thread-local `t_shader_preload`) and can show a quieter
   "Loading shaders" badge (`video.preload_indicator`, `GT5P_PRELOAD_INDICATOR=1`, default off;

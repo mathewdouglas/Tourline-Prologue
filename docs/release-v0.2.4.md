@@ -76,9 +76,11 @@ works without preparation. The first launch of this version **offers** it once
 - **Preload known shaders** (F1 > Shaders, `video.shader_warmup`) now defaults
   to **On** for a new settings file: while the game starts and the movie plays, the
   recorded menu pipelines (then the race set during loading) are prepared in the
-  background. A settings file that already says `shader_warmup = false`
-  (the v0.2.3 default wrote that line) keeps its value; switch it on in F1 or
-  delete the line. `RSX_SHADER_WARMUP=0` still turns it off. The default applies
+  background. Settings files from v0.2.3 and earlier all say
+  `shader_warmup = false` (the game writes every setting), so the first 0.2.4
+  launch switches it on once and records that in a new `[meta]` section. If you
+  turn it off again in F1, it stays off. `RSX_SHADER_WARMUP=0` still turns it off,
+  and `GT5P_SETTINGS_MIGRATE=0` skips the one-time switch. The default applies
   through the settings file; a bare engine run with `GT5P_NO_SETTINGS=1` is
   unchanged.
 - **"Compiling shaders" now means a draw is waiting.** Before, the badge also lit

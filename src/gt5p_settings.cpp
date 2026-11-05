@@ -197,7 +197,7 @@ bool known_key(std::string_view section, std::string_view key)
         {"performance", "fifth_spu_lane"},
         {"performance", "lane_cores"},   /* the old key (off by default then): read no more */
         {"debug", "verbose_log"},
-        {"debug", "export_enabled"},
+        {"debug", "export_enabled"}, {"meta", "defaults_version"},
     };
     for (const auto& k : kKnown)
         if (section == k.section && key == k.key) return true;
@@ -289,6 +289,9 @@ void parse_into(const toml::table& tbl, Gt5pSettings& s)
     read_bool(tbl["performance"]["fifth_spu_lane"], "performance.fifth_spu_lane", s.fifth_spu_lane);
     read_tristate(tbl["debug"]["verbose_log"], "debug.verbose_log", s.verbose_log);
     read_bool(tbl["debug"]["export_enabled"], "debug.export_enabled", s.debug_export);
+    /* A file without [meta] predates 0.2.4: generation 0. */
+    s.defaults_version = 0;
+    if (auto v = tbl["meta"]["defaults_version"].value<int64_t>()) s.defaults_version = (int)*v;
 }
 
 /* Hand the settings the runtime reads from the environment over to it. */
@@ -498,8 +501,32 @@ bool gt5p_settings_save(const Gt5pSettings& s, const std::string& path)
          "verbose_log = " << verbose << "\n"
          "# Keep up to 2 MiB of recent output per stream and enable F3 debug ZIP exports.\n"
          "# Applies immediately in F1. Off by default; GT5P_DEBUG_EXPORT=0 disables it.\n"
-         "export_enabled = " << (s.debug_export ? "true" : "false") << "\n";
+         "export_enabled = " << (s.debug_export ? "true" : "false") << "\n"
+         "\n"
+         "[meta]\n"
+         "# Settings-file generation, used to apply a new default once. Do not edit.\n"
+         "defaults_version = " << s.defaults_version << "\n";
     return (bool)f.flush();
+}
+
+/* One-time default changes for a file written by an older version, applied
+ * once and recorded in [meta] defaults_version. Every pre-0.2.4 file states
+ * shader_warmup = false because the game writes all keys, so keeping it would
+ * leave every upgrade without the new default. A later explicit false (the
+ * file then at generation 1) is kept. GT5P_SETTINGS_MIGRATE=0 skips this. */
+static void migrate_defaults(Gt5pSettings& s)
+{
+    const Gt5pSettings defaults{};
+    if (s.defaults_version >= defaults.defaults_version) return;
+    const char* e = getenv("GT5P_SETTINGS_MIGRATE");
+    if (e && e[0] == '0') return;
+    if (s.defaults_version < 1 && !s.shader_warmup) {
+        s.shader_warmup = true;
+        printf("[settings] 0.2.4: Preload known shaders turned on once (F1 > Shaders turns it off)\n");
+    }
+    s.defaults_version = defaults.defaults_version;
+    if (!gt5p_settings_save(s, g_path))
+        warn("could not record the settings update in " + g_path);
 }
 
 /* GT5P_RESOLUTION overrides the file, like the runtime's own variables. */
@@ -551,6 +578,7 @@ void gt5p_settings_load()
                  std::string(err.description()) + " -- using defaults");
         } else {
             parse_into(res.table(), g_settings);
+            migrate_defaults(g_settings);
         }
     }
 

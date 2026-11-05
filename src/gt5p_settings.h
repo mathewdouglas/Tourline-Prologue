@@ -57,6 +57,10 @@ struct Gt5pSettings {
     /* [debug] */
     int verbose_log = -1;       /* -1 auto (quiet), 0 off, 1 on */
     bool debug_export = false;  /* opt in to bounded recent logs and F3 reports */
+    /* [meta] Defaults generation the file was written with. 0: before 0.2.4
+     * (no [meta] section). Loading an older file applies the one-time default
+     * changes listed in gt5p_settings.cpp, then the file is rewritten. */
+    int defaults_version = 1;
 };
 
 /* The settings in effect, environment overrides included. Built-in defaults

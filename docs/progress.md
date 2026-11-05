@@ -23,8 +23,12 @@ tree and the shader-interp, shader-source-dump and frame-hitch-trace overlays st
 `shader_warmup = true` and the settings layer sets `RSX_SHADER_WARMUP=1`. A file that
 says `false` keeps false (checked: `scripts/test/debug_export_check.py` now covers
 default, explicit false, true, both overrides, an invalid value and `GT5P_NO_SETTINGS`).
-Limit: every v0.2.3 settings file written by the game contains an explicit
-`shader_warmup = false`, so upgraders keep Off until they switch it on in F1. The
+Every v0.2.3 settings file written by the game contains an explicit
+`shader_warmup = false`, so at the maintainer's request (after the merge) a file without
+the new `[meta] defaults_version` (generation 0, i.e. written before 0.2.4) is switched on
+once and rewritten at generation 1; a later explicit false is kept. `GT5P_SETTINGS_MIGRATE=0`
+skips it and leaves the generation unrecorded. `debug_export_check.py` adds upgrade-off,
+upgrade-on and migration-disabled cases (33 cases pass). The
 backend's own default (no settings layer, `GT5P_NO_SETTINGS=1`) is unchanged, so
 measurement scripts are unaffected. The F1 help text no longer says default off.
 
@@ -155,7 +159,7 @@ this phase (its code path is the same recipe function). Only 720p was checked fo
 two-worker time window is scaled, not measured. No CI or release build was run; main, tags and
 releases are unchanged. `scripts/test/settings_test.ps1` was edited for the new default but needs
 `build\gt5p.exe`, so it was not run; `rc024_settings_pages.ps1` covers the same toggles against a
-private engine. Existing v0.2.3 settings files keep their explicit `shader_warmup = false`.
+private engine. Existing v0.2.3 settings files are switched on once (see item 1).
 Switches: `RSX_SHADER_WARMUP=0`, `RSX_SHADER_INDICATOR_LEGACY=1`, `GT5P_PRELOAD_INDICATOR`,
 `GT5P_PREPARE_OFFER=0`.
 
