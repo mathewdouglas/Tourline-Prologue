@@ -26,8 +26,9 @@ struct Gt5pSettings {
     bool borderless = false;    /* a borderless window over the monitor (RSX_WINDOW_MODE) */
     bool vsync        = true;   /* wait for the monitor's vblank when presenting */
     bool shader_cache = true;   /* keep compiled shaders in shadercache/ between runs */
-    bool shader_indicator = true;   /* "Compiling shaders" over the game while it is busy */
-    bool shader_warmup = false;     /* prepare recorded pipelines during startup in the background */
+    bool shader_indicator = true;   /* "Compiling shaders" over the game while a draw waits on a shader */
+    bool preload_indicator = false; /* the quieter "Loading shaders" badge for background preload work */
+    bool shader_warmup = true;      /* prepare recorded pipelines during startup in the background */
     bool pipeline_async = true;    /* build driver pipelines on one background worker */
     bool race_preload = true;      /* prepare learned race pipelines during loading */
     bool shader_precompile = true;  /* compile new shaders on background threads, all at once */
