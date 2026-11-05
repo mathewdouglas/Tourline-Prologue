@@ -110,6 +110,24 @@ def preparation_output(parent, token, plan=None, progress=None):
     raise ValueError('Preparation generation limit reached; existing caches preserved')
 
 
+def selected_is_current(storage, parent, token):
+    """True when prepared-cache.txt selects a completed generation of this identity.
+
+    Read only. The launcher's one-time update offer uses it so a player whose
+    current preparation is already selected is not asked again.
+    """
+    pointer=storage/'prepared-cache.txt'
+    if not pointer.is_file() or pointer.is_symlink():return False
+    try:selected=regular_read(pointer,512).decode('utf-8')
+    except (OSError,ValueError):return False
+    match=re.fullmatch(r'preparation/([0-9a-f]{24})/shadercache',selected)
+    if not match:return False
+    if not any(generation_path(parent,token,n).name==match.group(1) for n in range(MAX_GENERATIONS)):return False
+    try:state=json.loads(regular_read(parent/match.group(1)/'preparation-state.json',65536))
+    except (OSError,ValueError):return False
+    return isinstance(state,dict) and state.get('phase')=='complete'
+
+
 def safe_storage(storage):
     storage=storage.absolute()
     for p in (storage,*storage.parents):
@@ -142,6 +160,8 @@ def main():
     source.add_argument('--game',type=Path,help='The already configured disc/PS3_GAME folder')
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
+    ap.add_argument('--check-selected',action='store_true',
+                    help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
     a=ap.parse_args()
     storage=safe_storage(a.storage)
     selection=select_settings(storage)
@@ -200,6 +220,7 @@ def main():
                             hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document,
                             enumeration['sha256']+':'+str(collapse) if enumeration is not None else None)
     parent=storage/'preparation'
+    if a.check_selected:sys.exit(0 if selected_is_current(storage,parent,token) else 3)
     # Retained generations share this directory. A few thousand records across
     # two generations can exceed the old 100000-entry scan limit.
     if parent.exists():preflight_tree(parent, generation_entry_budget()*MAX_GENERATIONS)

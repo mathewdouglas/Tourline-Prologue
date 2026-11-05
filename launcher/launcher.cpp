@@ -413,6 +413,38 @@ static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets,
     if (notices && !result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
     return result;
 }
+// One-time offer per port version. A small marker in the launcher's storage records that it was
+// answered (yes, no or closed), so it is never shown again for that version.
+static bool plain_version(const std::wstring& v) {
+    if (v.empty() || v.size() > 16) return false;
+    for (wchar_t c : v) if (!((c >= L'0' && c <= L'9') || c == L'.')) return false;
+    return true;
+}
+static fs::path offer_marker(const std::wstring& version) { return data/(L"prepare-offer-"+version+L".done"); }
+static void mark_offer(const std::wstring& version) {
+    try { std::ofstream(offer_marker(version)) << "answered\n"; } catch (...) {}
+}
+// 0: a completed preparation of the current identity is selected. 3: it is not. -1: unknown
+// (helper missing or failed); the launcher then offers nothing and records nothing.
+static int selected_preparation(const fs::path& disc) {
+    try {
+        auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
+        if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256")) return -1;
+        DWORD code=run(helper,L"--check-selected --install "+quote(install)+L" --storage "+quote(data)+L" --game "+quote(disc),
+            data,L"prepare-check");
+        return code==0 || code==3 ? (int)code : -1;
+    } catch (const Failure&) { return -1; } catch (const std::exception&) { return -1; }
+}
+// The same offer, preparation and failure handling for both launches.
+static void offer_preparation(const fs::path& disc, first_run_preparation::Kind kind, const std::wstring& version) {
+    DWORD cpus = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    bool yes = first_run_preparation::offer(brand_icon(), kind, first_run_preparation::estimate(cpus));
+    if (plain_version(version)) mark_offer(version);
+    if (!yes) return;
+    try { prepare_cache(disc,{},true); }
+    catch (const Failure& e) { report(e.message+L"\n\nThe game will now start. You can run Prepare shaders.cmd later."); }
+    catch (const std::exception&) { report(L"Optional preparation could not finish. The game will now start. You can run Prepare shaders.cmd later."); }
+}
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     try {
@@ -509,10 +541,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             prepare_cache(disc,prepare_assets,false);
             CoUninitialize();return 0;
         }
-        if (completed_setup && env(L"GT5P_PREPARE_OFFER")!=L"0" && first_run_preparation::offer(brand_icon())) {
-            try { prepare_cache(disc,{},true); }
-            catch (const Failure& e) { report(e.message+L"\n\nThe game will now start. You can run Prepare shaders.cmd later."); }
-            catch (const std::exception&) { report(L"Optional preparation could not finish. The game will now start. You can run Prepare shaders.cmd later."); }
+        // At most one offer per launch. GT5P_PREPARE_OFFER=0 disables both.
+        if (env(L"GT5P_PREPARE_OFFER")!=L"0") {
+            const std::wstring version=release_value(L"port_version");
+            if (completed_setup) offer_preparation(disc,first_run_preparation::Kind::AfterSetup,version);
+            else if (!no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" && plain_version(version) &&
+                     !fs::exists(offer_marker(version))) {
+                // First launch of this version: offer unless a completed preparation of the
+                // current identity is already selected (shaders of earlier versions do not count).
+                int state=selected_preparation(disc);
+                if (state==0) mark_offer(version);
+                else if (state==3) offer_preparation(disc,first_run_preparation::Kind::Update,version);
+            }
         }
         // Keep all mutable state outside the ZIP/install directory. Assets are
         // small, distributable glyph art; this never copies the game dump.

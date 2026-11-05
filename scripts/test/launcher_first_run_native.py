@@ -1,4 +1,9 @@
-"""First-run choices against owned synthetic children; never starts the game."""
+"""First-run and update-offer choices against owned synthetic children; never starts the game.
+
+Fresh installs get the post-setup offer. A configured install launched for the first time on a
+new port version gets the one-time update offer unless a completed preparation of the current
+identity is selected (the probe stands in for the helper's --check-selected answer). Each offer
+is answered at most once per version, and the two never appear in one launch."""
 import argparse
 import ctypes as C
 from ctypes import wintypes as W
@@ -48,28 +53,55 @@ def main():
             shutil.copyfile(args.probe, install/destination)
         elf = b'\x7fELF synthetic first-run executable'
         probe_hash = hashlib.sha256(args.probe.read_bytes()).hexdigest()
+        version = '0.2.4'
+        marker_name = 'prepare-offer-' + version + '.done'
         (install/'release.ini').write_text('[release]\nschema=1\ntarget=BCUS98158\nversion=03.00\n'
+            +'port_version='+version+'\n'
             +'elf_sha256='+hashlib.sha256(elf).hexdigest()+'\ngame_sha256='+probe_hash
             +'\nprepare_sha256='+probe_hash+'\n')
-        for label, choice in [('prepare',100), ('skip',101), ('close',0),
-                              ('cancel-preparation',100), ('cancel-legacy',100),
-                              ('helper-unavailable',100), ('offer-disabled',None), ('cancel-setup',None)]:
+        # Fresh installs: (label, choice; None means no offer expected).
+        fresh = [('prepare',100), ('skip',101), ('close',0), ('cancel-preparation',100), ('cancel-legacy',100),
+                 ('helper-unavailable',100), ('offer-disabled',None), ('cancel-setup',None)]
+        # Configured installs launched for the first time on this version: (label, choice, extra env).
+        update = [('update-prepare',100,{}), ('update-skip',101,{}),
+                  ('update-close',0,{}), ('update-cancel-preparation',100,{}),
+                  ('update-preparation-failure',100,{'GT5P_PROBE_PREPARE_EXIT':'1'}),
+                  ('update-already-prepared',None,{'GT5P_PROBE_SELECTED':'1'}),
+                  ('update-check-error',None,{'GT5P_PROBE_SELECTED':'error'}),
+                  ('update-helper-mismatch',None,{}),
+                  ('update-offer-disabled',None,{'GT5P_PREPARE_OFFER':'0'}),
+                  ('update-already-answered',None,{}), ('update-no-prepared-flag',None,{}),
+                  ('update-legacy-volume',None,{'GT5P_PREPARE_VOLUME':'0'})]
+        specs = [dict(label=l, choice=c, update=False, extra={}) for l, c in fresh]
+        specs += [dict(label=l, choice=c, update=True, extra=e) for l, c, e in update]
+        for spec in specs:
+            label, choice, is_update = spec['label'], spec['choice'], spec['update']
             data = root/label
             (data/'input').mkdir(parents=True)
             (data/'input/EMAIN.ELF').write_bytes(elf)
+            if is_update:
+                (data/'setup.ini').write_text('[game]\ndirectory='+str(disc)+'\n', encoding='utf-16')
+            if label=='update-already-answered': (data/marker_name).write_text('answered\n')
             env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0',
                        GT5P_PROBE_DELAY_MS='100',
-                       GT5P_PROBE_PREPARE_DELAY_MS='30000' if label.startswith('cancel-') else '100')
-            env.pop('GT5P_PREPARE_OFFER',None)
-            env.pop('GT5P_PREPARE_UI',None)
+                       GT5P_PROBE_PREPARE_DELAY_MS='30000' if 'cancel-' in label else '100')
+            for name in ('GT5P_PREPARE_OFFER','GT5P_PREPARE_UI','GT5P_PREPARE_VOLUME','GT5P_PROBE_SELECTED','GT5P_PROBE_PREPARE_EXIT'):
+                env.pop(name,None)
+            env['GT5P_PROBE_SELECTED']='0'   # not prepared, unless the scenario says otherwise
+            env.update(spec['extra'])
             if label=='offer-disabled': env['GT5P_PREPARE_OFFER']='0'
             if label=='cancel-legacy': env['GT5P_PREPARE_UI']='0'
+            check_expected = is_update and label not in ('update-offer-disabled','update-already-answered',
+                'update-no-prepared-flag','update-legacy-volume','update-helper-mismatch')
+            marker_expected = (choice is not None and label != 'cancel-setup') or label in (
+                'update-already-prepared','update-already-answered')
             release=install/'release.ini'
             release_text=release.read_text()
-            if label=='helper-unavailable':
+            if label in ('helper-unavailable','update-helper-mismatch'):
                 release.write_text(release_text.replace('prepare_sha256='+probe_hash,'prepare_sha256='+'0'*64))
-            owner = subprocess.Popen([launcher], env=env)
-            seen, picked, offered, cancelled = set(), False, False, False
+            args = [launcher] + (['--no-prepared'] if label=='update-no-prepared-flag' else [])
+            owner = subprocess.Popen(args, env=env)
+            seen, picked, offered, cancelled = set(), is_update, False, False
             picker_seen = None
             @callback
             def visit(hwnd, unused):
@@ -107,17 +139,17 @@ def main():
                     if choice: ui.PostMessageW(hwnd,0x400+102,choice,0)
                     else: ui.PostMessageW(hwnd,0x10,0,0)
                     offered = True
-                elif title.value=='Tourline Prologue' and offered and label in ('cancel-preparation','cancel-legacy') and not cancelled and (data/'logs/prepare.out').exists():
+                elif title.value=='Tourline Prologue' and offered and label in ('cancel-preparation','cancel-legacy','update-cancel-preparation') and not cancelled and (data/'logs/prepare.out').exists():
                     ui.PostMessageW(hwnd,0x400+102,2,0)
                     cancelled = True
-                elif title.value=='GT5P setup' and label=='helper-unavailable':
+                elif title.value=='GT5P setup' and label in ('helper-unavailable','update-preparation-failure'):
                     ui.PostMessageW(hwnd,0x111,2,0)
                 return True
             try:
                 deadline = time.monotonic()+25
                 while owner.poll() is None and time.monotonic()<deadline:
                     ui.EnumWindows(visit,0)
-                    if (data/'logs/setup.err').exists() and label!='helper-unavailable':
+                    if (data/'logs/setup.err').exists() and label not in ('helper-unavailable','update-preparation-failure'):
                         raise AssertionError((label,(data/'logs/setup.err').read_text()))
                     time.sleep(.03)
                 assert owner.poll() is not None, (label,'timed out',seen)
@@ -130,11 +162,22 @@ def main():
                     probe = dict(line.split('=',1) for line in (data/'probe.txt').read_text(encoding='utf-8-sig').splitlines())
                     assert probe['argc']=='2' and Path(probe['arg1'])==data/'input/EMAIN.ELF'
                     assert (data/'logs/prepare.out').exists()==(choice==100 and label!='helper-unavailable')
-                    if label in ('cancel-preparation','cancel-legacy'): assert cancelled and (data/'prepare.cancel').exists()
+                    if label in ('cancel-preparation','cancel-legacy','update-cancel-preparation'):
+                        assert cancelled and (data/'prepare.cancel').exists()
                     if label=='helper-unavailable': assert 'helper is missing or does not match' in (data/'logs/setup.err').read_text()
-                    # Once configured, ordinary launches do not offer again.
-                    done = subprocess.run([launcher],env=dict(env,GT5P_PROBE_DELAY_MS='0'),timeout=10)
+                    if label=='update-preparation-failure': assert 'Preparation did not finish' in (data/'logs/setup.err').read_text()
+                    # The update offer asks the helper once; a fresh install never asks it.
+                    def helper_checks():
+                        record = data/'check.txt'
+                        return record.read_text(encoding='utf-8-sig').count('argc=') if record.exists() else 0
+                    checks = helper_checks()
+                    assert checks==(1 if check_expected else 0),(label,'helper checks',checks)
+                    assert (data/marker_name).exists()==marker_expected,(label,'marker',seen)
+                    # Once answered, ordinary launches do not offer or ask the helper again; with
+                    # nothing recorded the next launch behaves like this one did.
+                    done = subprocess.run(args,env=dict(env,GT5P_PROBE_DELAY_MS='0',**({'GT5P_PROBE_SELECTED':'0'} if marker_expected else {})),timeout=10)
                     assert done.returncode==0
+                    if marker_expected: assert helper_checks()==checks,(label,'second launch asked the helper again')
                 print(label+': passed')
             finally:
                 if owner.poll() is None: owner.terminate(); owner.wait(timeout=10)

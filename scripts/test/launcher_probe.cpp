@@ -9,6 +9,15 @@
 #include "../../src/gt5p_restart.h"
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc>1 && !wcscmp(argv[1],L"--check-selected")) {
+        // The launcher's read-only "is the current preparation selected" question.
+        // Leaves its own record and never probe.txt, which marks a game start.
+        FILE* record=nullptr;
+        if (!_wfopen_s(&record,L"check.txt",L"a, ccs=UTF-8") && record) { fwprintf(record,L"argc=%d\n",argc); fclose(record); }
+        wchar_t selected[16]{};
+        GetEnvironmentVariableW(L"GT5P_PROBE_SELECTED",selected,16);
+        return !wcscmp(selected,L"1") ? 0 : !wcscmp(selected,L"error") ? 1 : 3;
+    }
     if (argc>1 && (!wcscmp(argv[1],L"--collect-contribution") || !wcscmp(argv[1],L"--verify-contribution"))) {
         const wchar_t* storage=nullptr;
         for (int i=2;i+1<argc;i++) if (!wcscmp(argv[i],L"--storage")) storage=argv[i+1];
@@ -83,6 +92,8 @@ int wmain(int argc, wchar_t** argv) {
         wchar_t cancelled[8]{};
         if (GetEnvironmentVariableW(L"GT5P_PROBE_TOOL_CANCEL",cancelled,8)) return 2;
     }
+    wchar_t failure[8]{};
+    if (preparation && GetEnvironmentVariableW(L"GT5P_PROBE_PREPARE_EXIT",failure,8)) return _wtoi(failure);
     if ((preparation && GetEnvironmentVariableW(L"GT5P_PROBE_PREPARE_DELAY_MS",delay,32)) || GetEnvironmentVariableW(L"GT5P_PROBE_DELAY_MS", delay, 32)) {
         for (int elapsed=0;elapsed<_wtoi(delay);elapsed+=20) {
             if (preparation && GetFileAttributesW(L"prepare.cancel")!=INVALID_FILE_ATTRIBUTES) return 2;
