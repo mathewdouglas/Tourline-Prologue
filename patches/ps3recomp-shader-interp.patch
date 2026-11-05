@@ -1,5 +1,5 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index e10331c..35f4e00 100644
+index 003789a..c473f21 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
 @@ -236,8 +236,57 @@ typedef struct {
@@ -149,7 +149,7 @@ index e10331c..35f4e00 100644
            hash = pso_hash_bytes(hash, "rs", 2);
            hash = pso_hash_bytes(hash, &rh, sizeof rh);
        } }
-@@ -5441,6 +5502,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5595,6 +5656,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
                                            u64 samp_key)
  {
      s_fp_pending = 0;
@@ -157,7 +157,7 @@ index e10331c..35f4e00 100644
      /* Key on which units are texel-addressed. Their sizes reach the shader
       * as per-draw constants, so they are not part of the pipeline. */
      u32 unnorm = unnorm_mask ? (0x100u | unnorm_mask) : 0;
-@@ -5585,7 +5647,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5739,7 +5801,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
            for (u32 h = fp_key_hash(&key) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1)) {
                const int e = s_fpi[h];
                if (!e) break;
@@ -166,7 +166,7 @@ index e10331c..35f4e00 100644
            }
        } else
      for (int i = 0; i < s_d3d.vp_fp_n; i++)
-@@ -5601,7 +5663,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5755,7 +5817,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
              s_d3d.vp_fp[i].vmask == s_pso_vmask &&
              s_d3d.vp_fp[i].samp_key == samp_key && s_d3d.vp_fp[i].ghi == s_pso_ghi &&
              s_d3d.vp_fp[i].shd == s_pso_shd && s_d3d.vp_fp[i].unhi == s_pso_unhi)
@@ -175,7 +175,7 @@ index e10331c..35f4e00 100644
      /* Keys whose pixel shader the pool is compiling: answer "pending" without
       * building the HLSL again. Both the pre-pass and the draw ask every frame,
       * and rebuilding it for every waiting draw took 4 of every 5 s while a
-@@ -6709,6 +6771,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -6883,6 +6945,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
              (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) ? &s_d3d.vp_vs[vs_idx].provenance : NULL,
              hlsl, fp_shc, fp_flags, hr);
      if (pso_timing_on()) s_pt_pso += pt_ms_since(&s_pt_t0);
@@ -183,7 +183,7 @@ index e10331c..35f4e00 100644
      pb->lpVtbl->Release(pb);
      if (hr == E_PENDING) {
          for (u32 h=fp_pend_h,n=0;n<32;++n,h=(h+1)&(FP_PEND_N-1))
-@@ -6780,6 +6843,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -6954,6 +7017,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
      s_d3d.vp_fp[s_d3d.vp_fp_n].unhi = s_pso_unhi;
      s_d3d.vp_fp[s_d3d.vp_fp_n].native_hash = native_hash;
      s_d3d.vp_fp[s_d3d.vp_fp_n].pso     = pso;
@@ -191,7 +191,7 @@ index e10331c..35f4e00 100644
      for (u32 h = fp_key_hash(&s_d3d.vp_fp[s_d3d.vp_fp_n]) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1))
          if (!s_fpi[h]) { s_fpi[h] = s_d3d.vp_fp_n + 1; break; }
      s_d3d.vp_fp_n++;
-@@ -7159,8 +7223,10 @@ static void tex_upload_sweep(void)
+@@ -7333,8 +7397,10 @@ static void tex_upload_sweep(void)
  static void vp_fp_cache_flush_if_full(void)
  {
      if (!s_fp_full) return;
@@ -203,7 +203,7 @@ index e10331c..35f4e00 100644
      for (int i = 0; i < s_fp_orphan_n; i++) s_fp_orphan[i]->lpVtbl->Release(s_fp_orphan[i]);
      s_d3d.vp_fp_n = 0; s_fp_orphan_n = 0; s_fp_full = 0;
      memset(s_fpi, 0, sizeof s_fpi);
-@@ -11954,6 +12020,7 @@ static void render_frame_body(void)
+@@ -12130,6 +12196,7 @@ static void render_frame_body(void)
                      (void*)vpso, (void*)s_d3d.vp_root_sig); } }
          if (any && vpso) {
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
@@ -211,7 +211,7 @@ index e10331c..35f4e00 100644
              s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list, vpso);
              s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(s_d3d.cmd_list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
-@@ -12219,8 +12286,8 @@ static void render_frame_body(void)
+@@ -12395,8 +12462,8 @@ static void render_frame_body(void)
                  static u32 skipdbg = 1; static int skipdbg_n;
                  if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
                  const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
@@ -222,7 +222,7 @@ index e10331c..35f4e00 100644
                  /* Per-draw pipeline: prefer the guest's own compiled FP; fall
                   * back to the hardcoded atlas/colour PS pair. */
                  u32 _un_dim[16][2];
-@@ -12228,27 +12295,89 @@ static void render_frame_body(void)
+@@ -12404,27 +12471,89 @@ static void render_frame_body(void)
                  s_pso_vmask = dr->vtx_mask ? dr->vtx_mask : 0xFFFFu; s_pso_ghi = dr->tex_gamma_hi | (dr_volume_mask(dr) << 16);
                  s_pso_unhi = dr_unnorm_hi(dr);
                  s_pso_shd = dr->tex_shd ? (dr->tex_shd | ((u32)dr->shd_func << 16)) : 0u;
@@ -325,7 +325,7 @@ index e10331c..35f4e00 100644
                  s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list,
                                                           dpso ? dpso : vpso);
                  if (dr->stencil & 1u)
-@@ -12362,9 +12491,13 @@ static void render_frame_body(void)
+@@ -12538,9 +12667,13 @@ static void render_frame_body(void)
                          rt != cur_m[0] && rt != cur_m[1] && rt != cur_m[2])
                          off_rt_transition(rt, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                  }
@@ -342,7 +342,7 @@ index e10331c..35f4e00 100644
                  /* Per-draw constants: this draw's vp_cb + FP texscale slots. */
                  s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
                      frame_gva(s_d3d.vp_cb)
-@@ -12408,6 +12541,7 @@ static void render_frame_body(void)
+@@ -12584,6 +12717,7 @@ static void render_frame_body(void)
                        s_d3d.cmd_list->lpVtbl->OMSetRenderTargets(
                            s_d3d.cmd_list, bn, brh, FALSE, cur_has_dsv ? &dsv_handle : NULL);
                    } }
@@ -350,7 +350,7 @@ index e10331c..35f4e00 100644
                  if (gf_slot(d)) {
                      s_d3d.cmd_list->lpVtbl->SetGraphicsRootShaderResourceView(s_d3d.cmd_list, 3,
                          frame_gva(s_vraw) + (u64)FR->parity * VRAW_BYTES);
-@@ -12469,6 +12603,12 @@ static void render_frame_body(void)
+@@ -12645,6 +12779,12 @@ static void render_frame_body(void)
                  s_d3d.cmd_list->lpVtbl->RSSetViewports(s_d3d.cmd_list, 1, &vp);
                  s_d3d.cmd_list->lpVtbl->RSSetScissorRects(s_d3d.cmd_list, 1, &sc);
              }
@@ -363,7 +363,7 @@ index e10331c..35f4e00 100644
          }
      }
  
-@@ -12840,7 +12980,9 @@ skip_dump_consider: ;
+@@ -13016,7 +13156,9 @@ skip_dump_consider: ;
      }
      if (dumping) {
          wait_for_gpu();            /* ensure the copy finished before mapping */
@@ -373,7 +373,7 @@ index e10331c..35f4e00 100644
          s_d3d.dump_frames_left--;
      }
  
-@@ -15343,6 +15485,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+@@ -15519,6 +15661,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
                  }
                  dr->tex_slot = -1;
                  { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
@@ -381,7 +381,7 @@ index e10331c..35f4e00 100644
                  dr->is_clear = 0; dr->readback = 0;
                  dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
                  dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
-@@ -15482,6 +15625,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+@@ -15658,6 +15801,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
              }
              dr->tex_slot = -1;
              { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
@@ -389,7 +389,7 @@ index e10331c..35f4e00 100644
              dr->is_clear = 0; dr->readback = 0;
              dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
              dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
-@@ -15737,12 +15881,15 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
+@@ -15913,12 +16057,15 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
          dr->gf_defhash = gfc ? vgpu_def_hash() : 0;
          DP_ADD(DP_RECORD, _dpr);
          { const unsigned long long _dv = DP_T0();
@@ -409,16 +409,16 @@ index e10331c..35f4e00 100644
              static int _n = 0; if (dr->vs_idx != VS_PENDING && _n++ < 8)
                  fprintf(stderr, "[VTXGPU] no fetch shader for this vertex program; draw dropped%c", 10);
              FR->gf_slot_gen[FR->draw_count] = 0;
-@@ -16130,6 +16277,8 @@ void rsx_d3d12_backend_shutdown(void)
-     pso_queue_stop();
-     wait_for_gpu();
+@@ -16308,6 +16455,8 @@ void rsx_d3d12_backend_shutdown(void)
      tex_pool_shutdown();
+     while (InterlockedCompareExchange(&s_fplk_saving, 0, 0)) Sleep(1);
+     fplk_save(1);
 +    fp_interp_shutdown();
 +    vp_interp_shutdown();
      spack_race_end_ex(1);   /* quitting from a race keeps what it learned */
      dxbc_mem_clear();
      pso_warm_clear();
-@@ -16292,6 +16441,9 @@ void rsx_d3d12_backend_present(void)
+@@ -16470,6 +16619,9 @@ void rsx_d3d12_backend_present(void)
      }
  }
  

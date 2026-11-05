@@ -1,7 +1,8 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
+index 003789a..35e48a5 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
-@@ -5123,6 +5123,119 @@
+@@ -5382,6 +5382,119 @@ static double pt_ms_since(LARGE_INTEGER* t)
      *t = n;
      return ms;
  }
@@ -121,7 +122,7 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
  static void pso_metrics_report(void)
  {
      static int on=-1; static ULONGLONG last;
-@@ -5326,7 +5439,10 @@
+@@ -5739,7 +5852,10 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
            for (u32 h = fp_key_hash(&key) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1)) {
                const int e = s_fpi[h];
                if (!e) break;
@@ -133,7 +134,7 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
            }
        } else
      for (int i = 0; i < s_d3d.vp_fp_n; i++)
-@@ -5342,7 +5458,10 @@
+@@ -5755,7 +5871,10 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
              s_d3d.vp_fp[i].vmask == s_pso_vmask &&
              s_d3d.vp_fp[i].samp_key == samp_key && s_d3d.vp_fp[i].ghi == s_pso_ghi &&
              s_d3d.vp_fp[i].shd == s_pso_shd && s_d3d.vp_fp[i].unhi == s_pso_unhi)
@@ -145,7 +146,7 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
      /* Keys whose pixel shader the pool is compiling: answer "pending" without
       * building the HLSL again. Both the pre-pass and the draw ask every frame,
       * and rebuilding it for every waiting draw took 4 of every 5 s while a
-@@ -5353,7 +5472,15 @@
+@@ -5766,7 +5885,15 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
      for (u32 h = fp_pend_h, n = 0; n < 32; n++, h = (h + 1) & (FP_PEND_N - 1)) {
          if (!s_fp_pend[h].used) break;
          if (fp_key_eq(&s_fp_pend[h].key, &key)) {
@@ -162,7 +163,15 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
              break;
          }
      }
-@@ -6261,6 +6388,7 @@
+@@ -5780,6 +5907,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+         else if (s_d3d.vp_fp_n + 1 >= VP_FP_CACHE || !pso_warm_get(mapped, &fast)) s_fplk_stat.miss_cold++;
+         else {
+             s_fplk_stat.hit++;
++            if (s_pso_use_draw) pso_coverage_note(mapped);
+             pso_race_learn(mapped);
+             VPFPEntry* e = &s_d3d.vp_fp[s_d3d.vp_fp_n];
+             *e = key; e->native_hash = mapped; e->pso = fast;
+@@ -6712,6 +6840,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
                  break;
              }
          s_fp_pending = 1;
@@ -170,15 +179,15 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
          return NULL;
      }
      /* A compile that holds the frame up long enough to matter: the frame is
-@@ -6424,6 +6552,7 @@
+@@ -6875,6 +7004,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
      ID3D12PipelineState* pso = NULL;
      if (pso_timing_on()) pt_ms_since(&s_pt_t0);
      u64 native_hash = guest_pso_hash(&pd);
 +    if (s_pso_use_draw) pso_coverage_note(native_hash);
      pso_race_learn(native_hash);
+     if (fplk) fplk_put(fplk, native_hash);
      hr = pso_async_on() ? pso_queue_get(native_hash, &pd, &pso) : create_guest_pso_job(&pd, &pso);
-     if (pso_provenance_on())
-@@ -11775,7 +11904,13 @@
+@@ -12396,7 +12526,13 @@ static void render_frame_body(void)
                  if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
                  const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
                  /* Its vertex shader is still compiling in the background. */
@@ -193,7 +202,7 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
                  /* Per-draw pipeline: prefer the guest's own compiled FP; fall
                   * back to the hardcoded atlas/colour PS pair. */
                  u32 _un_dim[16][2];
-@@ -11796,6 +11931,7 @@
+@@ -12417,6 +12553,7 @@ static void render_frame_body(void)
                                                  /* bit 27: no depth buffer is bound */
                                                  dr->stencil | (cur_has_dsv ? 0u : (1u << 27)),
                                                  _un_mask, _un_dim, dr->samp_key) : NULL;
@@ -201,15 +210,15 @@ diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
                  /* Its shader is still compiling in the background: leave the
                   * draw out until it is ready. */
                  if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] d=%u dpso=%p fp_pending=%d vtx_mask=0x%X cur_rt=%d has_dsv=%d n=%u%c",
-@@ -12595,6 +12731,7 @@
-
+@@ -13216,6 +13353,7 @@ skip_dump_consider: ;
+ 
      s_d3d.frame_count++;
      pso_metrics_report();
 +    pso_coverage_summary(0);
-
+ 
      /* RPCS3-style titlebar stats, refreshed once a second: presented FPS,
       * draw count of the last frame, and the backbuffer size. */
-@@ -15297,7 +15434,10 @@
+@@ -15918,7 +16056,10 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
          if (gfc && dr->vs_idx < 0) {
              /* No GPU-fetch shader for this program: the draw cannot be made
               * from raw bytes, and its vertices were not converted. */

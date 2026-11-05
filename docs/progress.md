@@ -9,6 +9,91 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 221 - Race hitches: texture allocation, race prewarm, pipeline lookup (2026-11-05)
+
+Branch `feature/hitch-texture-lru` (from `feature/interp-pipeline-prep` plus the `t3/hitch-attribution`
+tooling). Not merged; no tag or release. Method: the Phase-hitch trace overlay (`RSX_HITCH_LOG`,
+refreshed for the v0.2.4 main patch), High Speed Ring `hitch_capture.py hsr prepared`, 1080p 16:9 2x MSAA,
+`GT5P_NO_SETTINGS=1`, interpreter off, a fresh copy of the user's prepared 0.2.4 cache per run. Focus was
+not enforced (`--no-foreground`; Discord repeatedly took focus); the analyzer still marks foreground per batch.
+One locked run per row. New readers: `scripts/diag/hitch_list.py` (each long display interval with its
+replay, texture, allocation, pipeline-lookup and recording costs) and `scripts/diag/hitch_summary.py`.
+
+### What the long frames were
+
+With every switch off the two largest race frames are the race start (353-407 ms) and the camera change about
+7 s later (299-317 ms). In both, about 190 / 180 textures appear for the first time. Each new texture made two
+committed resources (the texture and its own upload buffer), about 1 ms together: 150-200 ms of
+`CreateCommittedResource` in one frame. The rest: pipeline lookup about 85-100 ms (with about 1,000 draws
+waiting for pipelines) and draw recording 55-70 ms. The race prewarm (on for players) prepared about 4,000
+learned race pipelines one at a time; the new split shows recipe reads 20.7 s, bytecode reads 12.8 s, driver
+creation 27.4 s (mostly the driver-blob file read): 66-69 s in total, so the 30 s loading gate timed out.
+
+### Changes (main patch, default on; rollback switches)
+
+- `RSX_TEX_LRU` (Phase 199 overlay folded in): least recently used eviction when the 1,024 slots are full.
+  `=0` restores first-unused eviction.
+- `RSX_TEX_POOL`: evicted textures parked for reuse by an identical description (`RSX_TEX_POOL_MB`, 256), and
+  one persistently mapped 64 MB staging ring (`RSX_TEX_RING_MB`, `0` off) reset after the per-batch GPU drain.
+  `=0` restores both old paths.
+- `RSX_RACE_PREWARM_THREADS` (default 4, `=1` rollback): the race index is prepared on helper threads; the
+  pso-worker keeps serving demand jobs; shutdown and a new race load stop the helpers between recipes.
+
+The separate `ps3recomp-texture-slot-lru.patch` overlay is removed; the interp, frame-hitch-trace and
+pipeline-use-coverage overlays were rebased and all four overlays apply on the new main patch.
+`texture_slot_policy_native.py` passes both modes against the new main patch.
+
+### Measurements (race start / +7 s camera change; frames over 100 ms in the grid-to-end window)
+
+| Engine / switches | Runs | Allocations | Race start | +7 s | >100 ms | Prewarm | 60 s FrameTest late / max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| all off (overlay builds) | a1, a2, a3 | 2,280-2,509 | 370-407 ms | 299-317 ms | 7-14 | 66-69 s, gate timed out | 0.7-3.2% / 37-133 ms |
+| LRU only | b1, b2 | 744-846 | 353-399 | 300-310 | 4-8 | timed out | 1.7-2.2% / 43-144 |
+| LRU + pool/ring | c1, c2, d1 (pool only) | about 560 | 267-288 | 270-291 | 3-7 | timed out | 1.1-2.0% / 45-102 |
+| LRU + pool/ring + 4 prewarm threads | c4, c5 | about 520 | 296-310 | 257-259 | 5 (excluding shots) | 15.7-16.2 s, gate ready | 0.1-0.9% / 35-37 |
+| new main patch defaults, no switches set | e1 | about 520 | 262 | 246 | 7 (excl. shots) | 14.9 s | 0.1% / 26.8 |
+
+With the defaults no draw waits for a pipeline at race start (`skip_fp` 0 against about 1,000), texture
+allocation in those two frames is 56-80 ms instead of 150-200 ms, and the staging ring served every upload
+(peak 57.6 MB, no fallback). The pool itself rarely hits (86 of about 1,390 allocations): most of the gain is
+the ring. Screenshots of the race (intro, on-track, mirror, signage, crowd, HUD) match the baseline;
+textures render correctly through the ring.
+
+Limits: one save and route; prepared cache only (cold not measured); one GPU/driver; the remaining race-start
+frame is still about 250-300 ms (next item). Startup menu warmup still runs single-threaded (not changed).
+
+### Persistent fast pipeline lookup (`RSX_PSO_FAST_LOOKUP`, default on, `=0` rollback)
+
+After the changes above the race-start frame still spent about 85-100 ms in pipeline lookup with every
+pipeline resident: the in-memory pipeline cache is keyed by session state (vertex-shader slot, generation),
+so the first draw of each shader/state combination in a process rebuilt its HLSL (`[pso-time]`: 350-385
+misses, hlsl 170-200 ms and dxbc 60-80 ms per 5 s around the race start) before it could find the resident
+pipeline. The renderer now keeps `warmup-v1/fp-lookup-v1.bin`: a session-independent key (fragment program
+content identity, vertex program content hash plus fetch mode, every native and translation field of the
+in-memory key) mapped to the native pipeline hash the full path produced. A miss whose mapped pipeline is
+resident uses it directly. The file carries an epoch (engine executable size/time plus every `RSX_`/`FP_`/`VP_`
+environment value that is not a path); a different epoch starts an empty table. Only pipelines resident under
+the current root signature and bytecode can be returned (recipes are re-hashed against the current root
+signature when loaded), so a stale or absent mapping falls back to the full path. New entries are written
+every 20 s (at least 64 new) from a short-lived thread and at shutdown. `[fast-lookup]` every 5 s.
+
+| Run (same learned cache, defaults) | Race start | +7 s | pipeline lookup in those frames | recording | >100 ms |
+| --- | --- | --- | --- | --- | --- |
+| f1 (table empty; learns 1,981 entries) | 275 ms | 244 ms | 86 / 76 ms | 62 / 66 ms | 8 (excl. shots) |
+| f2 (table loaded: 1,675 hits, 22 absent, 556 not resident) | 113 ms | 106 ms | 1.7 / 2.4 ms | 6.8 / 7.6 ms | 6 |
+| f3 (same cache, `RSX_PSO_FAST_LOOKUP=0`) | 350 ms | 286 ms | 122 / 104 ms | 75 / 63 ms | 15 (excl. shots) |
+
+f2's 60 s FrameTest: 59.9 FPS, p99 17.9 ms, max 28.9 ms, 0.0% late. "Not resident" entries are menu
+pipelines (the test route runs without startup warmup); with the player default (warmup on) those would hit too.
+f3 also showed several 0.6-1.6 s frames at 10-28 s, mostly overlapping screenshots, one with 912 ms in
+pipeline lookup; that run has the new path off, and the cause was not investigated. f2 screenshots (grid,
+bridge, on-track with mirror) render correctly.
+
+What remains in the race-start frame (113 ms): texture creation for about 190 first-time textures (52 ms),
+the rest of texture handling (13 ms) and replay. A first launch (empty table) still pays the old cost once.
+The rollback run r1 (`RSX_TEX_LRU=0 RSX_TEX_POOL=0 RSX_RACE_PREWARM_THREADS=1` on the default engine)
+reproduced the old behaviour (single-thread prewarm 56.8 s, two allocations per texture, race start 371 ms).
+
 ## Phase 220 - Shader-interpreter pipelines prepared ahead of use (2026-11-05)
 
 Branch `feature/interp-pipeline-prep` from `feature/shader-coverage-scaling` 839eb15 (v0.2.4 plus docs). 0.2.5 work;

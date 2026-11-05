@@ -32,6 +32,10 @@ Evidence for finished work goes in [progress.md](progress.md).
 - **Hitches:** finish hitch attribution (stopped at `3d8673d`). Then ship the
   measured fixes for car, reflection and rolling-start camera hitches, including
   texture retention (`RSX_TEX_LRU`) if the numbers hold.
+  Status (Phase 221, branch `feature/hitch-texture-lru`, not merged): texture retention, a texture
+  pool/staging ring, a 4-thread race prewarm and a persistent fast pipeline lookup are defaults in the main
+  patch; High Speed Ring race-start frame 370-407 -> 113 ms on a prepared cache. Remaining: first-time
+  texture creation and the first launch before the lookup table is learned.
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;
