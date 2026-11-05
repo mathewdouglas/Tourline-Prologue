@@ -124,6 +124,29 @@ def read(path):
     return tag_value, dict(struct.unpack_from('<QQ', data, 24 + 16 * i) for i in range(count))
 
 
+def translated_records(rows, default_records, cache):
+    """Additional-translation rows ({template_key: default native key, key, vp_source}) as records: state and
+    fragment program from the default record they derive from, "vs" from the translated vertex shader's
+    bytecode in the cache (the same FNV-1a 64 the renderer computes). Rows whose pieces are missing are skipped."""
+    from cache_hash import fnv64
+    by_key = {r['key']: r for r in default_records}
+    vs_cache, out = {}, []
+    for row in rows:
+        base = by_key.get(row.get('template_key'))
+        source = row.get('vp_source')
+        if not base or not source:
+            continue
+        if source not in vs_cache:
+            path = Path(cache) / f'{source}.dxbc'
+            try:
+                vs_cache[source] = f'{fnv64(path.read_bytes()):016x}' if path.is_file() and path.stat().st_size <= 4 << 20 else None
+            except OSError:
+                vs_cache[source] = None
+        if vs_cache[source]:
+            out.append(dict(fp=base['fp'], state=base['state'], vs=vs_cache[source], key=row['key']))
+    return out
+
+
 def enabled(environ=None):
     value = (os.environ if environ is None else environ).get('GT5P_PREPARE_FAST_LOOKUP', '1')
     if value not in ('0', '1'):
@@ -142,8 +165,12 @@ def write_for_preparation(output, engine, report, high_precision=True, translati
     warm.mkdir(parents=True, exist_ok=True)
     sets = {'default': report.get('derived_records') or []}
     extra = report.get('additional_translation')
-    if isinstance(extra, dict) and extra.get('translation') in MODES and extra.get('resolved_records'):
-        sets[extra['translation']] = extra['resolved_records']
+    if isinstance(extra, dict) and extra.get('translation') in MODES:
+        if extra.get('resolved_records'):
+            sets[extra['translation']] = extra['resolved_records']
+        elif extra.get('records'):
+            sets[extra['translation']] = translated_records(extra['records'], sets['default'],
+                                                            Path(output) / 'shadercache')
     for mode, records in sets.items():
         if not records:
             continue
