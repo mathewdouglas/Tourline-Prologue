@@ -52,6 +52,7 @@ More detail: [launcher/START-HERE.txt](launcher/START-HERE.txt), [docs/player-se
 - Shader preparation is optional and partial. The starter covers observed menu, High Speed Ring, Daytona and Fuji Speedway F pipelines at the supported settings. At 720p and 1080p 16:9 it also writes menu and race shader packs. Other cars, cameras, track sections and settings still compile on demand. One High Speed Ring comparison had fewer long frames with those packs. That is not a guarantee that stutter is gone.
 - A locked 60 frames per second is not guaranteed. The first visit to a new effect can pause the picture while shaders compile.
 - Post-race replay has been reported with several overlaid copies of the scene, and replay controls have been reported missing. Those reports are still open.
+- Returning to the main menu after a race has once shown the menu scene's glowing paper windows and lanterns as flat bright yellow. It did not happen again on a repeat of the same steps. A render-target slot reused after the race is suspected; the report is open.
 - The keyboard is used when no controller is connected. Some assignment-page text still names PlayStation buttons.
 - Only the US disc build BCUS98158 v03.00 is supported.
 

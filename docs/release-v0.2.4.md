@@ -66,6 +66,13 @@ works without preparation.
   after about 9% of travel. `PAD_PRESS_FORCE_FULL=1` restores the old
   behaviour.
 
+## Known problems
+
+- Once, after returning to the main menu from a race, the menu scene's
+  glowing paper windows and lanterns showed as flat bright yellow. A
+  repeat of the same steps did not reproduce it. A render-target
+  slot reused after the race is suspected; it may predate this release.
+
 ## Not in this release
 
 - The shader interpreter fallback stays off. It cuts draws left out while
