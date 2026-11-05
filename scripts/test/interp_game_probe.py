@@ -26,6 +26,8 @@ def main() -> None:
     p.add_argument("--seconds", type=int)
     p.add_argument("--track", choices=("HighSpeedRing", "Daytona", "FujiSpeedwayF"), default="HighSpeedRing")
     p.add_argument("--frame-test", action="store_true")
+    p.add_argument("--no-foreground", action="store_true",
+                   help="FrameTest without -RequireForeground (another window may take focus; timing is then unfocused)")
     p.add_argument("--ab", action="store_true")
     p.add_argument("--cold", action="store_true", help="require a completely empty cache")
     p.add_argument("--paired-prewarm", action="store_true", help="interpret both stages together while either is pending; precreate starter native classes")
@@ -90,7 +92,9 @@ def main() -> None:
                  "-Engine", str(a.engine.resolve()),
                  "-GameRoot", str(game), "-GridTimeoutSec", "240", "-MenuDelaySec", str(a.menu_delay if a.menu_delay is not None else (30 if a.cold else 0))]
         if a.frame_test:
-            args += ["-FrameTest", "-SampleDelay", "45", "-RequireForeground", "-IntroShots"]
+            args += ["-FrameTest", "-SampleDelay", "45", "-IntroShots"]
+            if not a.no_foreground:
+                args.append("-RequireForeground")
             # PowerShell accepts each named parameter only once.
             i = args.index("-SampleDelay")
             del args[i:i + 2]
