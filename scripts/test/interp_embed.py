@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import struct
+import sys
 
 
 def source_body(path: Path) -> str:
@@ -50,18 +51,11 @@ def generate(video: Path, cache: Path) -> None:
         total += len(data)
     text.append("static const struct { const unsigned char* bytes; unsigned size; u64 key; } rsx_interp_embedded[] = {")
     text += table + ["};"]
+    # Phase 220: one derivation shared with the preparation helper and its tests.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from interp_pipeline_classes import base_classes, load_template, render_c
     metadata = Path(__file__).resolve().parents[2] / "assets" / "pipeline-templates" / "gt5p-disc-v2"
-    classes = set()
-    for part in sorted(metadata.glob("part-*.json")):
-        for record in json.loads(part.read_text(encoding="utf-8"))["records"]:
-            state = record["state"]
-            classes.add((record["vp_gpu"], 0 if record["vp_gpu"] else state["vmask"],
-                         *(state[k] for k in ("nrt", "rtfmt", "blend", "cmask", "cull", "stencil")),
-                         state["cube"] & 0xF0000))
-    if not 0 < len(classes) <= 512 or any(type(v) is not int or not 0 <= v <= 0xFFFFFFFF for row in classes for v in row):
-        raise ValueError("invalid or excessive interpreter native classes")
-    text.append("static const struct { u32 gpu, vmask, nrt, fmt, blend, cmask, cull, stencil, cube; } rsx_interp_classes[] = {")
-    text += ["    {" + ",".join(f"{v}u" for v in row) + "}," for row in sorted(classes)]
-    text.append("};")
+    classes = base_classes(load_template(metadata))
+    text += render_c(classes)
     (video / "rsx_interp_dxbc.inc").write_text("\n".join(text) + "\n", encoding="ascii", newline="\n")
     print(f"embedded {len(rows)} original generic shaders / {total} bytes; {len(classes)} native/input classes", flush=True)

@@ -1,5 +1,5 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index b82ed04..171a2f0 100644
+index 61384ef..d89c1a5 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
 @@ -236,8 +236,57 @@ typedef struct {
@@ -25,7 +25,7 @@ index b82ed04..171a2f0 100644
 +static void fp_interp_log_tick(void);
 +static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
 +    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
-+    int vp_stage, u32* hdr_off);
++    int* vp_stage_io, u32* vp_hdr, u32* hdr_off);
 +static void fp_interp_bind(const D3D12DrawRecord* dr, u32 draw_i, u32 hdr_off);
 +static void interp_frame_begin(void);
 +static int interp_pair(void);
@@ -140,7 +140,7 @@ index b82ed04..171a2f0 100644
      { static int s_miss = 0, s_calls = 0;      /* VP_CACHEDBG=1: miss rate */
        static int dbg = -1; if (dbg < 0) dbg = getenv("VP_CACHEDBG") ? 1 : 0;
        if (dbg) {
-@@ -4090,7 +4151,7 @@ static u64 guest_pso_hash_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, int w
+@@ -4124,7 +4185,7 @@ static u64 guest_pso_hash_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, int w
      { static int rs = -1; if (rs < 0) { const char* e = getenv("RSX_PSO_KEY_RS"); rs = !(e && e[0] == '0'); }
        if (rs && with_rs) {
            u64 rh = pd->pRootSignature == s_d3d.vp_root_sig ? s_vp_rs_hash :
@@ -149,7 +149,7 @@ index b82ed04..171a2f0 100644
            hash = pso_hash_bytes(hash, "rs", 2);
            hash = pso_hash_bytes(hash, &rh, sizeof rh);
        } }
-@@ -5298,6 +5359,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5342,6 +5403,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
                                            u64 samp_key)
  {
      s_fp_pending = 0;
@@ -157,7 +157,7 @@ index b82ed04..171a2f0 100644
      /* Key on which units are texel-addressed. Their sizes reach the shader
       * as per-draw constants, so they are not part of the pipeline. */
      u32 unnorm = unnorm_mask ? (0x100u | unnorm_mask) : 0;
-@@ -5442,7 +5504,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5486,7 +5548,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
            for (u32 h = fp_key_hash(&key) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1)) {
                const int e = s_fpi[h];
                if (!e) break;
@@ -166,7 +166,7 @@ index b82ed04..171a2f0 100644
            }
        } else
      for (int i = 0; i < s_d3d.vp_fp_n; i++)
-@@ -5458,7 +5520,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -5502,7 +5564,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
              s_d3d.vp_fp[i].vmask == s_pso_vmask &&
              s_d3d.vp_fp[i].samp_key == samp_key && s_d3d.vp_fp[i].ghi == s_pso_ghi &&
              s_d3d.vp_fp[i].shd == s_pso_shd && s_d3d.vp_fp[i].unhi == s_pso_unhi)
@@ -175,7 +175,7 @@ index b82ed04..171a2f0 100644
      /* Keys whose pixel shader the pool is compiling: answer "pending" without
       * building the HLSL again. Both the pre-pass and the draw ask every frame,
       * and rebuilding it for every waiting draw took 4 of every 5 s while a
-@@ -6566,6 +6628,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -6610,6 +6672,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
              (vs_idx >= 0 && vs_idx < s_d3d.vp_vs_n) ? &s_d3d.vp_vs[vs_idx].provenance : NULL,
              hlsl, fp_shc, fp_flags, hr);
      if (pso_timing_on()) s_pt_pso += pt_ms_since(&s_pt_t0);
@@ -183,7 +183,7 @@ index b82ed04..171a2f0 100644
      pb->lpVtbl->Release(pb);
      if (hr == E_PENDING) {
          for (u32 h=fp_pend_h,n=0;n<32;++n,h=(h+1)&(FP_PEND_N-1))
-@@ -6637,6 +6700,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
+@@ -6681,6 +6744,7 @@ static ID3D12PipelineState* vp_get_fp_pso(int vs_idx, u32 fp_addr, u32 blend, in
      s_d3d.vp_fp[s_d3d.vp_fp_n].unhi = s_pso_unhi;
      s_d3d.vp_fp[s_d3d.vp_fp_n].native_hash = native_hash;
      s_d3d.vp_fp[s_d3d.vp_fp_n].pso     = pso;
@@ -191,7 +191,7 @@ index b82ed04..171a2f0 100644
      for (u32 h = fp_key_hash(&s_d3d.vp_fp[s_d3d.vp_fp_n]) & (FPI_N - 1), n = 0; n < FPI_N; n++, h = (h + 1) & (FPI_N - 1))
          if (!s_fpi[h]) { s_fpi[h] = s_d3d.vp_fp_n + 1; break; }
      s_d3d.vp_fp_n++;
-@@ -6884,8 +6948,10 @@ static void tex_upload_sweep(void)
+@@ -6928,8 +6992,10 @@ static void tex_upload_sweep(void)
  static void vp_fp_cache_flush_if_full(void)
  {
      if (!s_fp_full) return;
@@ -203,7 +203,7 @@ index b82ed04..171a2f0 100644
      for (int i = 0; i < s_fp_orphan_n; i++) s_fp_orphan[i]->lpVtbl->Release(s_fp_orphan[i]);
      s_d3d.vp_fp_n = 0; s_fp_orphan_n = 0; s_fp_full = 0;
      memset(s_fpi, 0, sizeof s_fpi);
-@@ -11660,6 +11726,7 @@ static void render_frame_body(void)
+@@ -11704,6 +11770,7 @@ static void render_frame_body(void)
                      (void*)vpso, (void*)s_d3d.vp_root_sig); } }
          if (any && vpso) {
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootSignature(s_d3d.cmd_list, s_d3d.vp_root_sig);
@@ -211,7 +211,7 @@ index b82ed04..171a2f0 100644
              s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list, vpso);
              s_d3d.cmd_list->lpVtbl->IASetPrimitiveTopology(s_d3d.cmd_list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
              s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
-@@ -11925,8 +11992,8 @@ static void render_frame_body(void)
+@@ -11969,8 +12036,8 @@ static void render_frame_body(void)
                  static u32 skipdbg = 1; static int skipdbg_n;
                  if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
                  const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
@@ -222,7 +222,7 @@ index b82ed04..171a2f0 100644
                  /* Per-draw pipeline: prefer the guest's own compiled FP; fall
                   * back to the hardcoded atlas/colour PS pair. */
                  u32 _un_dim[16][2];
-@@ -11934,27 +12001,89 @@ static void render_frame_body(void)
+@@ -11978,27 +12045,89 @@ static void render_frame_body(void)
                  s_pso_vmask = dr->vtx_mask ? dr->vtx_mask : 0xFFFFu; s_pso_ghi = dr->tex_gamma_hi | (dr_volume_mask(dr) << 16);
                  s_pso_unhi = dr_unnorm_hi(dr);
                  s_pso_shd = dr->tex_shd ? (dr->tex_shd | ((u32)dr->shd_func << 16)) : 0u;
@@ -269,7 +269,7 @@ index b82ed04..171a2f0 100644
 +                ID3D12PipelineState* dpso = NULL;
 +                if (_imode == 2 && dr->fp_addr) {
 +                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
-+                                             _cmask, dr->cull, _cube, _sten, vp_stage, &hdr_off);
++                                             _cmask, dr->cull, _cube, _sten, &vp_stage, &vp_hdr, &hdr_off);
 +                    use_interp = dpso != NULL;
 +                    if (!use_interp) fp_interp_note_fallback();
 +                }
@@ -294,7 +294,7 @@ index b82ed04..171a2f0 100644
 +                     * while either stage/driver PSO is pending. */
 +                    if (interp_pair() && !vp_stage) vp_stage = vp_interp_stage(dr, &vp_hdr);
 +                    dpso = fp_interp_prepare(dr, d, _nrt, _rtfmt, dr->blend_key,
-+                                             _cmask, dr->cull, _cube, _sten, vp_stage, &hdr_off);
++                                             _cmask, dr->cull, _cube, _sten, &vp_stage, &vp_hdr, &hdr_off);
 +                    if (dpso) { use_interp = 1; s_fp_pending = 0; }
 +                    else fp_interp_note_fallback();
 +                }
@@ -325,7 +325,7 @@ index b82ed04..171a2f0 100644
                  s_d3d.cmd_list->lpVtbl->SetPipelineState(s_d3d.cmd_list,
                                                           dpso ? dpso : vpso);
                  if (dr->stencil & 1u)
-@@ -12068,9 +12197,13 @@ static void render_frame_body(void)
+@@ -12112,9 +12241,13 @@ static void render_frame_body(void)
                          rt != cur_m[0] && rt != cur_m[1] && rt != cur_m[2])
                          off_rt_transition(rt, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                  }
@@ -342,7 +342,7 @@ index b82ed04..171a2f0 100644
                  /* Per-draw constants: this draw's vp_cb + FP texscale slots. */
                  s_d3d.cmd_list->lpVtbl->SetGraphicsRootConstantBufferView(s_d3d.cmd_list, 0,
                      frame_gva(s_d3d.vp_cb)
-@@ -12114,6 +12247,7 @@ static void render_frame_body(void)
+@@ -12158,6 +12291,7 @@ static void render_frame_body(void)
                        s_d3d.cmd_list->lpVtbl->OMSetRenderTargets(
                            s_d3d.cmd_list, bn, brh, FALSE, cur_has_dsv ? &dsv_handle : NULL);
                    } }
@@ -350,7 +350,7 @@ index b82ed04..171a2f0 100644
                  if (gf_slot(d)) {
                      s_d3d.cmd_list->lpVtbl->SetGraphicsRootShaderResourceView(s_d3d.cmd_list, 3,
                          frame_gva(s_vraw) + (u64)FR->parity * VRAW_BYTES);
-@@ -12175,6 +12309,12 @@ static void render_frame_body(void)
+@@ -12219,6 +12353,12 @@ static void render_frame_body(void)
                  s_d3d.cmd_list->lpVtbl->RSSetViewports(s_d3d.cmd_list, 1, &vp);
                  s_d3d.cmd_list->lpVtbl->RSSetScissorRects(s_d3d.cmd_list, 1, &sc);
              }
@@ -363,7 +363,7 @@ index b82ed04..171a2f0 100644
          }
      }
  
-@@ -12546,7 +12686,9 @@ skip_dump_consider: ;
+@@ -12590,7 +12730,9 @@ skip_dump_consider: ;
      }
      if (dumping) {
          wait_for_gpu();            /* ensure the copy finished before mapping */
@@ -373,7 +373,7 @@ index b82ed04..171a2f0 100644
          s_d3d.dump_frames_left--;
      }
  
-@@ -15049,6 +15191,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+@@ -15093,6 +15235,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
                  }
                  dr->tex_slot = -1;
                  { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
@@ -381,7 +381,7 @@ index b82ed04..171a2f0 100644
                  dr->is_clear = 0; dr->readback = 0;
                  dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
                  dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
-@@ -15188,6 +15331,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
+@@ -15232,6 +15375,7 @@ static void d3d12_draw_arrays_body(void* ud, u32 primitive, u32 first, u32 count
              }
              dr->tex_slot = -1;
              { double _q = perf_on() ? perf_now() : 0.0; dr->vs_idx = vp_get_vs(s_d3d.current_rsx_state); if (perf_on()) s_perf_vs += perf_now() - _q; }
@@ -389,7 +389,7 @@ index b82ed04..171a2f0 100644
              dr->is_clear = 0; dr->readback = 0;
              dr->blend = s_d3d.current_rsx_state ? s_d3d.current_rsx_state->blend_enable : 1;
              dr->blend_key = rsx_blend_key(s_d3d.current_rsx_state, dr->blend);
-@@ -15443,12 +15587,15 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
+@@ -15487,12 +15631,15 @@ static void d3d12_draw_indexed_body(void* ud, u32 primitive, u32 first, u32 coun
          dr->gf_defhash = gfc ? vgpu_def_hash() : 0;
          DP_ADD(DP_RECORD, _dpr);
          { const unsigned long long _dv = DP_T0();
@@ -409,7 +409,7 @@ index b82ed04..171a2f0 100644
              static int _n = 0; if (dr->vs_idx != VS_PENDING && _n++ < 8)
                  fprintf(stderr, "[VTXGPU] no fetch shader for this vertex program; draw dropped%c", 10);
              FR->gf_slot_gen[FR->draw_count] = 0;
-@@ -15835,6 +15982,8 @@ void rsx_d3d12_backend_shutdown(void)
+@@ -15879,6 +16026,8 @@ void rsx_d3d12_backend_shutdown(void)
      rt_stop();
      pso_queue_stop();
      wait_for_gpu();
@@ -418,7 +418,7 @@ index b82ed04..171a2f0 100644
      spack_race_end_ex(1);   /* quitting from a race keeps what it learned */
      dxbc_mem_clear();
      pso_warm_clear();
-@@ -15997,6 +16146,9 @@ void rsx_d3d12_backend_present(void)
+@@ -16041,6 +16190,9 @@ void rsx_d3d12_backend_present(void)
      }
  }
  
@@ -881,10 +881,10 @@ index 0000000..6011b6f
 +#endif
 diff --git a/libs/video/rsx_fp_interp_backend.inc b/libs/video/rsx_fp_interp_backend.inc
 new file mode 100644
-index 0000000..2696f17
+index 0000000..7c197ea
 --- /dev/null
 +++ b/libs/video/rsx_fp_interp_backend.inc
-@@ -0,0 +1,1012 @@
+@@ -0,0 +1,1283 @@
 +/* Fragment-interpreter replay. Included at the bottom of rsx_d3d12_backend.c
 + * so it can call that file's static helpers. RSX_SHADER_INTERP unset or 0
 + * returns before any allocation, signature, or binding. This file also owns
@@ -944,7 +944,8 @@ index 0000000..2696f17
 +} InterpPsoKey;
 +/* state: 1 queued for the background creator, 2 ready, 3 failed (never retried). Synchronous
 + * creation stores 2 or leaves no slot. pso is published before state becomes 2. */
-+typedef struct { InterpPsoKey key; ID3D12PipelineState* volatile pso; ID3DBlob* vs_hold; ID3DBlob* ps_hold; volatile LONG state; } InterpPsoSlot;
++/* prep: 1 + index into the class-preparation list when this slot was queued by it (Phase 220), else 0. */
++typedef struct { InterpPsoKey key; ID3D12PipelineState* volatile pso; ID3DBlob* vs_hold; ID3DBlob* ps_hold; volatile LONG state; u32 prep; } InterpPsoSlot;
 +#define INTERP_PSO_MAX 4096
 +static InterpPsoSlot s_interp_pso[INTERP_PSO_MAX];
 +static u32 s_interp_pso_n;
@@ -958,6 +959,8 @@ index 0000000..2696f17
 +    /* Phase 216: pipeline persistence and background creation. */
 +    u32 pso_disk_hit, pso_disk_save, pso_disk_reject, pso_wait, pso_queued, pso_queue_full;
 +    u32 block_ms, block_max_ms;          /* time the replay thread spent inside CreateGraphicsPipelineState */
++    /* Phase 220: class preparation (never counted in pso_new/pso_ms, which stay demand-only). */
++    u32 prep_pair, prep_promoted;
 +} s_interp_stat;
 +
 +/* Configured mode: 0 off, 1 only while the specialized stage is pending,
@@ -1283,6 +1286,7 @@ index 0000000..2696f17
 +
 +static int interp_pso_disk(void);
 +static int interp_pso_async(void);
++static void interp_prep_log(void);
 +static void fp_interp_log_tick(void)
 +{
 +    if (!fp_interp_cfg()) return;
@@ -1299,6 +1303,7 @@ index 0000000..2696f17
 +            s_interp_stat.block_ms, s_interp_stat.block_max_ms, s_interp_stat.pso_queued, s_interp_stat.pso_queue_full,
 +            s_interp_stat.pso_wait, s_interp_stat.pso_disk_hit, s_interp_stat.pso_disk_save, s_interp_stat.pso_disk_reject,
 +            interp_pso_disk(), interp_pso_async());
++    interp_prep_log();
 +}
 +
 +/* Cube wins over volume when both are set: srv_write_ex writes the cube view last. */
@@ -1407,15 +1412,22 @@ index 0000000..2696f17
 +
 +/* Create one pipeline, from the disk blob when it validates, else from the descriptor (and then save it).
 + * Safe on any thread: only the device, the local filesystem and the atomic counters are touched. */
-+static HRESULT interp_pso_make(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, ID3D12PipelineState** out)
++/* disk: persist/reuse the blob (callers pass interp_pso_disk() for demand work; class preparation persists
++ * unless RSX_SHADER_INTERP_PSO_DISK=0). hash_out: the blob key, 0 when the disk path is off. from_disk: 1 when
++ * the driver accepted the persisted blob. */
++static HRESULT interp_pso_make_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, ID3D12PipelineState** out,
++                                  int disk, u64* hash_out, int* from_disk)
 +{
 +    *out = NULL;
++    if (hash_out) *hash_out = 0;
++    if (from_disk) *from_disk = 0;
 +    const char* dir = getenv("RSX_SHADER_CACHE");
 +    if (!dir) dir = "shadercache";
 +    const char* pe = getenv("RSX_PSO_DISK");
-+    if (!interp_pso_disk() || !strcmp(dir, "0") || (pe && !strcmp(pe, "0")))
++    if (!disk || !strcmp(dir, "0") || (pe && !strcmp(pe, "0")))
 +        return s_d3d.device->lpVtbl->CreateGraphicsPipelineState(s_d3d.device, pd, &IID_ID3D12PipelineState, (void**)out);
 +    const u64 hash = guest_pso_hash(pd);
++    if (hash_out) *hash_out = hash;
 +    char path[512]; snprintf(path, sizeof path, "%s/ipso_%016llx.bin", dir, (unsigned long long)hash);
 +    const u64 magic = 0x31534F5035505447ull;
 +    void* cached = NULL; size_t bytes = 0;
@@ -1439,7 +1451,7 @@ index 0000000..2696f17
 +    if (bytes) {
 +        desc.CachedPSO.pCachedBlob = cached; desc.CachedPSO.CachedBlobSizeInBytes = bytes;
 +        hr = s_d3d.device->lpVtbl->CreateGraphicsPipelineState(s_d3d.device, &desc, &IID_ID3D12PipelineState, (void**)out);
-+        if (SUCCEEDED(hr)) interp_stat_add(&s_interp_stat.pso_disk_hit, 1);
++        if (SUCCEEDED(hr)) { interp_stat_add(&s_interp_stat.pso_disk_hit, 1); if (from_disk) *from_disk = 1; }
 +        else { interp_stat_add(&s_interp_stat.pso_disk_reject, 1); if (*out) { (*out)->lpVtbl->Release(*out); *out = NULL; } }
 +    }
 +    free(cached);
@@ -1464,6 +1476,10 @@ index 0000000..2696f17
 +    }
 +    return hr;
 +}
++static HRESULT interp_pso_make(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, ID3D12PipelineState** out)
++{
++    return interp_pso_make_ex(pd, out, interp_pso_disk(), NULL, NULL);
++}
 +
 +static void interp_note_created(u32 ms)
 +{
@@ -1475,7 +1491,7 @@ index 0000000..2696f17
 +/* Background creator: one thread, a bounded ring of descriptor copies. The descriptor's shader blobs are
 + * kept alive by the slot's holds; the root signature lives to shutdown. */
 +#define INTERP_JOB_MAX 512
-+typedef struct { D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; D3D12_INPUT_ELEMENT_DESC il[16]; u32 slot; } InterpJob;
++typedef struct { D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; D3D12_INPUT_ELEMENT_DESC il[16]; u32 slot; int disk; } InterpJob;
 +static InterpJob* s_ijob;
 +static u32 s_ijob_head, s_ijob_tail;
 +static SRWLOCK s_ijob_lock = SRWLOCK_INIT;
@@ -1500,7 +1516,7 @@ index 0000000..2696f17
 +        QueryPerformanceFrequency(&qf);
 +        QueryPerformanceCounter(&q0);
 +        ID3D12PipelineState* pso = NULL;
-+        HRESULT hr = interp_pso_make(&job.pd, &pso);
++        HRESULT hr = interp_pso_make_ex(&job.pd, &pso, job.disk, NULL, NULL);
 +        QueryPerformanceCounter(&q1);
 +        u32 ms = (u32)((q1.QuadPart - q0.QuadPart) * 1000ll / qf.QuadPart);
 +        InterpPsoSlot* sl = &s_interp_pso[job.slot];
@@ -1509,7 +1525,8 @@ index 0000000..2696f17
 +    }
 +}
 +
-+static int interp_job_enqueue(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, const D3D12_INPUT_ELEMENT_DESC* il, u32 slot)
++static int interp_job_enqueue_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, const D3D12_INPUT_ELEMENT_DESC* il,
++                                 u32 slot, int disk)
 +{
 +    if (!s_ijob) s_ijob = (InterpJob*)calloc(INTERP_JOB_MAX, sizeof(InterpJob));
 +    if (!s_ijob) return 0;
@@ -1518,14 +1535,185 @@ index 0000000..2696f17
 +    if (!s_ijob_thread) s_ijob_thread = CreateThread(NULL, 0, interp_job_main, NULL, 0, NULL);
 +    if (!s_ijob_thread) { ReleaseSRWLockExclusive(&s_ijob_lock); return 0; }
 +    InterpJob* j = &s_ijob[s_ijob_tail++ % INTERP_JOB_MAX];
-+    j->pd = *pd; memcpy(j->il, il, 16u * sizeof(D3D12_INPUT_ELEMENT_DESC)); j->slot = slot;
++    j->pd = *pd; memcpy(j->il, il, 16u * sizeof(D3D12_INPUT_ELEMENT_DESC)); j->slot = slot; j->disk = disk;
 +    ReleaseSRWLockExclusive(&s_ijob_lock);
 +    WakeConditionVariable(&s_ijob_cv);
 +    return 1;
 +}
++static int interp_job_enqueue(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd, const D3D12_INPUT_ELEMENT_DESC* il, u32 slot)
++{
++    return interp_job_enqueue_ex(pd, il, slot, interp_pso_disk());
++}
++
++/* ---- Phase 220: interpreter pipeline classes prepared ahead of use ----
++ * The class table (rsx_interp_classes, embedded by the private build from the verified starter's numeric
++ * state) names native output state only: targets/format, blend, write mask, cull, stencil/depth, input layout,
++ * multisampled or not. interp_prewarm maps it to this process's settings (RSX_MSAA sample count,
++ * RSX_HIGH_PRECISION target format, RSX_SSAA pixel-shader variant) and queues the generic fragment x generic
++ * vertex pipeline of each class on a list that a separate lowest-priority thread creates in order. Demand work
++ * keeps its own worker; a demand draw that needs a still-queued class promotes that one entry to the demand
++ * worker. Blobs persist as ipso_<hash>.bin with the demand path's validation; a complete set writes
++ * ipso-set-<identity>.txt beside them.
++ *   RSX_SHADER_INTERP_PIPELINE_PREP=0     no class preparation (rollback)
++ *   RSX_SHADER_INTERP_PIPELINE_PREP=sync  create them on the init thread and report (offline preparation helper)
++ *   RSX_SHADER_INTERP_PREP_PAIR=0         never route a fragment-only interpreter draw to a prepared paired pipeline
++ *   RSX_SHADER_INTERP_PREP_YIELD=0        do not wait for queued demand pipelines between preparation jobs
++ * Runs only when both RSX_SHADER_INTERP and RSX_SHADER_INTERP_VP are configured. */
++typedef struct { D3D12_GRAPHICS_PIPELINE_STATE_DESC pd; D3D12_INPUT_ELEMENT_DESC il[16]; u32 slot; volatile LONG taken; } InterpPrep;
++#define INTERP_PREP_MAX 1024
++static InterpPrep* s_iprep;
++static u32 s_iprep_n;
++static int s_iprep_enqueue;                 /* set while interp_prewarm queues: interp_get_pso adds prep entries */
++static HANDLE s_iprep_thread;
++static struct { u32 classes, rejected, created, disk_hit, failed, driver_ms, max_ms; int cancelled; } s_iprep_stat;
++static volatile LONG s_iprep_done;          /* 1 once the run (complete or cancelled) has reported */
++
++static int interp_prep_mode(void)           /* 0 off, 1 background, 2 synchronous */
++{
++    static int m = -1;
++    if (m < 0) {
++        const char* e = getenv("RSX_SHADER_INTERP_PIPELINE_PREP");
++        m = (e && e[0] == '0') ? 0 : (e && (e[0] == 's' || e[0] == 'S')) ? 2 : 1;
++        const char* legacy = getenv("RSX_SHADER_INTERP_PREWARM");   /* Phase 216 switch: synchronous at init */
++        if (legacy && legacy[0] == '1' && m) m = 2;
++    }
++    return m;
++}
++static int interp_prep_disk(void)
++{
++    const char* e = getenv("RSX_SHADER_INTERP_PSO_DISK");
++    return !(e && e[0] == '0');
++}
++static int interp_prep_pair_on(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("RSX_SHADER_INTERP_PREP_PAIR"); on = !(e && e[0] == '0'); }
++    return on && s_iprep_n;
++}
++static int interp_prep_should_yield(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("RSX_SHADER_INTERP_PREP_YIELD"); on = !(e && e[0] == '0'); }
++    if (!on) return 0;
++    LONG main_pending = s_pso_queued - s_pso_done - s_pso_failed;   /* specialized demand pipelines queued */
++    return main_pending > 0 || s_ijob_tail != s_ijob_head;           /* or an interpreter demand job */
++}
++
++/* Called by the replay thread when a demand draw finds its slot still on the preparation list. */
++static void interp_prep_promote(u32 slot)
++{
++    u32 pi = s_interp_pso[slot].prep;
++    if (!pi || pi > s_iprep_n || s_iprep_enqueue) return;
++    InterpPrep* e = &s_iprep[pi - 1];
++    if (InterlockedCompareExchange(&e->taken, 1, 0) != 0) return;
++    if (interp_job_enqueue_ex(&e->pd, e->il, slot, interp_prep_disk())) s_interp_stat.prep_promoted++;
++    else InterlockedExchange(&e->taken, 0);   /* demand ring full: preparation keeps it */
++}
++
++static void interp_prep_report(const char* mode, ULONGLONG t0)
++{
++    const char* dir = getenv("RSX_SHADER_CACHE");
++    if (!dir) dir = "shadercache";
++    /* Identity: every prepared descriptor's blob key in list order (bytecode, all native state, root signature
++     * bytes, sample count and target format all enter it). A settings change gives another identity. */
++    u64 id = 1469598103934665603ull;
++    u32 ready = 0;
++    for (u32 i = 0; i < s_iprep_n; i++) {
++        u64 h = guest_pso_hash(&s_iprep[i].pd);
++        for (int b = 0; b < 8; b++) { id ^= (u8)(h >> (b * 8)); id *= 1099511628211ull; }
++        if (s_interp_pso[s_iprep[i].slot].state == 2) ready++;
++    }
++    int complete = !s_iprep_stat.cancelled && !s_iprep_stat.failed && ready == s_iprep_n && s_iprep_n;
++    char marker[600]; snprintf(marker, sizeof marker, "%s/ipso-set-%016llx.txt", dir, (unsigned long long)id);
++    DWORD attr = GetFileAttributesA(marker);
++    int previously = attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
++    const char* pe = getenv("RSX_PSO_DISK");
++    int persisted = interp_prep_disk() && strcmp(dir, "0") && !(pe && !strcmp(pe, "0"));
++    if (complete && persisted && !previously) {
++        FILE* f = fopen(marker, "wb");
++        if (f) { fprintf(f, "ipso-set-v1 pipelines=%u classes=%u\n", s_iprep_n, s_iprep_stat.classes); fclose(f); }
++    }
++    fprintf(stderr, "[interp-prep] version=1 mode=%s complete=%d persisted=%d previously_complete=%d identity=%016llx "
++        "classes=%u rejected=%u pipelines=%u ready=%u created=%u disk_hit=%u promoted=%u failed=%u cancelled=%d "
++        "wall_ms=%llu driver_ms=%u max_ms=%u\n",
++        mode, complete, persisted, previously, (unsigned long long)id, s_iprep_stat.classes, s_iprep_stat.rejected,
++        s_iprep_n, ready, s_iprep_stat.created, s_iprep_stat.disk_hit, s_interp_stat.prep_promoted,
++        s_iprep_stat.failed, s_iprep_stat.cancelled, (unsigned long long)(GetTickCount64() - t0),
++        s_iprep_stat.driver_ms, s_iprep_stat.max_ms);
++    fflush(stderr);
++    InterlockedExchange(&s_iprep_done, 1);
++}
++
++static void interp_prep_run(int background)
++{
++    ULONGLONG t0 = GetTickCount64();
++    int disk = interp_prep_disk();
++    LARGE_INTEGER qf; QueryPerformanceFrequency(&qf);
++    for (u32 i = 0; i < s_iprep_n; i++) {
++        InterpPrep* e = &s_iprep[i];
++        if (s_ijob_stop) { s_iprep_stat.cancelled = 1; break; }
++        if (e->taken) continue;
++        /* Live demand first: wait (bounded, 200 ms a job) while demand pipelines are queued. */
++        for (int w = 0; background && w < 100 && !s_ijob_stop && interp_prep_should_yield(); w++) Sleep(2);
++        if (InterlockedCompareExchange(&e->taken, 1, 0) != 0) continue;   /* promoted meanwhile */
++        InterlockedIncrement(&g_rsx_shader_preload_busy);
++        LARGE_INTEGER q0, q1; QueryPerformanceCounter(&q0);
++        ID3D12PipelineState* pso = NULL; int hit = 0;
++        HRESULT hr = interp_pso_make_ex(&e->pd, &pso, disk, NULL, &hit);
++        QueryPerformanceCounter(&q1);
++        InterlockedDecrement(&g_rsx_shader_preload_busy);
++        u32 ms = (u32)((q1.QuadPart - q0.QuadPart) * 1000ll / qf.QuadPart);
++        InterpPsoSlot* sl = &s_interp_pso[e->slot];
++        if (SUCCEEDED(hr) && pso) {
++            sl->pso = pso; InterlockedExchange(&sl->state, 2);
++            s_iprep_stat.created++; s_iprep_stat.disk_hit += hit ? 1u : 0u;
++            s_iprep_stat.driver_ms += ms; if (ms > s_iprep_stat.max_ms) s_iprep_stat.max_ms = ms;
++            shader_work_done(1);
++        } else {
++            s_iprep_stat.failed++; InterlockedExchange(&sl->state, 3);
++            if (s_iprep_stat.failed <= 8)
++                fprintf(stderr, "[interp-prep] create failed 0x%08lX entry %u\n", (unsigned long)hr, i);
++        }
++    }
++    /* Entries promoted to the demand worker: wait (stop-aware, at most 30 s) so the report is exact. */
++    for (int w = 0; w < 3000 && !s_ijob_stop; w++) {
++        int busy = 0;
++        for (u32 i = 0; i < s_iprep_n && !busy; i++) busy = s_interp_pso[s_iprep[i].slot].state == 1;
++        if (!busy) break;
++        Sleep(10);
++    }
++    if (s_ijob_stop) s_iprep_stat.cancelled = 1;
++    interp_prep_report(background ? "background" : "sync", t0);
++}
++
++/* Five-second line beside [interp-pso]: pso there counts prepared slots too; demand = pso - prepared. */
++static void interp_prep_log(void)
++{
++    if (!s_iprep_n) return;
++    u32 ready = 0;
++    for (u32 i = 0; i < s_iprep_n; i++) ready += s_interp_pso[s_iprep[i].slot].state == 2;
++    fprintf(stderr, "[interp-prep] use prepared %u ready %u demand_pso %u pair_draws %u promoted %u done %ld\n",
++            s_iprep_n, ready, s_interp_pso_n - s_iprep_n, s_interp_stat.prep_pair, s_interp_stat.prep_promoted,
++            (long)s_iprep_done);
++}
++
++static DWORD WINAPI interp_prep_main(LPVOID unused)
++{
++    (void)unused;
++    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
++    interp_prep_run(1);
++    return 0;
++}
 +
 +static void interp_job_shutdown(void)
 +{
++    if (s_iprep_thread) {
++        /* Cancel class preparation between jobs; an in-flight driver call finishes first. */
++        InterlockedExchange(&s_ijob_stop, 1);
++        WaitForSingleObject(s_iprep_thread, INFINITE);
++        CloseHandle(s_iprep_thread);
++        s_iprep_thread = NULL;
++    }
 +    if (s_ijob_thread) {
 +        InterlockedExchange(&s_ijob_stop, 1);
 +        WakeAllConditionVariable(&s_ijob_cv);
@@ -1537,6 +1725,7 @@ index 0000000..2696f17
 +    }
 +    free(s_ijob); s_ijob = NULL;
 +    s_ijob_head = s_ijob_tail = 0;
++    free(s_iprep); s_iprep = NULL; s_iprep_n = 0;
 +    InterlockedExchange(&s_ijob_stop, 0);
 +}
 +
@@ -1544,6 +1733,31 @@ index 0000000..2696f17
 + * (ps) with either the specialized vertex shader or the vertex interpreter
 + * (vsb); kind 2 pairs the vertex interpreter with a specialized pixel shader.
 + * Nothing in the key names a guest program: only blobs and native state. */
++static void interp_key_fill(InterpPsoKey* key, int kind, ID3DBlob* vsb, ID3DBlob* ps, int gpu, u32 vmask_in,
++                            int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil)
++{
++    u32 samples = (cube_mask >> 16) & 0xFu; if (!samples) samples = 1;
++    if (nrt < 1) nrt = 1; if (nrt > 4) nrt = 4;
++    memset(key, 0, sizeof *key);
++    key->vs = vsb; key->ps = ps; key->blend = blend; key->cmask = cmask; key->rtfmt = (u32)rtfmt;
++    key->stencil = stencil; key->cull = cull; key->samples = samples;
++    key->vmask = gpu ? 0u : (vmask_in ? vmask_in : 0xFFFFu);
++    key->packed = (u32)nrt | ((u32)(gpu ? 1 : 0) << 8) | ((u32)kind << 16);
++}
++
++/* Phase 220: does class preparation own a paired generic pipeline for this native state (any state)? */
++static int interp_prep_has(ID3DBlob* vsb, ID3DBlob* ps, int gpu, u32 vmask_in, int nrt, DXGI_FORMAT rtfmt,
++                           u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil)
++{
++    if (!s_iprep_n || !vsb || !ps) return 0;
++    InterpPsoKey key;
++    interp_key_fill(&key, 1, vsb, ps, gpu, vmask_in, nrt, rtfmt, blend, cmask, cull, cube_mask, stencil);
++    for (u32 i = 0; i < s_interp_pso_n; i++)
++        if (memcmp(&s_interp_pso[i].key, &key, sizeof key) == 0)
++            return s_interp_pso[i].prep != 0 && s_interp_pso[i].state != 3;
++    return 0;
++}
++
 +static ID3D12PipelineState* interp_get_pso(int kind, ID3DBlob* vsb, ID3DBlob* ps, int gpu, u32 vmask_in,
 +                                           int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull,
 +                                           u32 cube_mask, u32 stencil)
@@ -1553,18 +1767,16 @@ index 0000000..2696f17
 +    u32 samples = (cube_mask >> 16) & 0xFu; if (!samples) samples = 1;
 +    if (nrt < 1) nrt = 1; if (nrt > 4) nrt = 4;
 +    InterpPsoKey key;
-+    memset(&key, 0, sizeof key);
-+    key.vs = vsb; key.ps = ps; key.blend = blend; key.cmask = cmask; key.rtfmt = (u32)rtfmt;
-+    key.stencil = stencil; key.cull = cull; key.samples = samples;
-+    key.vmask = gpu ? 0u : (vmask_in ? vmask_in : 0xFFFFu);
-+    key.packed = (u32)nrt | ((u32)(gpu ? 1 : 0) << 8) | ((u32)kind << 16);
++    interp_key_fill(&key, kind, vsb, ps, gpu, vmask_in, nrt, rtfmt, blend, cmask, cull, cube_mask, stencil);
 +    for (u32 i = 0; i < s_interp_pso_n; i++)
 +        if (memcmp(&s_interp_pso[i].key, &key, sizeof key) == 0) {
++            if (s_iprep_enqueue) return NULL;   /* duplicate class after settings mapping */
 +            if (s_interp_pso[i].state == 2) return s_interp_pso[i].pso;
-+            if (s_interp_pso[i].state == 1) s_interp_stat.pso_wait++;
++            if (s_interp_pso[i].state == 1) { s_interp_stat.pso_wait++; interp_prep_promote(i); }
 +            return NULL;
 +        }
 +    if (s_interp_pso_n >= INTERP_PSO_MAX) { s_interp_stat.pso_fail++; return NULL; }
++    if (s_iprep_enqueue && (!s_iprep || s_iprep_n >= INTERP_PREP_MAX)) { s_iprep_stat.rejected++; return NULL; }
 +
 +    D3D12_INPUT_ELEMENT_DESC il[16];
 +    u32 vmask = key.vmask ? key.vmask : 0xFFFFu;
@@ -1670,6 +1882,18 @@ index 0000000..2696f17
 +                  pd.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; } }
 +    pd.pRootSignature = rs;
 +    pd.SampleDesc.Count = samples;
++    if (s_iprep_enqueue) {
++        /* Class preparation: the descriptor is kept on the preparation list (its blobs are held by the slot). */
++        InterpPrep* e = &s_iprep[s_iprep_n];
++        InterpPsoSlot* sl = &s_interp_pso[s_interp_pso_n];
++        e->pd = pd; memcpy(e->il, il, sizeof il); e->pd.InputLayout.pInputElementDescs = e->il;
++        e->slot = s_interp_pso_n; e->taken = 0;
++        sl->key = key; sl->pso = NULL; sl->state = 1; sl->prep = ++s_iprep_n;
++        vsb->lpVtbl->AddRef(vsb); ps->lpVtbl->AddRef(ps);
++        sl->vs_hold = vsb; sl->ps_hold = ps;
++        s_interp_pso_n++;
++        return NULL;
++    }
 +    if (interp_pso_async()) {
 +        InterpPsoSlot* sl = &s_interp_pso[s_interp_pso_n];
 +        sl->key = key; sl->pso = NULL; sl->state = 1;
@@ -1723,33 +1947,67 @@ index 0000000..2696f17
 +    return pso;
 +}
 +
-+/* Precreate only native/input classes already present in the verified starter,
-+ * with the generic stage pair. No program bytes, keys or material state enter
-+ * these pipelines. Unseen classes still use the bounded first-use path. */
++/* Phase 220: map one starter class to this process's settings. scripts/interp_pipeline_classes.py mirrors
++ * this rule (and its unit tests pin it); keep the two identical. Returns 0 for a row outside the bounds. */
++static int interp_class_map(u32 gpu, u32 vmask, u32 nrt, u32 fmt, u32 cube,
++                            u32* fmt_o, u32* samples_o, u32* vmask_o)
++{
++    if (gpu > 1 || nrt < 1 || nrt > 4 || (cube & ~0xF0000u) || vmask > 0xFFFFu) return 0;
++    if (fmt != (u32)DXGI_FORMAT_R8G8B8A8_UNORM && fmt != (u32)DXGI_FORMAT_R16G16B16A16_UNORM &&
++        fmt != (u32)DXGI_FORMAT_R16G16B16A16_FLOAT && fmt != (u32)DXGI_FORMAT_R32G32B32A32_FLOAT &&
++        fmt != (u32)DXGI_FORMAT_R32_FLOAT) return 0;
++    u32 raw = (cube >> 16) & 0xFu, n = rsx_msaa_samples();
++    /* Every multisampled target uses RSX_MSAA samples (off_rt_make_ms), whatever count the starter saw. */
++    *samples_o = (raw > 1 && n > 1) ? n : 1u;
++    /* 8-bit guest colour targets are R16G16B16A16_UNORM only under RSX_HIGH_PRECISION (rsx_surface_dxgi). */
++    *fmt_o = (fmt == (u32)DXGI_FORMAT_R16G16B16A16_UNORM && !rsx_hp()) ? (u32)DXGI_FORMAT_R8G8B8A8_UNORM : fmt;
++    *vmask_o = gpu ? 0u : vmask;
++    return 1;
++}
++
++/* Queue (or, in sync mode, create) the paired generic pipelines of every mapped starter class. Program-free:
++ * no game bytes, keys or material state enter these pipelines. Unseen classes keep the demand path. */
 +static void interp_prewarm(void)
 +{
-+    const char* e = getenv("RSX_SHADER_INTERP_PREWARM");
-+    if (!e || e[0] != '1' || !fp_interp_cfg() || !vp_interp_cfg()) return;
++    int mode = interp_prep_mode();
++    if (!mode || !fp_interp_cfg()) return;
++    if (!vp_interp_cfg()) {
++        fprintf(stderr, "[interp-prep] skipped: paired generic pipelines need RSX_SHADER_INTERP_VP as well\n");
++        return;
++    }
 +#ifdef RSX_SHADER_INTERP_EMBED_DXBC
 +    ULONGLONG t0 = GetTickCount64();
-+    u32 before = s_interp_pso_n;
-+    for (unsigned i = 0; i < sizeof(rsx_interp_classes) / sizeof(rsx_interp_classes[0]); i++) {
-+        u32 samples = (rsx_interp_classes[i].cube >> 16) & 15u;
++    s_iprep = (InterpPrep*)calloc(INTERP_PREP_MAX, sizeof *s_iprep);
++    if (!s_iprep) return;
++    const int ss = fp_interp_ssaa();
++    u32 rows = (u32)(sizeof(rsx_interp_classes) / sizeof(rsx_interp_classes[0]));
++    s_iprep_enqueue = 1;
++    for (u32 i = 0; i < rows; i++) {
++        const u32 gpu = rsx_interp_classes[i].gpu, nrt = rsx_interp_classes[i].nrt;
++        u32 fmt, samples, vmask;
++        if (!interp_class_map(gpu, rsx_interp_classes[i].vmask, nrt, rsx_interp_classes[i].fmt,
++                              rsx_interp_classes[i].cube, &fmt, &samples, &vmask)) {
++            s_iprep_stat.rejected++;
++            continue;
++        }
++        s_iprep_stat.classes++;
 +        for (int full = 0; full < 2; full++)
-+            interp_get_pso(1, vp_interp_blob(rsx_interp_classes[i].gpu),
-+                fp_interp_blob(full, fp_interp_ssaa() && samples > 1, (int)rsx_interp_classes[i].nrt),
-+                (int)rsx_interp_classes[i].gpu, rsx_interp_classes[i].vmask,
-+                (int)rsx_interp_classes[i].nrt, (DXGI_FORMAT)rsx_interp_classes[i].fmt,
-+                rsx_interp_classes[i].blend, rsx_interp_classes[i].cmask,
-+                rsx_interp_classes[i].cull, rsx_interp_classes[i].cube, rsx_interp_classes[i].stencil);
++            interp_get_pso(1, vp_interp_blob((int)gpu), fp_interp_blob(full, ss && samples > 1, (int)nrt),
++                (int)gpu, vmask, (int)nrt, (DXGI_FORMAT)fmt, rsx_interp_classes[i].blend,
++                rsx_interp_classes[i].cmask, rsx_interp_classes[i].cull, samples > 1 ? samples << 16 : 0u,
++                rsx_interp_classes[i].stencil);
 +    }
-+    fprintf(stderr, "[interp-prewarm] pipelines=%u wall_ms=%llu driver_ms=%u max_ms=%u failures=%u\n",
-+        s_interp_pso_n - before, (unsigned long long)(GetTickCount64() - t0),
-+        s_interp_stat.pso_ms, s_interp_stat.pso_max_ms, s_interp_stat.pso_fail);
-+    /* Keep startup cost separate from subsequent first-use calls. */
-+    s_interp_stat.pso_ms = s_interp_stat.pso_max_ms = s_interp_stat.pso_new = 0;
++    s_iprep_enqueue = 0;
++    fprintf(stderr, "[interp-prep] queued rows=%u mapped=%u rejected=%u pipelines=%u samples=%u high_precision=%d "
++        "sample_rate=%d mode=%s queue_ms=%llu\n", rows, s_iprep_stat.classes, s_iprep_stat.rejected, s_iprep_n,
++        rsx_msaa_samples(), rsx_hp(), ss, mode == 2 ? "sync" : "background",
++        (unsigned long long)(GetTickCount64() - t0));
++    if (!s_iprep_n) return;
++    if (mode == 2) { interp_prep_run(0); return; }
++    s_iprep_thread = CreateThread(NULL, 0, interp_prep_main, NULL, 0, NULL);
++    if (!s_iprep_thread) fprintf(stderr, "[interp-prep] background thread unavailable; demand path only\n");
 +#else
-+    fprintf(stderr, "[interp-prewarm] unavailable: build has no embedded native-class metadata\n");
++    fprintf(stderr, "[interp-prep] unavailable: build has no embedded native-class metadata\n");
 +#endif
 +}
 +
@@ -1758,8 +2016,9 @@ index 0000000..2696f17
 + * instead of the specialized vertex shader. */
 +static ID3D12PipelineState* fp_interp_prepare(const D3D12DrawRecord* dr, u32 draw_i,
 +    int nrt, DXGI_FORMAT rtfmt, u32 blend, u32 cmask, u32 cull, u32 cube_mask, u32 stencil,
-+    int vp_stage, u32* hdr_off)
++    int* vp_stage_io, u32* vp_hdr, u32* hdr_off)
 +{
++    int vp_stage = vp_stage_io && *vp_stage_io;
 +    if (!fp_interp_mode() || !dr || !dr->fp_addr || !hdr_off) return NULL;
 +    if (draw_i >= MAX_DRAWS) return NULL;
 +    /* Depth-copy (tex_dz) and stacked-mip (tex_mip) units are interpreted since
@@ -1847,6 +2106,18 @@ index 0000000..2696f17
 +    ID3DBlob* ps = fp_interp_blob(full, sample, targets);
 +    if (!ps) return NULL;
 +    ID3DBlob* vsb = NULL; int gpu = 0;
++    /* Phase 220: a fragment-only interpreter draw (its specialized vertex shader is ready) whose native class
++     * was prepared uses the prepared paired generic pipeline, staging its vertex program for the vertex
++     * interpreter, instead of creating a pipeline for the specialized vertex shader on first use.
++     * RSX_SHADER_INTERP_PREP_PAIR=0 restores the specialized vertex shader here. */
++    if (!vp_stage && vp_stage_io && vp_hdr && interp_prep_pair_on() && fp_interp_mode() == 1 && vp_interp_mode() == 1) {
++        int g = gf_slot(draw_i) ? 1 : 0;
++        if (interp_prep_has(vp_interp_blob(g), ps, g, s_pso_vmask, targets, rtfmt, blend, cmask, cull,
++                            cube_mask, stencil) && vp_interp_stage(dr, vp_hdr)) {
++            vp_stage = *vp_stage_io = 1;
++            s_interp_stat.prep_pair++;
++        }
++    }
 +    if (vp_stage) {
 +        gpu = gf_slot(draw_i) ? 1 : 0;
 +        vsb = vp_interp_blob(gpu);
