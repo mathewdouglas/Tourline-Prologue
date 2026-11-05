@@ -284,6 +284,47 @@ def stage(plan, document, folder, resume=False):
                 unique_keys=len(keys), scope=SCOPE, indices_written=len(pending))
 
 
+
+def stage_translated(plan, report, folder):
+    """Phase 221: publish menu/race membership for an additional translation (ultrawide-native or
+    native-scaled preparation), so the race prewarm and fast lookup work in the mode the player runs.
+
+    The observed plan names default pipelines; each maps through the translation pass's own records
+    (template_key = default native key -> key = translated native key) to the pipeline the game will draw
+    in that mode. Only keys with a local recipe are written. Never replaces membership the game learned:
+    an existing non-empty index is left alone. GT5P_PREPARE_TRANSLATED_PLAN=0 skips it.
+    """
+    import os
+    if os.environ.get('GT5P_PREPARE_TRANSLATED_PLAN') == '0':
+        return dict(status='skipped', reason='GT5P_PREPARE_TRANSLATED_PLAN=0')
+    extra = report.get('additional_translation')
+    if not isinstance(extra, dict) or not extra.get('records'):
+        return dict(status='skipped', reason='no additional translation')
+    plan = native_plan(plan, report)
+    mapping = {r['template_key']: r['key'] for r in extra['records']
+               if isinstance(r.get('template_key'), str) and isinstance(r.get('key'), str)}
+    folder = Path(folder)
+    if not folder.is_dir() or folder.is_symlink() or folder.is_junction():
+        raise ValueError('Expected a private regular warmup directory')
+    counts, written = {}, 0
+    for phase, values in plan['phases'].items():
+        keys = list(dict.fromkeys(mapping[k] for k in values if k in mapping))
+        keys = [k for k in keys if (folder/('pso_'+k+'.recipe')).is_file()]
+        counts[phase] = len(keys)
+        path = folder/(phase+'-v1.txt')
+        if path.is_symlink() or path.is_junction():
+            raise ValueError('Refusing to replace existing learned membership')
+        if path.exists() and bounded(path, MAX_INDEX):
+            continue
+        temporary = path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+        with temporary.open('x', encoding='ascii', newline='\n') as stream:
+            stream.write(''.join(k+'\n' for k in keys))
+        temporary.replace(path)
+        written += 1
+    return dict(status='complete', translation=extra.get('translation'), phase_counts=counts,
+                indices_written=written)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest='command', required=True)

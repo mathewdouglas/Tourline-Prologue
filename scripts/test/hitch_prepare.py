@@ -60,6 +60,11 @@ def main():
         code=0
         import fast_lookup_table
         report['fast_lookup']=fast_lookup_table.write_for_preparation(output,engine,report)
+        if a.translation!='default':
+            from pipeline_warmup_plan import load as load_plan_v3, stage_translated
+            report['translated_plan']=stage_translated(load_plan_v3(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',template),
+                report,output/'shadercache/warmup-v1')
+            print('translated plan:',json.dumps(report['translated_plan']),flush=True)
         print('fast lookup:',json.dumps(report['fast_lookup']),flush=True)
         (home/f'prepared-summary-{a.name}.json').write_text(json.dumps({k:report.get(k) for k in ('counts','enumeration','preparation_seconds','fast_lookup')},indent=2))
     except KeyboardInterrupt:

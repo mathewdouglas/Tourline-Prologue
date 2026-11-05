@@ -330,6 +330,15 @@ def main():
             high_precision=shape[1] if shape else True,translation_env=shader_source_policy.overlay())
     except Exception as exc:  # noqa: BLE001 - optional; the game learns the table during play
         report['fast_lookup']=dict(status='failed',reason=str(exc))
+    if translation!='default':
+        # Phase 221: membership lists for the translation the player runs (default plan mapped through the
+        # translation pass); the race prewarm and fast lookup otherwise have nothing resident at 21:9 / >1080p.
+        try:
+            from pipeline_warmup_plan import load as load_plan_v3, stage_translated
+            report['translated_plan']=stage_translated(load_plan_v3(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',bundle),
+                report,out/'shadercache/warmup-v1')
+        except Exception as exc:  # noqa: BLE001 - optional; the game learns membership during play
+            report['translated_plan']=dict(status='failed',reason=str(exc))
     template.save_report(out/'report.json',report)
     # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
     # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.
