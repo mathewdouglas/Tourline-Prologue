@@ -51,7 +51,7 @@ struct Badge {
     const wchar_t* cls;       /* window class */
     const wchar_t* label;
     const char* tag;          /* for the log line */
-    int w, h, font, dot;      /* size, font height, spinner dot radius */
+    int w, h, font, dot, ring;   /* size, font height, spinner dot radius, spinner ring radius */
     COLORREF fill, edge, text, hue;   /* hue: spinner colour at full strength */
     BYTE alpha;
     ULONGLONG delay_ms;       /* sustained activity before it shows */
@@ -70,11 +70,11 @@ HWND s_game;
 volatile LONG s_enabled = 1;           /* "Compiling shaders" */
 volatile LONG s_preload_enabled = 0;   /* "Loading shaders" */
 
-Badge s_main = { L"gt5p_shaderbusy", L"Compiling shaders", "shader-badge", 236, 38, -15, 2,
+Badge s_main = { L"gt5p_shaderbusy", L"Compiling shaders", "shader-badge", 236, 38, -15, 2, 8,
                  RGB(20, 23, 30), RGB(52, 120, 220), RGB(230, 233, 240), RGB(52, 140, 255), 235, 200,
                  &s_enabled };
-Badge s_pre  = { L"gt5p_shaderpreload", L"Loading shaders", "preload-badge", 196, 30, -13, 1,
-                 RGB(24, 26, 30), RGB(70, 78, 92), RGB(168, 174, 186), RGB(120, 140, 170), 170, 400,
+Badge s_pre  = { L"gt5p_shaderpreload", L"Loading shaders", "preload-badge", 196, 30, -13, 2, 7,
+                 RGB(24, 26, 30), RGB(70, 78, 92), RGB(168, 174, 186), RGB(150, 175, 215), 170, 400,
                  &s_preload_enabled };
 
 BOOL CALLBACK find_game(HWND h, LPARAM)
@@ -106,7 +106,7 @@ void paint(Badge& b, HDC dc)
     SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(pb); DeleteObject(pp);
 
     /* Spinner: eight dots round a circle, the lit one moving. */
-    const int cx = b.h / 2 + 3, cy = b.h / 2, r = b.h / 2 - 11;
+    const int cx = b.h / 2 + 3, cy = b.h / 2, r = b.ring;
     const int hr = GetRValue(b.hue), hg = GetGValue(b.hue), hb = GetBValue(b.hue);
     for (int i = 0; i < 8; i++) {
         const double a = i * 3.14159265 / 4;

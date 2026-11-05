@@ -5,6 +5,44 @@ include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` fiel
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
 not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
 
+## First-launch preparation offer, preload default and indicators (v0.2.4)
+
+Shaders prepared by an earlier version are not reused by v0.2.4 (the shader text
+is the cache key), so the **first launch of v0.2.4** offers preparation once,
+after setup and before the game starts, in the same dialog as the post-setup
+offer. It gives a broad time estimate for your processor count: **about 10 to 20
+minutes** with eight or more logical processors (four compiler workers), **about
+20 to 40 minutes** with fewer (two). One full preparation measured on a 12-thread
+i5-12400F took 579 s (9.7 minutes), 0.96 GiB; see the
+[v0.2.4 notes](release-v0.2.4.md#cheaper-shaders-faster-preparation). Your time
+depends on your PC.
+
+- **Prepare now** runs the existing preparation window (cancel and resume as
+  before); **Skip and play**, closing the dialog, cancelling or a failure all
+  start the game.
+- The answer is recorded in `prepare-offer-<port version>.done` in the launcher
+  storage, so the offer is not repeated for that version. A fresh install gets
+  the post-setup offer instead, which records the same marker; both never appear
+  in one launch.
+- Nothing is asked when a completed preparation made by this release is already
+  selected: the helper's read-only `GT5P-Prepare.exe --check-selected` (exit 0
+  prepared, 3 not prepared) compares the fingerprint recorded in
+  `prepared-identity.txt`. If the helper cannot answer, nothing is offered and
+  nothing is recorded.
+- `GT5P_PREPARE_OFFER=0` disables the offer; `--no-prepared` and
+  `GT5P_PREPARE_VOLUME=0` skip it for that launch. **Prepare shaders.cmd** and
+  **F1 > Debug > Prepare shaders** remain available.
+- Tests: `scripts/test/launcher_first_run_native.py` (20 scenarios against the
+  probe), `scripts/test/rc024_launcher_e2e.py` (real launcher, helper and
+  engine).
+
+**Preload known shaders** (F1 > Shaders) now defaults to On in a new settings
+file; an existing file that says `shader_warmup = false` keeps false. "Compiling
+shaders" lights only for work a draw is waiting on; background preload is counted
+separately and can show a smaller **"Loading shaders"** badge (F1 > Game >
+Shader preload indicator, `video.preload_indicator`, `GT5P_PRELOAD_INDICATOR=1`,
+off by default). `RSX_SHADER_INDICATOR_LEGACY=1` restores the combined counting.
+
 ## Shader enumeration in development builds
 
 Optional **Prepare shaders**, the first-run **Prepare now** choice and F1
