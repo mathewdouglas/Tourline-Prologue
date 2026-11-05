@@ -36,13 +36,18 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-05, Phase 217)
+## Start here: state of play (2026-11-05, Phase 218)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 217 is the latest).
+has the evidence, newest phase first (Phase 218 is the latest).
 
 ### What works now
+
+- **Analog L2/R2 for throttle/brake (Phase 218):** with R2/L2 assigned in the
+  game's own button assignments, triggers now report their full 0-255 pressure;
+  the injected-input fix-up no longer forces 255 once the digital bit is set
+  (about 9% travel). `PAD_PRESS_FORCE_FULL=1` rolls back. User testing pending.
 
 - **Dealership logo stall (Phase 217):** the supplied
   Mazda export has all 64 PPU slots occupied (30 FINISHED), with the loader

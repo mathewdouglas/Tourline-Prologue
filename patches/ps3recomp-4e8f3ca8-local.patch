@@ -5419,7 +5419,7 @@ index 49e13905..3f759a9a 100644
  /* Internal: feed a key event from the host input system */
  void cellKb_keyEvent(u32 port, u16 keycode, int pressed);
 diff --git a/libs/input/cellPad.c b/libs/input/cellPad.c
-index afdd93de..b7eff4a2 100644
+index afdd93de..c20a298e 100644
 --- a/libs/input/cellPad.c
 +++ b/libs/input/cellPad.c
 @@ -70,6 +70,7 @@ static double pad_clock(unsigned long long t0_ms)
@@ -6141,6 +6141,24 @@ index afdd93de..b7eff4a2 100644
      pad_track_assign();
      pad_unlock();
  }
+@@ -1079,8 +1687,16 @@ skip_inject: ;
+             { CELL_PAD_BTN_OFFSET_DIGITAL2, 0x08, CELL_PAD_BTN_OFFSET_PRESS_R1 },
+             { CELL_PAD_BTN_OFFSET_DIGITAL2, 0x01, CELL_PAD_BTN_OFFSET_PRESS_L2 },
+             { CELL_PAD_BTN_OFFSET_DIGITAL2, 0x02, CELL_PAD_BTN_OFFSET_PRESS_R2 } };
++        /* Only fill a pressure the host left at zero. An analog trigger also
++         * sets its digital bit past a small threshold (SDL 3000/32767), and
++         * raising its partial value to 255 there made L2/R2 throttle/brake
++         * jump to full after ~9% travel. PAD_PRESS_FORCE_FULL=1 restores the
++         * old rule (any set bit reads 255). */
++        static int force_full = -1;
++        if (force_full < 0) { const char* e = getenv("PAD_PRESS_FORCE_FULL"); force_full = e && e[0] == '1'; }
+         for (unsigned k = 0; k < sizeof pm / sizeof pm[0]; k++)
+-            if ((data->button[pm[k].word] & pm[k].bit) && data->button[pm[k].off] < 255)
++            if ((data->button[pm[k].word] & pm[k].bit) &&
++                (force_full ? data->button[pm[k].off] < 255 : data->button[pm[k].off] == 0))
+                 data->button[pm[k].off] = 255;
+     }
+ 
 diff --git a/libs/network/cellHttpUtil.c b/libs/network/cellHttpUtil.c
 index 2c557f4d..c890d64a 100644
 --- a/libs/network/cellHttpUtil.c
