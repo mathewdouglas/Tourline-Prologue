@@ -1,5 +1,5 @@
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index e1063ba..1a91820 100644
+index e1063ba..c43747d 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
 @@ -4589,6 +4589,7 @@ static void pso_prepare_batch(const char* dir)
@@ -68,7 +68,97 @@ index e1063ba..1a91820 100644
  }
  static int pso_race_recipe(u64 hash) {
      char dir[512],path[640];if(!pso_warm_dir(dir,sizeof dir))return 0;
-@@ -5179,6 +5191,8 @@ static DWORD WINAPI pso_worker_main(LPVOID unused) {
+@@ -5096,6 +5108,79 @@ static void pso_startup_step(PsoStartup* s,const char* dir) {
+         s_pso_warm_loaded,s_pso_warm_rejected,s->menu_ready,s->race_ready,(unsigned long long)(GetTickCount64()-s->began));
+     pso_startup_close(s);
+ }
++/* Parallel race prewarm (developer experiment). The race set is mostly small-file reads (recipe, bytecode,
++ * driver blob: ~15 ms a pipeline on one thread, ~68 s for ~4,000), so the 30 s loading gate timed out and
++ * the race started while it was still filling. RSX_RACE_PREWARM_THREADS=<n> (2..8) reads the index once and
++ * prepares it on n below-normal helper threads; the pso-worker keeps serving demand jobs meanwhile. The last
++ * helper sets s_race_ready and prints the usual "finished" line. Unset or 1 keeps the one-recipe-per-turn
++ * worker path. A new race load or shutdown stops the helpers between recipes. */
++#define PSO_PREWARM_THREADS_MAX 8
++static HANDLE s_prewarm_thr[PSO_PREWARM_THREADS_MAX];
++static u32 s_prewarm_thr_n;
++static u64* s_prewarm_list;
++static u32 s_prewarm_list_n;
++static volatile LONG s_prewarm_next, s_prewarm_active, s_prewarm_loaded, s_prewarm_rejected, s_prewarm_gen;
++static ULONGLONG s_prewarm_began;
++static int pso_prewarm_threads(void)
++{
++    static int n = -1;
++    if (n < 0) { const char* e = getenv("RSX_RACE_PREWARM_THREADS"); n = e ? atoi(e) : 1; if (n < 1) n = 1; if (n > PSO_PREWARM_THREADS_MAX) n = PSO_PREWARM_THREADS_MAX; }
++    return n;
++}
++static DWORD WINAPI pso_prewarm_helper(LPVOID arg)
++{
++    const LONG gen = (LONG)(LONG_PTR)arg;
++    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
++    for (;;) {
++        if (s_pso_stopping || s_prewarm_gen != gen) break;
++        LONG i = InterlockedIncrement(&s_prewarm_next) - 1;
++        if (i < 0 || (u32)i >= s_prewarm_list_n) break;
++        if (pso_race_recipe(s_prewarm_list[i])) { InterlockedIncrement(&s_prewarm_loaded); InterlockedIncrement(&s_race_loaded); }
++        else { InterlockedIncrement(&s_prewarm_rejected); InterlockedIncrement(&s_race_rejected); }
++    }
++    if (InterlockedDecrement(&s_prewarm_active) == 0 && s_prewarm_gen == gen) {
++        if (s_race_ready) SetEvent(s_race_ready);
++        fprintf(stderr,"[race-prewarm] finished: ready=%ld rejected=%ld elapsed_ms=%llu threads=%u\n",
++                (long)s_prewarm_loaded,(long)s_prewarm_rejected,(unsigned long long)(GetTickCount64()-s_prewarm_began),s_prewarm_thr_n);
++        fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms)\n",
++                (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000);
++    }
++    return 0;
++}
++/* Join helpers of an earlier load (worker thread or shutdown only). */
++static void pso_prewarm_join(void)
++{
++    InterlockedIncrement(&s_prewarm_gen);
++    for (u32 i = 0; i < s_prewarm_thr_n; i++) { WaitForSingleObject(s_prewarm_thr[i], INFINITE); CloseHandle(s_prewarm_thr[i]); }
++    s_prewarm_thr_n = 0;
++}
++/* Start helpers for the race index; 0 when the single-thread path should run instead. */
++static int pso_prewarm_start(const char* index)
++{
++    int n = pso_prewarm_threads();
++    if (n < 2) return 0;
++    pso_prewarm_join();
++    FILE* f = fopen(index, "r");
++    if (!f) return 0;
++    if (!s_prewarm_list) s_prewarm_list = (u64*)malloc(sizeof(u64) * PSO_RACE_SEEN);
++    if (!s_prewarm_list) { fclose(f); return 0; }
++    char line[64]; unsigned long long h; u32 count = 0;
++    while (count < PSO_RACE_SEEN && fgets(line, sizeof line, f)) if (sscanf(line, "%llx", &h) == 1 && h) s_prewarm_list[count++] = (u64)h;
++    fclose(f);
++    s_prewarm_list_n = count; s_prewarm_next = 0; s_prewarm_loaded = s_prewarm_rejected = 0;
++    s_prewarm_began = GetTickCount64();
++    const LONG gen = s_prewarm_gen;
++    s_prewarm_active = n;
++    for (int i = 0; i < n; i++) {
++        HANDLE t = CreateThread(NULL, 0, pso_prewarm_helper, (LPVOID)(LONG_PTR)gen, 0, NULL);
++        if (t) s_prewarm_thr[s_prewarm_thr_n++] = t;
++        else InterlockedDecrement(&s_prewarm_active);
++    }
++    if (!s_prewarm_thr_n) return 0;
++    fprintf(stderr, "[race-prewarm] %u helper threads for %u recipes\n", s_prewarm_thr_n, count);
++    return 1;
++}
++
+ static DWORD WINAPI pso_worker_main(LPVOID unused) {
+     (void)unused;
+     fprintf(stderr,"[pso-worker] hosttid=%lu\n",(unsigned long)GetCurrentThreadId());
+@@ -5153,7 +5238,8 @@ static DWORD WINAPI pso_worker_main(LPVOID unused) {
+             if(index[0])pso_warm_keep_only(index);
+             preload=index[0]?fopen(index,"r"):NULL; loaded=rejected=visited=0; began=GetTickCount64();
+             fprintf(stderr,"[race-prewarm] loading known race pipeline set: %s\n",preload?index:"none learned yet");
+-            if (!preload) SetEvent(s_race_ready);
++            if (preload && pso_prewarm_start(index)) { fclose(preload); preload=NULL; }
++            else if (!preload) SetEvent(s_race_ready);
+         }
+         if(learn && index[0] && learn_race==PSO_LEARN_USED) pso_recipe_touch(dir,learn);
+         else if(learn && index[0]) {
+@@ -5179,11 +5265,14 @@ static DWORD WINAPI pso_worker_main(LPVOID unused) {
                  fclose(preload);preload=NULL;
                  SetEvent(s_race_ready);
                  fprintf(stderr,"[race-prewarm] finished: ready=%u rejected=%u elapsed_ms=%llu\n",loaded,rejected,(unsigned long long)(GetTickCount64()-began));
@@ -77,7 +167,13 @@ index e1063ba..1a91820 100644
              }
          } else if(startup.phase) {pso_startup_step(&startup,dir);Sleep(1);}
      }
-@@ -6943,6 +6957,138 @@ void rsx_d3d12_backend_prepare_library(void)
+     pso_startup_close(&startup);
+     if(preload)fclose(preload);
++    pso_prewarm_join();   /* RSX_RACE_PREWARM_THREADS helpers stop between recipes */
+     /* Persist membership already accepted by the renderer even when shutdown
+      * cancels queued driver jobs. Only validated recipes can be replayed later. */
+     while(s_race_head!=s_race_tail) {
+@@ -6943,6 +7032,138 @@ void rsx_d3d12_backend_prepare_library(void)
   * texture in RAM. Animated/streamed textures keep theirs while they change.
   * The wait guarantees no recorded copy still reads them. RSX_TEX_UPLOAD_KEEP=0
   * keeps every buffer, as before. */
@@ -216,7 +312,7 @@ index e1063ba..1a91820 100644
  static void tex_upload_sweep(void)
  {
      static int keep = -1;
-@@ -7447,7 +7593,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7447,7 +7668,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
       * cube path copies 6 subresources and writes a 6x upload buffer -- which
       * crashes. */
      if (t->res && (t->w != w || t->h != h || t->fmt != fmt || t->cube != cube || t->depth != depth || t->levels != levels)) {
@@ -226,7 +322,7 @@ index e1063ba..1a91820 100644
          if (t->up) { t->up->lpVtbl->Release(t->up); t->up = NULL; }
      }
      double alloc_begin = hitch_on() ? perf_now() : 0;
-@@ -7461,21 +7608,33 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7461,21 +7683,33 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
          td.MipLevels = (UINT16)levels;
          td.Format = dxfmt; td.SampleDesc.Count = 1;
          td.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -268,7 +364,7 @@ index e1063ba..1a91820 100644
          bd.Height = 1; bd.DepthOrArraySize = 1;
          bd.MipLevels = 1; bd.SampleDesc.Count = 1; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
          if (FAILED(s_d3d.device->lpVtbl->CreateCommittedResource(
-@@ -7495,7 +7654,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7495,7 +7729,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
  
      void* mapped = NULL; D3D12_RANGE nr = {0,0};
      double map_begin = hitch_on() ? perf_now() : 0;
@@ -278,7 +374,7 @@ index e1063ba..1a91820 100644
      if (hitch_on()) s_hitch_tex_map_ms += (perf_now()-map_begin)*1000.;
      { static int _tp=0; if (getenv("RTT_DUMP") && _tp++ < 6) {
          const u8* sp = vm_base + off;
-@@ -7537,7 +7697,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7537,7 +7772,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
      if (depth) {
          if (!rsx_texture_decode_volume(mapped, pitch, pitch*h, tex_src(off, chain_bytes),
                                        w, h, depth, &tl, rsx_texture_argb_is_rgba())) {
@@ -287,7 +383,7 @@ index e1063ba..1a91820 100644
          }
      } else for (u32 _f = 0; _f < _nfaces; _f++) {
      off    = _off0 + _f * _face_bytes;
-@@ -7833,7 +7993,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7833,7 +8068,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
              src_off += bytes;
          }
      }
@@ -296,7 +392,7 @@ index e1063ba..1a91820 100644
  
      double copy_begin = hitch_on() ? perf_now() : 0;
      if (!fresh) {   /* reused resource: PSR -> COPY_DEST first */
-@@ -7847,7 +8007,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7847,7 +8082,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
      }
      D3D12_TEXTURE_COPY_LOCATION dst = {0}, src = {0};
      dst.pResource = t->res; dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -305,7 +401,7 @@ index e1063ba..1a91820 100644
      src.PlacedFootprint.Footprint.Format   = dxfmt;
      src.PlacedFootprint.Footprint.Width    = w;
      src.PlacedFootprint.Footprint.Height   = h;
-@@ -7857,6 +8017,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+@@ -7857,6 +8092,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
          dst.SubresourceIndex        = _f;      /* cube face = array slice */
          src.PlacedFootprint.Offset  = (u64)_f * pitch * _face_rows;
          if (levels > 1) src.PlacedFootprint = mip_fp[_f];
@@ -313,7 +409,7 @@ index e1063ba..1a91820 100644
          s_d3d.cmd_list->lpVtbl->CopyTextureRegion(s_d3d.cmd_list, &dst, 0, 0, 0, &src, NULL);
      }
      {
-@@ -10784,6 +10945,8 @@ static void render_frame_body(void)
+@@ -10784,6 +11020,8 @@ static void render_frame_body(void)
        if (perf_on()) s_perf_wait += perf_now() - _w0; }
      vp_fp_cache_flush_if_full();
      tex_upload_sweep();          /* staging of textures that stopped changing */
@@ -322,7 +418,7 @@ index e1063ba..1a91820 100644
      off_rt_release_deferred();   /* the list that last referenced them is done */
      wb_flush();                  /* last frame's small results into guest memory */
  
-@@ -15983,6 +16146,7 @@ void rsx_d3d12_backend_shutdown(void)
+@@ -15983,6 +16221,7 @@ void rsx_d3d12_backend_shutdown(void)
      if (s_hitch_file) { fclose(s_hitch_file); s_hitch_file=NULL; }
      pso_queue_stop();
      wait_for_gpu();
