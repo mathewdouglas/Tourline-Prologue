@@ -36,13 +36,25 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-04, Phase 214)
+## Start here: state of play (2026-11-05, Phase 217)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 215 is the latest).
+has the evidence, newest phase first (Phase 217 is the latest).
 
 ### What works now
+
+- **Dealership logo stall (Phase 217):** the supplied
+  Mazda export has all 64 PPU slots occupied (30 FINISHED), with the loader
+  retrying failed thread creation every 2 ms while the logo still presents.
+  A deterministic native test reproduces Windows join freeing the slot before
+  the old host epilogue writes FINISHED again. The isolated compatibility
+  overlay waits for host completion outside the table lock. Original-source
+  failure and 128 corrected delayed joins pass; a private headless baseline
+  reproduces table exhaustion. A fixed 315-second headless route creates 87
+  threads and retains no FINISHED slots. See progress for scope and limits.
+  Rendered Mazda acceptance remains open (user testing); `PS3_PPU_JOIN_WAIT_HOST=0`
+  rolls back. No release/player-setting change.
 
 - **De-specialized shader text (Phase 215, development, on branch t3/shader-despecialize):** looped GPU vertex
   fetch (`RSX_VFETCH_LOOP`, 2), sized fragment registers (`RSX_FP_REG_SIZE`), lazy sRGB helpers (`RSX_FP_GAMMA_LAZY`)

@@ -35404,7 +35404,7 @@ index ed427714..dec699fd 100644
  
      __atomic_add_fetch(&m->waiters, 1, __ATOMIC_SEQ_CST);   /* see sys_mutex_destroy */
 diff --git a/runtime/syscalls/sys_ppu_thread.c b/runtime/syscalls/sys_ppu_thread.c
-index 41d5721c..9afe939c 100644
+index 41d5721c..342f3731 100644
 --- a/runtime/syscalls/sys_ppu_thread.c
 +++ b/runtime/syscalls/sys_ppu_thread.c
 @@ -51,6 +51,22 @@ ppu_thread_info       g_ppu_threads[PPU_THREAD_MAX];
@@ -35741,7 +35741,26 @@ index 41d5721c..9afe939c 100644
      return CELL_OK;
  }
  
-@@ -1266,6 +1517,9 @@ int64_t sys_ppu_thread_set_priority(ppu_context* ctx)
+@@ -705,8 +956,17 @@ int64_t sys_ppu_thread_join(ppu_context* ctx)
+ #endif
+     }
+ 
+-    /* Clean up */
++    /* The guest exit event is signalled inside sys_ppu_thread_exit, before
++     * the host procedure unwinds and stamps FINISHED. Reusing the slot at
++     * that event lets the old epilogue resurrect a freed slot (or overwrite
++     * a new thread). Join the host outside the table lock, as on POSIX.
++     * PS3_PPU_JOIN_WAIT_HOST=0 restores the old join (slot freed at the
++     * guest exit event). */
+ #ifdef _WIN32
++    static int wait_host = -1;
++    if (wait_host < 0) { const char* e = getenv("PS3_PPU_JOIN_WAIT_HOST"); wait_host = !(e && e[0] == '0'); }
++    if (wait_host && WaitForSingleObject(t->host_thread, INFINITE) != WAIT_OBJECT_0)
++        return (int64_t)(int32_t)CELL_EAGAIN;
+     table_lock();
+     CloseHandle(t->host_thread);
+     CloseHandle(t->finish_event);
+@@ -1266,6 +1526,9 @@ int64_t sys_ppu_thread_set_priority(ppu_context* ctx)
      }
  
      t->priority = priority;
@@ -35751,7 +35770,7 @@ index 41d5721c..9afe939c 100644
      table_unlock();
      return CELL_OK;
  }
-@@ -1425,3 +1679,14 @@ void sys_ppu_thread_init(lv2_syscall_table* tbl)
+@@ -1425,3 +1688,14 @@ void sys_ppu_thread_init(lv2_syscall_table* tbl)
      lv2_syscall_register(tbl, SYS_PPU_THREAD_GET_STACK_INFORMATION, sys_ppu_thread_get_stack_information);
      lv2_syscall_register(tbl, SYS_PPU_THREAD_RENAME,              sys_ppu_thread_rename);
  }
