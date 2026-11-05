@@ -86,6 +86,10 @@ def prepare(document, template, catalog, elf, engine, decoder, game_root, output
         engine_sha256=checkpoint.contract['engine'], decoder_sha256=checkpoint.contract['decoder'],
         requested=len(document['records']),records=rows,counts=dict(Counter(r['status'] for r in rows)),
         derived_records=resolved['records'],
+        # Phase 221: structural identity of each fragment program (the renderer's fast lookup key; written as a
+        # table by fast_lookup_table.py). Hashes only; no program bytes.
+        fp_code_identity={sha: f'{__import__("fast_lookup_table").structural_hash(code):016x}'
+                          for sha, code in fragments.items()},
         lookup=lookup, inventory=derived['inventory'], cache_reuse=derived['cache_reuse'],
         runtime_lookup_counts=derived['runtime_lookup_counts'],
         native_counts=derived.get('native_counts',[0]*4),
