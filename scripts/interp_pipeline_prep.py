@@ -94,14 +94,15 @@ def prepare(engine, game_root, cache, storage, template, output, base_env, runne
             return finish()
         raise ValueError('Interpreter pipeline preparation was not confirmed; see ' + str(log))
     report['engine'] = result
-    if result.get('pipelines') != expected:
-        raise ValueError(f"Interpreter pipelines {result.get('pipelines')} differ from the derived {expected}")
-    if result.get('complete') != 1 or result.get('failed') or result.get('ready') != expected:
+    # The engine's embedded table is authoritative. It equals the installed starter in a release; a private
+    # subset install (tests) or an older embedded table differs, which is recorded rather than failed.
+    report['matches_installed_template'] = result.get('pipelines') == expected
+    if not result.get('pipelines') or result.get('complete') != 1 or result.get('failed') or             result.get('ready') != result.get('pipelines'):
         raise ValueError('Interpreter pipelines incomplete; prepared shaders unchanged. See ' + str(log))
     marker = Path(cache) / f"ipso-set-{result['identity']}.txt"
     if result.get('persisted') == 1 and not marker.is_file():
         raise ValueError('Interpreter pipeline set marker missing')
     report['status'] = 'complete'
     if progress:
-        progress('interpreter-pipelines', dict(completed=expected, total=expected))
+        progress('interpreter-pipelines', dict(completed=result['ready'], total=result['pipelines']))
     return finish()
