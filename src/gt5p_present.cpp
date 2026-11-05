@@ -799,7 +799,9 @@ static DWORD WINAPI present_thread(LPVOID)
       cyc_per_s = (double)(cb - ca) / ((double)(b.QuadPart - a.QuadPart) / qf.QuadPart); }
     /* The cycle query is a system call per walk (3% of the walker when
      * always on): only when something reads the result. */
-    const bool walk_cpu = prof || getenv("GT5P_FRAME_LOG") != nullptr;
+    const char* hitch_host_path = getenv("GT5P_HITCH_HOST_LOG");
+    const bool hitch_host_requested = hitch_host_path && *hitch_host_path && strcmp(hitch_host_path, "0");
+    const bool walk_cpu = prof || getenv("GT5P_FRAME_LOG") != nullptr || hitch_host_requested;
     auto walk_fifo = [&]() {
         LARGE_INTEGER a, b; ULONG64 ca = 0, cb = 0;
         const bool cyc = walk_cpu || g_tl_on;
@@ -822,8 +824,29 @@ static DWORD WINAPI present_thread(LPVOID)
         if (frame_log) setvbuf(frame_log, nullptr, _IOFBF, 1 << 16);
     }
     unsigned frame_log_n = 0;
+    /* Default-off host submission trace. These cumulative, mutually exclusive
+     * outer-loop stages are separate from asynchronous backend replay. */
+    FILE* hitch_host = nullptr;
+    if (hitch_host_requested) {
+        hitch_host = fopen(hitch_host_path, "wx");
+        if (hitch_host) {
+            setvbuf(hitch_host, nullptr, _IOFBF, 65536);
+            fprintf(hitch_host, "qpc_ms,fifo_ms,present_ms,pump_ms,vblank_ms,flip_ms,idle_ms,walk_cpu_ms\n");
+        }
+    }
+    unsigned hitch_host_n = 0;
+    double hitch_host_cpu = 0;
     auto log_frame = [&]() {
-        if (!frame_log) return;
+        if (hitch_host) {
+            LARGE_INTEGER hitch_now; QueryPerformanceCounter(&hitch_now);
+            hitch_host_cpu += f_walk_cpu * 1000.;
+            fprintf(hitch_host, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                (double)hitch_now.QuadPart * 1000. / qf.QuadPart, c_p_fifo*1000.,
+                c_p_pres*1000.,c_p_pump*1000.,c_p_vbl*1000.,c_p_flip*1000.,c_p_wait*1000.,hitch_host_cpu);
+            if (++hitch_host_n % 30 == 0) fflush(hitch_host);
+            if (hitch_host_n == 32768) { fclose(hitch_host); hitch_host = nullptr; }
+        }
+        if (!frame_log) { if (hitch_host) f_walk = f_walk_cpu = 0; return; }
         FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
         const unsigned long long t = ((unsigned long long)ft.dwHighDateTime << 32 | ft.dwLowDateTime);
         const double unix_ms = (double)(t - 116444736000000000ull) / 10000.0;

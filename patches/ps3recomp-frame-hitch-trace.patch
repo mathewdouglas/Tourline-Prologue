@@ -1,6 +1,6 @@
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
-@@ -752,11 +752,23 @@
+@@ -752,11 +752,27 @@
      QueryPerformanceFrequency(&f); QueryPerformanceCounter(&c);
      return (double)c.QuadPart / (double)f.QuadPart;
  }
@@ -12,6 +12,10 @@
 +    return on;
 +}
 +static volatile LONG64 s_hitch_cache_us, s_hitch_cache_reads;
++static __declspec(thread) int s_hitch_replay;
++static volatile LONG64 s_hitch_compile_us;
++static double s_hitch_sync_compile_ms, s_hitch_sync_driver_ms, s_hitch_sync_read_ms;
++static u64 s_hitch_skip_vp, s_hitch_skip_fp, s_hitch_skip_record;
 +static double s_hitch_present_ms;
 +static double s_hitch_tex_alloc_ms, s_hitch_tex_decode_ms;
 +static double s_hitch_tex_hash_ms, s_hitch_tex_map_ms, s_hitch_tex_copy_ms, s_hitch_tex_srv_ms;
@@ -25,7 +29,7 @@
  }
  /* RSX_DRAWPROF=1: every 5 s, the FIFO walker's draw recording split by stage,
   * in ms and calls per frame, timed with the TSC (a few ns per probe; QPC
-@@ -3792,6 +3804,7 @@
+@@ -3808,6 +3824,7 @@
      char path[512] = {0};
      if (dir) {
          snprintf(path, sizeof path, "%s/%016llx.dxbc", dir, (unsigned long long)h);
@@ -33,18 +37,47 @@
          FILE* f = fopen(path, "rb");
          if (f) {
              fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
-@@ -3800,6 +3813,10 @@
+@@ -3816,6 +3833,11 @@
                  fclose(f);
                  if (err) *err = NULL;
                  dxbc_mem_put(h, *out);
 +                if (hitch_on()) {
 +                    InterlockedAdd64(&s_hitch_cache_us, (LONG64)((perf_now()-cache_begin)*1e6));
 +                    InterlockedIncrement64(&s_hitch_cache_reads);
++                    if(s_hitch_replay) s_hitch_sync_read_ms += (perf_now()-cache_begin)*1000.;
 +                }
                  return S_OK;
              }
              if (*out) { (*out)->lpVtbl->Release(*out); *out = NULL; }
-@@ -7315,7 +7332,9 @@
+@@ -3823,7 +3845,9 @@
+         }
+     }
+     InterlockedIncrement(&g_rsx_shader_busy);
++    double hitch_compile_begin = hitch_on() ? perf_now() : 0;
+     HRESULT hr = D3DCompile(src, len, name, NULL, NULL, "main", target, flags, 0, out, err);
++    if(hitch_on()) { double ms=(perf_now()-hitch_compile_begin)*1000.; InterlockedAdd64(&s_hitch_compile_us,(LONG64)(ms*1000.)); if(s_hitch_replay) s_hitch_sync_compile_ms += ms; }
+     InterlockedIncrement(&g_rsx_shaders_compiled);
+     InterlockedDecrement(&g_rsx_shader_busy);
+     if (SUCCEEDED(hr) && *out && path[0]) {
+@@ -3918,7 +3942,9 @@
+         if(s_shader_profile.on)InterlockedAdd64(&s_shader_profile.queue_us,shader_clock-j->queued_us);
+         ID3DBlob* out = NULL; ID3DBlob* err = NULL;
+         InterlockedIncrement(&g_rsx_shader_busy);
++        double hitch_worker_begin = hitch_on() ? perf_now() : 0;
+         HRESULT hr = D3DCompile(j->src, j->len, "guest_async", NULL, NULL, "main", j->target, j->flags, 0, &out, &err);
++        if(hitch_on()) InterlockedAdd64(&s_hitch_compile_us,(LONG64)((perf_now()-hitch_worker_begin)*1e6));
+         if(s_shader_profile.on)InterlockedAdd64(&s_shader_profile.compile_us,shader_prepare_clock()-shader_clock);
+         shader_clock=shader_prepare_clock();
+         InterlockedIncrement(&g_rsx_shaders_compiled);
+@@ -4053,6 +4079,7 @@
+     InterlockedIncrement64(&s_driver_pso_calls);
+     if (pd->CachedPSO.CachedBlobSizeInBytes) InterlockedIncrement64(&s_driver_pso_cached);
+     InterlockedAdd64(&s_driver_pso_us, us);
++    if(hitch_on() && s_hitch_replay) s_hitch_sync_driver_ms += (double)us/1000.;
+     LONG64 previous = InterlockedCompareExchange64(&s_driver_pso_max_us, 0, 0);
+     while (us > previous) {
+         LONG64 found = InterlockedCompareExchange64(&s_driver_pso_max_us, us, previous);
+@@ -7320,7 +7347,9 @@
      if (!cube && !depth && w <= 1024 && h <= 1024 && tex_repl_on() &&
          (s_tex_repl_fn || getenv("RSX_TEX_REPL_DUMP"))) {
          const u8* src = tex_src(off, chain_bytes);
@@ -54,7 +87,7 @@
          const void* rp = NULL;
          if (s_tex_repl_fn) repl_cand = s_tex_repl_fn(repl_hash, w, h, fmt, levels, chain_bytes, src, &rp);
          if (repl_cand) repl = (const u8*)rp;
-@@ -7344,7 +7363,9 @@
+@@ -7349,7 +7378,9 @@
          t->res->lpVtbl->Release(t->res); t->res = NULL;
          if (t->up) { t->up->lpVtbl->Release(t->up); t->up = NULL; }
      }
@@ -64,7 +97,7 @@
          D3D12_HEAP_PROPERTIES hp = {0}; hp.Type = D3D12_HEAP_TYPE_DEFAULT;
          D3D12_RESOURCE_DESC td = {0};
          td.Dimension = depth ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-@@ -7363,6 +7384,7 @@
+@@ -7368,6 +7399,7 @@
      /* The staging buffer lives in system memory. tex_upload_sweep frees it
       * once a texture stops changing; a later re-upload makes a new one. */
      if (!t->up) {
@@ -72,7 +105,7 @@
          D3D12_HEAP_PROPERTIES hu = {0}; hu.Type = D3D12_HEAP_TYPE_UPLOAD;
          D3D12_RESOURCE_DESC bd = {0};
          bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-@@ -7378,10 +7400,16 @@
+@@ -7383,10 +7415,16 @@
              return -1;
          }
      }
@@ -89,7 +122,7 @@
      { static int _tp=0; if (getenv("RTT_DUMP") && _tp++ < 6) {
          const u8* sp = vm_base + off;
          fprintf(stderr, "[TEXUP] off=0x%X fmt=0x%X row0:", off, fmt);
-@@ -7434,8 +7462,10 @@
+@@ -7439,8 +7477,10 @@
      /* Pixel conversion -- deswizzle, channel order, block copy -- is RSX
       * semantics and lives in rsx_texture_layout.c, so a second backend gets
       * it by calling this rather than porting the loops again. */
@@ -100,7 +133,7 @@
      if (repl_hash && !repl)
          tex_repl_dump(repl_hash, off, w, h, fmt, (const u8*)mapped, pitch, dxt ? blkrows : h,
                        dxt ? blkrow : tl.dst_row_bytes,
-@@ -7718,6 +7748,7 @@
+@@ -7723,6 +7763,7 @@
      }
      t->up->lpVtbl->Unmap(t->up, 0, NULL);
  
@@ -108,7 +141,7 @@
      if (!fresh) {   /* reused resource: PSR -> COPY_DEST first */
          D3D12_RESOURCE_BARRIER b = {0};
          b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-@@ -7750,6 +7781,7 @@
+@@ -7755,6 +7796,7 @@
          b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
          s_d3d.cmd_list->lpVtbl->ResourceBarrier(s_d3d.cmd_list, 1, &b);
      }
@@ -116,7 +149,7 @@
      /* SRV at heap slot 1+slot */
      D3D12_SHADER_RESOURCE_VIEW_DESC sv = {0};
      sv.Format = dxfmt;
-@@ -7773,7 +7805,9 @@
+@@ -7778,7 +7820,9 @@
          sv.TextureCube.MostDetailedMip = 0;
          sv.TextureCube.ResourceMinLODClamp = 0.0f;
      }
@@ -126,7 +159,7 @@
  
      t->off = off; t->key = key_off; t->w = w; t->h = h; t->fmt = fmt;
      t->cube = cube; t->depth = depth; t->used = 1; t->levels = levels;
-@@ -10592,10 +10626,52 @@
+@@ -10597,10 +10641,56 @@
      if (rt_on() && (s_rt_thr || rt_start())) { rt_submit(); return; }
      render_frame_sync();
  }
@@ -145,13 +178,13 @@
 +        s_hitch_file = fopen(getenv("RSX_HITCH_LOG"), "wx");
 +        if (!s_hitch_file) { fprintf(stderr, "[hitch-trace] cannot create fresh output\n"); return; }
 +        setvbuf(s_hitch_file, NULL, _IOFBF, 65536);
-+        fprintf(s_hitch_file, "unix_ms,qpc_ms,batch_ms,draws,present,foreground,present_ms,gpu_previous_ms,tex_ms,vtx_ms,vs_ms,cb_ms,wait_ms,pre_ms,srv_ms,pso_ms,record_ms,cache_us,cache_reads,shader_compiles,driver_calls,driver_us,cached_calls,demand_queued,demand_done,pending,tex_alloc_ms,tex_decode_ms,tex_allocs,up_allocs,uploads,upload_bytes,tex_hash_ms,tex_map_ms,tex_copy_ms,tex_srv_ms\n");
++        fprintf(s_hitch_file, "unix_ms,qpc_ms,batch_ms,draws,present,foreground,present_ms,gpu_previous_ms,tex_ms,vtx_ms,vs_ms,cb_ms,wait_ms,pre_ms,srv_ms,pso_ms,record_ms,cache_us,cache_reads,shader_compiles,driver_calls,driver_us,cached_calls,demand_queued,demand_done,pending,tex_alloc_ms,tex_decode_ms,tex_allocs,up_allocs,uploads,upload_bytes,tex_hash_ms,tex_map_ms,tex_copy_ms,tex_srv_ms,skip_vp,skip_fp,skip_record,compile_us,sync_compile_ms,sync_driver_ms,sync_read_ms\n");
 +    }
 +    if (!s_hitch_file || s_hitch_rows >= 32768) return;
 +    FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);
 +    ULARGE_INTEGER t; t.LowPart=ft.dwLowDateTime; t.HighPart=ft.dwHighDateTime;
 +    double now=perf_now();
-+    fprintf(s_hitch_file, "%.3f,%.3f,%.3f,%u,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%lld,%lld,%ld,%lld,%lld,%lld,%ld,%ld,%ld,%.3f,%.3f,%llu,%llu,%llu,%llu,%.3f,%.3f,%.3f,%.3f\n",
++    fprintf(s_hitch_file, "%.3f,%.3f,%.3f,%u,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%lld,%lld,%ld,%lld,%lld,%lld,%ld,%ld,%ld,%.3f,%.3f,%llu,%llu,%llu,%llu,%.3f,%.3f,%.3f,%.3f,%llu,%llu,%llu,%lld,%.3f,%.3f,%.3f\n",
 +        (double)(t.QuadPart-116444736000000000ull)/10000.,now*1000.,(now-begin)*1000.,draws,present,
 +        GetForegroundWindow()==s_d3d.hwnd,s_hitch_present_ms,g_rsx_gpu_ms_last,
 +        s_perf_tex*1000.,s_perf_vtx*1000.,s_perf_vs*1000.,s_perf_cb*1000.,s_perf_wait*1000.,
@@ -164,7 +197,9 @@
 +        (long)s_pso_queued,(long)s_pso_done,(long)g_rsx_shader_busy,
 +        s_hitch_tex_alloc_ms,s_hitch_tex_decode_ms,(unsigned long long)s_hitch_tex_allocs,
 +        (unsigned long long)s_hitch_up_allocs,(unsigned long long)s_hitch_uploads,(unsigned long long)s_hitch_upload_bytes,
-+        s_hitch_tex_hash_ms,s_hitch_tex_map_ms,s_hitch_tex_copy_ms,s_hitch_tex_srv_ms);
++        s_hitch_tex_hash_ms,s_hitch_tex_map_ms,s_hitch_tex_copy_ms,s_hitch_tex_srv_ms,
++        (unsigned long long)s_hitch_skip_vp,(unsigned long long)s_hitch_skip_fp,(unsigned long long)s_hitch_skip_record,
++        (long long)InterlockedCompareExchange64(&s_hitch_compile_us,0,0),s_hitch_sync_compile_ms,s_hitch_sync_driver_ms,s_hitch_sync_read_ms);
 +    if ((s_hitch_rows+1)%120 == 0) fflush(s_hitch_file);
 +    if (++s_hitch_rows == 32768) { fclose(s_hitch_file); s_hitch_file=NULL; }
 +}
@@ -174,12 +209,32 @@
 +    int trace_present = FR->present;
      ULONGLONG t0 = GetTickCount64(); u32 nd = FR->draw_count;
 +    s_hitch_present_ms = 0;
++    s_hitch_replay = hitch_on();
      render_frame_body();
++    s_hitch_replay = 0;
 +    hitch_trace(trace_begin, nd, trace_present);
      ULONGLONG dt = GetTickCount64() - t0; static int _n = 0;
      if (dt >= 1500 && _n++ < 32)
          fprintf(stderr, "[D3D12] frame took %llu ms (%u records)%c", (unsigned long long)dt, nd, 10);
-@@ -12220,7 +12296,7 @@
+@@ -11909,7 +11999,7 @@
+                 if (skipdbg == 1) { const char* e = getenv("RSX_SKIPDBG_FP"); skipdbg = e ? (u32)strtoul(e, NULL, 16) : 0; }
+                 const int sdbg = skipdbg && dr->fp_addr == skipdbg && skipdbg_n < 40;
+                 /* Its vertex shader is still compiling in the background. */
+-                if (dr->vs_idx == VS_PENDING) { if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); } FR->shader_pending = 1; continue; }
++                if (dr->vs_idx == VS_PENDING) { if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] vs pending%c", 10); } FR->shader_pending = 1; if(hitch_on()) s_hitch_skip_vp++; continue; }
+                 /* Per-draw pipeline: prefer the guest's own compiled FP; fall
+                  * back to the hardcoded atlas/colour PS pair. */
+                 u32 _un_dim[16][2];
+@@ -11934,7 +12024,7 @@
+                  * draw out until it is ready. */
+                 if (sdbg) { skipdbg_n++; fprintf(stderr, "[skipdbg] d=%u dpso=%p fp_pending=%d vtx_mask=0x%X cur_rt=%d has_dsv=%d n=%u%c",
+                                                 d, (void*)dpso, (int)s_fp_pending, dr->vtx_mask, cur_rt, cur_has_dsv, dr->vertex_count, 10); }
+-                if (!dpso && s_fp_pending) { FR->shader_pending = 1; continue; }
++                if (!dpso && s_fp_pending) { FR->shader_pending = 1; if(hitch_on()) s_hitch_skip_fp++; continue; }
+                 /* The fallback pipeline reads sixteen slots; a packed draw
+                  * would read garbage through it. */
+                 if (!dpso && dr->vtx_mask && dr->vtx_mask != 0xFFFFu) continue;
+@@ -12218,7 +12308,7 @@
                  (unsigned long long)s_req_verts, (unsigned long long)s_req_draws,
                  MAX_VERTICES, (unsigned long long)s_drop_draws, FR->draw_count, 10); } }
        s_req_verts = 0; s_req_draws = 0; s_drop_draws = 0; }
@@ -188,7 +243,7 @@
          static double s_t_prev = 0.0; static int s_n = 0;
          double now = perf_now();
          if (s_t_prev > 0.0) s_perf_frame += now - s_t_prev;
-@@ -12721,6 +12797,7 @@
+@@ -12719,6 +12809,7 @@
      if (FR->present && !hold) {
          const double pt = perf_now();
          HRESULT phr = s_d3d.swap_chain->lpVtbl->Present(s_d3d.swap_chain, (UINT)s_psync, 0);
@@ -196,7 +251,16 @@
          if (getenv("RSX_PRESENT_DIAG") && (s_d3d.frame_count < 8 || s_d3d.frame_count % 120 == 0))
              fprintf(stderr, "[present-diag] frame=%llu sync=%d result=%08lX call_ms=%.3f gpu_ms=%.3f foreground=%d\n",
                  (unsigned long long)s_d3d.frame_count, s_psync, (unsigned long)phr,
-@@ -15822,6 +15899,7 @@
+@@ -15431,7 +15522,7 @@
+         if (gfc && dr->vs_idx < 0) {
+             /* No GPU-fetch shader for this program: the draw cannot be made
+              * from raw bytes, and its vertices were not converted. */
+-            if (dr->vs_idx == VS_PENDING) FR->shader_pending = 1;
++            if (dr->vs_idx == VS_PENDING) { FR->shader_pending = 1; if(hitch_on()) s_hitch_skip_record++; }
+             static int _n = 0; if (dr->vs_idx != VS_PENDING && _n++ < 8)
+                 fprintf(stderr, "[VTXGPU] no fetch shader for this vertex program; draw dropped%c", 10);
+             FR->gf_slot_gen[FR->draw_count] = 0;
+@@ -15816,6 +15907,7 @@
  
      { extern void (*g_pad_milestone_hook)(const char*); g_pad_milestone_hook = NULL; }
      rt_stop();
