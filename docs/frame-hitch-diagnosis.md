@@ -69,7 +69,32 @@ unterminated row and reports the discarded byte count. It never repairs interior
 rows. A complete prefix is useful timing evidence but is not a final coverage
 snapshot, successful shutdown proof or complete-session counter total.
 
-## Bounded texture eviction experiment
+## Texture and race-prewarm hitch fixes (default since Phase 221)
+
+Phase 221 folded three changes into the main runtime patch and made them the default.
+The earlier separate overlays (`ps3recomp-texture-slot-lru.patch`, and the Phase 221
+`ps3recomp-texture-alloc-pool.patch` experiment) are removed. Each keeps a rollback switch:
+
+| Switch | Default | Rollback | What it does |
+| --- | --- | --- | --- |
+| `RSX_TEX_LRU` | on | `=0` | When the 1,024 texture slots are full, evict the least recently used unreferenced slot instead of the first unused one. Empty slots still win, exact dirty/replacement hits reuse their own slot, a slot used by this batch is never evicted. |
+| `RSX_TEX_POOL` | on | `=0` | A texture evicted because its slot changes shape is parked (at most 512 entries / `RSX_TEX_POOL_MB`, default 256) and reused by a later texture with the identical resource description. Staging data goes through one persistently mapped upload buffer (`RSX_TEX_RING_MB`, default 64, `0` off) reset after the per-batch GPU drain, instead of a new committed upload buffer per texture; an upload that does not fit uses the old per-slot buffer. `[tex-pool]` stats every 5 s. |
+| `RSX_RACE_PREWARM_THREADS` | 4 | `=1` | The race prewarm reads the race index once and prepares it on n below-normal helper threads (2..8); the pso-worker keeps serving demand jobs. `[race-prewarm] finished ... threads=n` and a per-stage split (recipe/bytecode/driver-blob reads, driver call). |
+
+Why: each new texture upload made two committed resources (texture plus its own staging
+buffer), about 1 ms together, so a frame where about 190 textures appear for the first time
+(race start, the +7 s camera change) spent 150-200 ms in `CreateCommittedResource`. The race
+prewarm (on by default for players) prepared about 4,000 learned race pipelines one at a time;
+each costs about 15 ms of small-file reads (recipe, bytecode, driver blob in directories of
+16k-39k files), so it took 66-69 s, the 30 s loading gate timed out and the race started while
+it was still filling (about 1,000 draws then waited for pipelines).
+
+`scripts/test/texture_slot_policy_native.py --runtime <tree>` still compiles the production
+slot-selection loop and checks both modes. Evidence and limits: progress.md Phase 221.
+
+## Bounded texture eviction experiment (historical, Phase 199)
+
+The text below describes the Phase 199 overlay before it became the default in Phase 221.
 
 `patches/ps3recomp-texture-slot-lru.patch` is a separate, default-off runtime
 experiment. `RSX_TEX_LRU=1` selects the least recently used slot among textures

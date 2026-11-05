@@ -1,8 +1,11 @@
-"""Private engine: main patch + frame-hitch trace overlay + texture-slot LRU overlay (+ optional extras).
+"""Private engine: main patch + frame-hitch trace overlay (+ optional extra overlays).
+
+Since Phase 221 texture-slot recency, the texture pool/staging ring and the parallel race prewarm are part
+of the main patch (default on; RSX_TEX_LRU=0, RSX_TEX_POOL=0, RSX_RACE_PREWARM_THREADS=1 roll back).
 
 Invoke through run_locked.py from a VS x64 environment with GT5P_RUNTIME set to the runtime source
 that the reference build names. Every overlay stays default-off at run time (RSX_HITCH_LOG,
-RSX_TEX_LRU, ...). Output stays under scratch; reference objects are read-only.
+...). Output stays under scratch; reference objects are read-only.
 """
 import argparse
 import os
@@ -27,7 +30,7 @@ def apply(tree, patch):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--output', type=Path, default=ROOT / 'scratch/hitch/build')
-    ap.add_argument('--overlay', action='append', default=['ps3recomp-frame-hitch-trace.patch', 'ps3recomp-texture-slot-lru.patch'])
+    ap.add_argument('--overlay', action='append', default=None)
     a = ap.parse_args()
     if os.environ.get('VSCMD_ARG_TGT_ARCH', '').lower() != 'x64':
         raise SystemExit('Use a VS x64 environment')
@@ -38,7 +41,7 @@ def main():
         shutil.rmtree(fresh)
     fresh.mkdir(parents=True)
     backend = patched_source(fresh / 'runtime-source')
-    for name in a.overlay:
+    for name in (a.overlay or ['ps3recomp-frame-hitch-trace.patch']):
         apply(fresh / 'runtime-source', ROOT / 'patches' / name)
     obj = compile_backend(backend, fresh / 'backend-objects')
     print(link_engine(fresh, obj, []), flush=True)
