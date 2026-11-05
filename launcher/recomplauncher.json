@@ -1,0 +1,170 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Project Tourline Prologue",
+  "repo": "mathewdouglas/Tourline-Prologue",
+  "start": {
+    "program": ["tourline-prologue.exe"]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "toml",
+      "file": [
+        {
+          "path": "{local}/GT5PRecomp/selected-storage/gt5p_settings.toml",
+          "if": "{local}/GT5PRecomp/selected-storage"
+        },
+        { "path": "{local}/GT5PRecomp/gt5p_settings.toml" }
+      ],
+      "new": {
+        "video/resolution": "\"720p\"",
+        "video/aspect": "\"16:9\"",
+        "video/msaa": "2",
+        "video/shader_precompile": "true",
+        "video/pipeline_async": "true",
+        "meta/defaults_version": "1"
+      }
+    }
+  ],
+  "folders": {
+    "logs": [
+      {
+        "path": "{local}/GT5PRecomp/selected-storage/logs",
+        "if": "{local}/GT5PRecomp/selected-storage"
+      },
+      { "path": "{local}/GT5PRecomp/logs" }
+    ],
+    "storage": [
+      {
+        "path": "{local}/GT5PRecomp/selected-storage",
+        "if": "{local}/GT5PRecomp/selected-storage"
+      },
+      { "path": "{local}/GT5PRecomp" }
+    ]
+  },
+  "actions": [
+    { "id": "open-storage", "label": "Open Storage Folder", "open": "storage" },
+    { "id": "open-logs", "label": "Open Logs", "open": "logs" }
+  ],
+  "settings": [
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "group": "Video",
+      "help": "Rendered natively at this size. 720p is the console's own.",
+      "choices": [
+        { "label": "720p", "set": { "video/resolution": "\"720p\"" } },
+        { "label": "1080p", "set": { "video/resolution": "\"1080p\"" } },
+        { "label": "1440p", "set": { "video/resolution": "\"1440p\"" } },
+        { "label": "4K", "set": { "video/resolution": "\"2160p\"" } }
+      ],
+      "defaults": { "video/resolution": "\"720p\"" }
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect Ratio",
+      "group": "Video",
+      "help": "21:9 widens races and the dealer view; menus stay centred.",
+      "choices": [
+        { "label": "16:9", "set": { "video/aspect": "\"16:9\"" } },
+        { "label": "21:9 Ultrawide", "set": { "video/aspect": "\"21:9\"" } }
+      ],
+      "defaults": { "video/aspect": "\"16:9\"" }
+    },
+    {
+      "id": "window",
+      "label": "Window Mode",
+      "group": "Video",
+      "choices": [
+        { "label": "Windowed", "set": { "video/window": "\"windowed\"" } },
+        { "label": "Borderless", "set": { "video/window": "\"borderless\"" } }
+      ],
+      "defaults": { "video/window": "\"windowed\"" }
+    },
+    {
+      "id": "msaa",
+      "label": "Anti-Aliasing",
+      "group": "Video",
+      "help": "Multisampling for the scenes the game antialiases. Higher costs more GPU time.",
+      "choices": [
+        { "label": "Off", "set": { "video/msaa": "1" } },
+        { "label": "2x MSAA", "set": { "video/msaa": "2" } },
+        { "label": "4x MSAA", "set": { "video/msaa": "4" } },
+        { "label": "8x MSAA", "set": { "video/msaa": "8" } }
+      ],
+      "defaults": { "video/msaa": "4" }
+    },
+    {
+      "id": "vsync",
+      "label": "V-Sync",
+      "group": "Video",
+      "choices": [
+        { "label": "On", "set": { "video/vsync": "true" } },
+        { "label": "Off", "set": { "video/vsync": "false" } }
+      ],
+      "defaults": { "video/vsync": "true" }
+    },
+    {
+      "id": "anisotropy",
+      "label": "Texture Filtering",
+      "group": "Video",
+      "help": "Anisotropic filtering keeps roads sharp into the distance.",
+      "choices": [
+        { "label": "Trilinear", "set": { "game/anisotropy": "1" } },
+        { "label": "4x Anisotropic", "set": { "game/anisotropy": "4" } },
+        { "label": "8x Anisotropic", "set": { "game/anisotropy": "8" } },
+        { "label": "16x Anisotropic", "set": { "game/anisotropy": "16" } }
+      ],
+      "defaults": { "game/anisotropy": "16" }
+    },
+    {
+      "id": "smooth_colour",
+      "label": "Smooth Colour",
+      "group": "Video",
+      "advanced": true,
+      "help": "16-bit colour without the console's dither noise.",
+      "choices": [
+        { "label": "On", "set": { "game/smooth_colour": "true" } },
+        { "label": "Off", "set": { "game/smooth_colour": "false" } }
+      ],
+      "defaults": { "game/smooth_colour": "true" }
+    },
+    {
+      "id": "shader_warmup",
+      "label": "Preload Known Shaders",
+      "group": "Video",
+      "advanced": true,
+      "help": "Prepares recorded shaders in the background at startup to reduce stutter.",
+      "choices": [
+        { "label": "On", "set": { "video/shader_warmup": "true" } },
+        { "label": "Off", "set": { "video/shader_warmup": "false" } }
+      ],
+      "defaults": { "video/shader_warmup": "true" }
+    },
+    {
+      "id": "skip_movie",
+      "label": "Skip Opening Movie",
+      "group": "Game",
+      "choices": [
+        { "label": "Off", "set": { "game/skip_movie": "false" } },
+        { "label": "On", "set": { "game/skip_movie": "true" } }
+      ],
+      "defaults": { "game/skip_movie": "false" }
+    },
+    {
+      "id": "button_prompts",
+      "label": "Button Prompts",
+      "group": "Input",
+      "help": "Automatic follows the controller in use.",
+      "choices": [
+        { "label": "Automatic", "set": { "input/button_prompts": "\"auto\"" } },
+        { "label": "PlayStation", "set": { "input/button_prompts": "\"playstation\"" } },
+        { "label": "Xbox", "set": { "input/button_prompts": "\"xbox\"" } },
+        { "label": "Nintendo", "set": { "input/button_prompts": "\"nintendo\"" } },
+        { "label": "Keyboard", "set": { "input/button_prompts": "\"keyboard\"" } }
+      ],
+      "defaults": { "input/button_prompts": "\"auto\"" }
+    }
+  ]
+}

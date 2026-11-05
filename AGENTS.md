@@ -36,14 +36,20 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-05, Phase 221)
+## Start here: state of play (2026-11-05, Phase 222)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 219 is the latest).
+has the evidence, newest phase first (Phase 222 is the latest).
 
 ### What works now
 
+- **RecompLauncher manifest (Phase 222, from feature/recomplauncher-manifest, merged into feature/hitch-texture-lru):**
+  `launcher/recomplauncher.json` starts `tourline-prologue.exe` and edits `gt5p_settings.toml`
+  (10 settings). Relocated storage is followed through the junction
+  `%LOCALAPPDATA%\GT5PRecomp\selected-storage` (`GT5P_STORAGE_LINK=0` off). Keep the manifest's
+  `config.new` and the launcher's first-run preset identical. See docs/recomplauncher.md.
+  Untested inside RecompLauncher itself; not merged or released.
 - **Race hitches (Phase 221, branch feature/hitch-texture-lru, main patch, defaults on):** texture slot
   recency (`RSX_TEX_LRU=0` rollback), texture pool + 64 MB staging ring (`RSX_TEX_POOL=0`), race prewarm on 4
   threads (`RSX_RACE_PREWARM_THREADS=1`; 66-69 s -> 15-16 s, now inside the loading gate) and a persistent

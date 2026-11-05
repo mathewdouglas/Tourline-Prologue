@@ -57,6 +57,15 @@ def template_files():
     return result
 
 
+def recomplauncher_manifest():
+    path=regular(ROOT/'launcher/recomplauncher.json')
+    document=json.loads(path.read_text(encoding='utf-8'))
+    if (not isinstance(document,dict) or document.get('format')!=1 or
+            document.get('start',{}).get('program')!=['tourline-prologue.exe']):
+        raise ValueError('recomplauncher.json must start tourline-prologue.exe')
+    return path
+
+
 def preparation_files(folder):
     manifest=json.loads(regular(folder/'files.json').read_text())
     if (set(manifest)!={'schema','files'} or manifest['schema']!=1 or
@@ -164,7 +173,9 @@ def main():
              'Change storage.cmd': regular(ROOT / 'launcher/Change storage.cmd'),
              'Prepare shaders.cmd': regular(ROOT / 'launcher/Prepare shaders.cmd'),
              'Collect pipeline template.cmd': regular(ROOT / 'launcher/Collect pipeline template.cmd'),
-             'Resume pipeline verification.cmd': regular(ROOT / 'launcher/Resume pipeline verification.cmd')}
+             'Resume pipeline verification.cmd': regular(ROOT / 'launcher/Resume pipeline verification.cmd'),
+             # RecompLauncher reads this beside tourline-prologue.exe (docs/recomplauncher.md).
+             'recomplauncher.json': recomplauncher_manifest()}
     files.update(preparation_files(args.preparer_dir))
     files.update(template_files())
     for name in RUNTIME:

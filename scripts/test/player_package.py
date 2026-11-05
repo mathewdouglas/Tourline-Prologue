@@ -51,6 +51,9 @@ def main():
         put(package.ROOT / 'launcher/Prepare shaders.cmd', b'@echo off\n')
         put(package.ROOT / 'launcher/Collect pipeline template.cmd', b'@echo off\n')
         put(package.ROOT / 'launcher/Resume pipeline verification.cmd', b'@echo off\n')
+        launcher_manifest = {'format': 1, 'start': {'program': ['tourline-prologue.exe']}}
+        put(package.ROOT / 'launcher/recomplauncher.json',
+            json.dumps(dict(launcher_manifest, start={'program': ['runtime/gt5p.exe']})).encode())
         helper=root/'helper'
         payloads={'GT5P-Prepare.exe':pe,'decoder.dll':pe,'volume_reader.dll':pe,'licenses/Python-LICENSE.txt':b'Synthetic license',
                   'licenses/PyInstaller-COPYING.txt':b'Synthetic license'}
@@ -81,6 +84,8 @@ def main():
             else:
                 raise AssertionError(label + ' was accepted')
 
+        refused('manifest bypassing the launcher')
+        put(package.ROOT / 'launcher/recomplauncher.json', json.dumps(launcher_manifest).encode())
         put(build/'CMakeCache.txt', cmake.replace(b'BCUS98158', b'NPUA80075'))
         refused('wrong target')
         put(build/'CMakeCache.txt', cmake.replace(b'Release', b'Debug'))
@@ -115,6 +120,7 @@ def main():
             assert 'release.ini' in names and 'runtime/gt5p.exe' in names
             assert 'tourline-prologue.exe' in names and 'GT5P.exe' not in names
             assert 'Change storage.cmd' in names
+            assert 'recomplauncher.json' in names
             assert 'Prepare shaders.cmd' in names and 'preparation/GT5P-Prepare.exe' in names
             assert 'Collect pipeline template.cmd' in names
             assert 'Resume pipeline verification.cmd' in names

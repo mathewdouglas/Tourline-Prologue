@@ -9,6 +9,27 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 222 - RecompLauncher manifest, launcher-edited settings, storage link (2026-11-05)
+
+Branch `feature/recomplauncher-manifest` (commit d4a0272), merged into `feature/hitch-texture-lru`; that branch and its worktree are closed. See
+[recomplauncher.md](recomplauncher.md).
+
+- `launcher/recomplauncher.json` (level 1 and 2) starts `tourline-prologue.exe` and exposes ten
+  settings over `gt5p_settings.toml`; the packager ships it at the ZIP root and refuses a manifest
+  that starts anything else.
+- `config.new` and the launcher's first-run preset now both write `[meta] defaults_version = 1`,
+  so a Preload choice made in RecompLauncher before the first start survives the 0.2.4 migration.
+- Relocated storage: rewriting the manifest was rejected (updates replace it, and RecompLauncher
+  writes settings before our launcher runs). The launcher keeps a junction
+  `%LOCALAPPDATA%\GT5PRecomp\selected-storage` instead, made on storage change and repaired or
+  removed on every start; `GT5P_STORAGE_LINK=0` rolls back.
+- Measured: `recomplauncher_manifest.py` (a Python port of RecompLauncher's TOML editor) passes
+  every choice of all 10 settings against the game's saved layout; `player_package.py` passes;
+  `storage_link.py` passes the junction probe and the compiled launcher's `--set-storage`,
+  start-up repair, stale-link removal and rollback in a private `GT5P_LAUNCHER_HOME`. Probe and
+  launcher compile cleanly at /W4.
+- Not measured: RecompLauncher itself (Developer tools "Add a build"), a real install/update, or
+  the game reading a RecompLauncher-edited file. No game run, build or release.
 ## Phase 221 - Race hitches: texture allocation, race prewarm, pipeline lookup (2026-11-05)
 
 Branch `feature/hitch-texture-lru` (from `feature/interp-pipeline-prep` plus the `t3/hitch-attribution`
