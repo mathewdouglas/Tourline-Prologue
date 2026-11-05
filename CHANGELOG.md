@@ -3,6 +3,21 @@
 All notable changes to this port. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.2.4] - 2026-11-05
+
+- Optional preparation now covers 12,669 verified pipelines (3,446 programs) and
+  enumerates the game's shader catalogue from the player's own files; a full
+  fresh preparation measured 9.7 minutes on the reference PC. 0.2.3 caches are
+  not reused, so the first 0.2.4 launch offers preparation once.
+- Cheaper shaders: sample sharing and simpler generated text, with identical
+  output; much faster preparation stages.
+- Preload known shaders is on by default; "Compiling shaders" now shows only
+  when a draw is waiting, with an optional separate "Loading shaders" badge.
+- Fixed the dealership logo freeze (Windows thread-join race) and analog L2/R2
+  throttle/brake jumping to full.
+- [Release notes](docs/release-v0.2.4.md) and
+  [download](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.4).
+
 ## [0.2.3] - 2026-11-03
 
 - Expanded optional preparation to 5,669 verified observed pipelines.

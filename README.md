@@ -15,11 +15,11 @@
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
 ![Direct3D 12](https://img.shields.io/badge/graphics-Direct3D%2012-555)
 
-**[Release notes](docs/release-v0.2.3.md)** · **[Getting started](#getting-started)** · **[Known problems](#known-problems)** · **[Player setup](docs/player-setup.md)** · **[Shader preparation](docs/shader-precompile.md)** · **[Progress](docs/progress.md)** · **[Roadmap](ROADMAP.md)** · **[Changelog](CHANGELOG.md)** · **[AI use](docs/AI.md)**
+**[Release notes](docs/release-v0.2.4.md)** · **[Getting started](#getting-started)** · **[Known problems](#known-problems)** · **[Player setup](docs/player-setup.md)** · **[Shader preparation](docs/shader-precompile.md)** · **[Progress](docs/progress.md)** · **[Roadmap](ROADMAP.md)** · **[Changelog](CHANGELOG.md)** · **[AI use](docs/AI.md)**
 
 An unofficial port of **Gran Turismo 5 Prologue** (PS3, US disc BCUS98158) to Windows x64. It is a static recompilation: the game's own code, translated ahead of time to native x64, then run with a Direct3D 12 renderer. No emulator runs while you play. The player build is **Tourline Prologue**. The window title is Project Tourline Prologue.
 
-> **Status: early, partly playable.** The supported disc build boots to the menu, the dealerships draw, and a race loads and drives. The current download is [v0.2.3](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.3). The investigation, with dates and measurements, is in [docs/progress.md](docs/progress.md).
+> **Status: early, partly playable.** The supported disc build boots to the menu, the dealerships draw, and a race loads and drives. The current download is [v0.2.4](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.4). The investigation, with dates and measurements, is in [docs/progress.md](docs/progress.md).
 
 This tree is a fork of [sp00nznet/GT5P](https://github.com/sp00nznet/GT5P), built with [ps3recomp](https://github.com/sp00nznet/ps3recomp).
 
@@ -33,7 +33,7 @@ This project ships none of the game. Player notes in the download: [launcher/STA
 
 ## Getting started
 
-1. Download the Windows ZIP from [v0.2.3](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.3) on the [releases page](https://github.com/mathewdouglas/Tourline-Prologue/releases).
+1. Download the Windows ZIP from [v0.2.4](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.4) on the [releases page](https://github.com/mathewdouglas/Tourline-Prologue/releases).
 2. Extract the entire ZIP to a normal folder. Do not run it from inside the ZIP.
 3. Run **tourline-prologue.exe**. Choose where to keep saves, settings and shaders (the default folder, or an empty folder on another drive). Then select your extracted disc folder.
 4. If `EMAIN.ELF` is not already available, choose your installed RPCS3 when asked, or choose a decrypted `EMAIN.ELF` made from your own `EMAIN.SELF`.
@@ -45,7 +45,7 @@ Optional shader preparation, after setup and with the game closed: run **Prepare
 
 To move saves and shaders, close the game and run **Change storage.cmd**. To point at a different dump, run `tourline-prologue.exe --setup`. For an update, close the game and extract the new ZIP into its own folder. Your selected storage stays where it is.
 
-More detail: [launcher/START-HERE.txt](launcher/START-HERE.txt), [docs/player-setup.md](docs/player-setup.md), [docs/release-v0.2.3.md](docs/release-v0.2.3.md). Changes per version: [CHANGELOG.md](CHANGELOG.md).
+More detail: [launcher/START-HERE.txt](launcher/START-HERE.txt), [docs/player-setup.md](docs/player-setup.md), [docs/release-v0.2.4.md](docs/release-v0.2.4.md). Changes per version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Known problems
 
