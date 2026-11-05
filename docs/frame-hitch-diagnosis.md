@@ -81,6 +81,7 @@ The earlier separate overlays (`ps3recomp-texture-slot-lru.patch`, and the Phase
 | `RSX_TEX_POOL` | on | `=0` | A texture evicted because its slot changes shape is parked (at most 512 entries / `RSX_TEX_POOL_MB`, default 256) and reused by a later texture with the identical resource description. Staging data goes through one persistently mapped upload buffer (`RSX_TEX_RING_MB`, default 64, `0` off) reset after the per-batch GPU drain, instead of a new committed upload buffer per texture; an upload that does not fit uses the old per-slot buffer. `[tex-pool]` stats every 5 s. |
 | `RSX_RACE_PREWARM_THREADS` | 4 | `=1` | The race prewarm reads the race index once and prepares it on n below-normal helper threads (2..8); the pso-worker keeps serving demand jobs. `[race-prewarm] finished ... threads=n` and a per-stage split (recipe/bytecode/driver-blob reads, driver call). |
 | `RSX_PSO_FAST_LOOKUP` | on | `=0` | Persistent map from a session-independent draw key to the native pipeline hash (`warmup-v1/fp-lookup-v1.bin`, epoch-tagged); a first-in-process miss whose pipeline is resident skips HLSL/DXBC rebuilding. |
+| `RSX_TEX_PLACED` | on | `=0` | Textures are placed in 64 MB pre-made default heaps (first fit, coalescing; `RSX_TEX_HEAP_MB`, `RSX_TEX_HEAP_MAX`, `RSX_TEX_HEAP_PRE`) instead of one committed resource each. |
 
 Why: each new texture upload made two committed resources (texture plus its own staging
 buffer), about 1 ms together, so a frame where about 190 textures appear for the first time

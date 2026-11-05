@@ -115,6 +115,50 @@ the rest of texture handling (13 ms) and replay. A first launch (empty table) st
 The rollback run r1 (`RSX_TEX_LRU=0 RSX_TEX_POOL=0 RSX_RACE_PREWARM_THREADS=1` on the default engine)
 reproduced the old behaviour (single-thread prewarm 56.8 s, two allocations per texture, race start 371 ms).
 
+### Placed textures, preparation-built lookup table, route matrix (Phase 221, continued)
+
+- `RSX_TEX_PLACED` (default on, `=0` rollback): textures are placed resources in 64 MB default heaps
+  (`RSX_TEX_HEAP_MB`, `RSX_TEX_HEAP_MAX` 32, two made ahead `RSX_TEX_HEAP_PRE`, one more whenever free space
+  falls under a heap), first fit with coalescing, 4 KB alignment for small textures when the driver accepts it,
+  committed fallback. `scripts/test/texture_heap_alloc_native.py` compiles the real allocator: 179,431 random
+  operations, no overlap, alignment kept, free bytes conserved, one range per heap after freeing everything.
+  High Speed Ring: 1,305 placed textures cost 48 ms in total (committed: 455 ms), 4 heaps 17 ms.
+- Fast lookup v2: the key uses the FNV-1a 64 of the vertex shader's bytecode (the template records' `vs`) and the
+  file is `warmup-v1/fp-lookup-v2-<tag>.bin`, where the tag is reproducible offline (engine size/write time,
+  `RSX_ULTRAWIDE`, native scaling, `RSX_HIGH_PRECISION`, `RSX_FP_*`/`RSX_VP_*`/`FP_*`/`VP_*`/`RSX_VFETCH_LOOP`).
+  `scripts/fast_lookup_table.py` writes the table from a preparation (fragment structural hashes are now kept in
+  the report as `fp_code_identity`; the translated pass is rebuilt from its records and the cached vertex
+  bytecode); `player_prepare.py` and `hitch_prepare.py` call it (`GT5P_PREPARE_FAST_LOOKUP=0` skips).
+  `scripts/test/fast_lookup_table.py`: the Python structural hash matches the runtime C function on 400 catalogue
+  programs and edge cases; key/tag/file checks pass. In game the prepared table loads on the first launch
+  (12,669 entries, tag matched) and serves 1,677 lookups at High Speed Ring.
+- Translated preparations (`ultrawide-native`, `native-scaled`) now also publish menu/race membership mapped
+  through the translation pass (`pipeline_warmup_plan.stage_translated`, `GT5P_PREPARE_TRANSLATED_PLAN=0`
+  skips); before, a 21:9 preparation had no race list, so the race prewarm loaded nothing.
+
+Route matrix: fresh preparations with the final engine (16:9: 647 s, 12,669 table entries; 21:9 ultrawide:
+995 s), one locked run per row, focus not enforced. "Off" = `RSX_TEX_LRU=0 RSX_TEX_POOL=0
+RSX_RACE_PREWARM_THREADS=1 RSX_PSO_FAST_LOOKUP=0 RSX_TEX_PLACED=0`. Excess = time above the frame budget in
+display intervals over 50 ms from the grid on (dealership: above 33.4 ms), screenshot overlaps excluded.
+
+| Route, settings, cache | Defaults on: excess / >100 ms / worst | Off: excess / >100 ms / worst | Note |
+| --- | --- | --- | --- |
+| High Speed Ring 16:9 2x prepared | 1,490 ms / 3 / 129 ms | 3,344 ms / 12 / 346 ms | race start 73 ms (was 370-407) |
+| Daytona 16:9 2x prepared | 1,814 ms / 9 / 220 ms | 3,199 ms / 11 / 208 ms | worst frames at +90-97 s: pipelines outside the prepared set |
+| Dealership 16:9 2x prepared, warmup off | 818 ms / 2 / 128 ms | 4,821 ms / 17 / 175 ms | menu set not resident (test route default) |
+| Dealership, startup warmup on (player default) | 1,225 ms / 5 / 480 ms | 1,167 ms / 5 / 230 ms | cars differ per visit; one pair, inconclusive |
+| High Speed Ring 21:9 8x prepared (with translated lists) | 4,536 ms / 18 / 842 ms | 4,902 ms / 22 / 995 ms | 8x MSAA pipelines are not prepared at all |
+| High Speed Ring 16:9 2x empty cache | 11,238 ms / 47 / 247 ms | 13,760 ms / 47 / 308 ms | first "off" run never left the grid (rejected) |
+
+At 21:9 8x the prewarm (8 s) and lookup work (pipeline lookup 41 ms against 2.2 s off), but the race start
+(722 ms) and the +7 s change (842 ms) are dominated by about 2,200 pipelines created on first use: the
+starter's multisampled pipelines were observed at 2x/4x, the sample count is part of the native pipeline, so
+none of them exist at 8x. Shaders are shared between sample counts since Phase 213, so an MSAA-mapped native
+pass in preparation (driver creation only) is the next step for 8x players.
+Remaining at 16:9 prepared: first-draw GPU time after race start (26-45 ms frames), about 18 ms of texture
+upload at race start, game-thread (outside the renderer) frames of 85-130 ms around +10-15 s, and Daytona's
+late pipelines outside the starter.
+
 ## Phase 220 - Shader-interpreter pipelines prepared ahead of use (2026-11-05)
 
 Branch `feature/interp-pipeline-prep` from `feature/shader-coverage-scaling` 839eb15 (v0.2.4 plus docs). 0.2.5 work;
