@@ -40,9 +40,7 @@ for case, value, override, disabled, file_value, effective in (
 ):
     folder = root / ('preload_indicator_' + case); folder.mkdir()
     settings = folder / 'settings.toml'
-    settings.write_text('[video]
-' + ('preload_indicator = ' + value + '
-' if value else ''))
+    settings.write_text('[video]\n' + ('preload_indicator = ' + value + '\n' if value else ''))
     env = os.environ.copy()
     for key in ('GT5P_PRELOAD_INDICATOR', 'GT5P_NO_SETTINGS'): env.pop(key, None)
     env.update(GT5P_SETTINGS=str(settings), TEST_PRELOAD_FILE=str(int(file_value)), TEST_PRELOAD_EFFECTIVE=str(int(effective)))
