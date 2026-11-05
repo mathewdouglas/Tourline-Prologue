@@ -9,6 +9,34 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 220 - Shader-interpreter pipelines prepared ahead of use (2026-11-05)
+
+Branch `feature/interp-pipeline-prep` from `feature/shader-coverage-scaling` 839eb15 (v0.2.4 plus docs). 0.2.5 work;
+not merged, no tag or release. Full write-up, switches and the measurement table: the Phase 220 status section of
+[coverage-shader-interpreter.md](coverage-shader-interpreter.md).
+
+- Finding: with independent `RSX_SHADER_INTERP=1 RSX_SHADER_INTERP_VP=1` most interpreter pipelines paired the
+  fragment interpreter with the draw's *specialized* vertex shader, so they were program-specific; and the Phase 216
+  prewarm used the starter's raw 2x/4x sample counts, which never match at 8x. That explains 274 pipelines in the
+  user's cold play against 173 embedded classes.
+- Change (overlay only): the 173 starter classes are mapped to the process settings (RSX_MSAA count for every
+  multisampled class, 8-bit format without high precision, per-sample variant with SSAA): 318 pipelines at 2/4/8x,
+  188 at 1x. A lowest-priority thread creates them at startup when both stages are configured, yielding to queued
+  demand pipelines, counted as preload work, persisted as `ipso_*` with an `ipso-set-<identity>` marker. Fragment-only
+  interpreter draws of a prepared class use the paired generic pipeline. The helper runs the same creation offline
+  as a separate final stage (`interp-pipelines.json`, `--interp-pipelines-only`), never touching the token, prepared
+  shaders or selection. Rollbacks: `RSX_SHADER_INTERP_PIPELINE_PREP=0`, `RSX_SHADER_INTERP_PREP_PAIR=0`,
+  `RSX_SHADER_INTERP_PREP_YIELD=0`, `GT5P_PREPARE_INTERP_PIPELINES=0`.
+- Measured: interpreter pipeline creation during play falls from 346-482 to 15-42 per run, waiting draws from
+  4,309-8,187 to 15-42, fragment draws left out for a pipeline to 0. User shape with a prepared cache + stage:
+  57.7 FPS, p99 28.9 ms, 1.9% late against 55.3 / 52.3 / 7.0% (one pair). Default 1080p 16:9 2x cold is **worse**
+  with paired routing (16.8-18.4% late against 4.2-10.0%): draws that used to be skipped are now interpreted for the
+  whole compile (fragment-interpreter draws 52k -> 57-98k), the known interpreter GPU cost. Without pairing the step
+  is neutral (4.0% late). Interpreter stays default-off; a per-frame interpreter budget is the proposed next step
+  for consistent frame times.
+- Offline/helper: 12 derivation unit tests; offline engine cold/warm/MSAA/precision/kill-resume/existing-cache checks;
+  helper cancel/resume/stage-only/rollback on a 32-record install with the user's settings shape all pass.
+
 ## Phase 219 - 0.2.4 RC: preload on by default, separate indicator, one-time precompile offer (2026-11-05)
 
 The maintainer tested the 0.2.4 release candidate and asked for three changes

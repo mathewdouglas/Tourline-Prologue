@@ -53,6 +53,7 @@ def main():
     ap.add_argument('--seed', type=Path)
     ap.add_argument('--stage', action='store_true')
     ap.add_argument('--prep', choices=('0', '1'), required=True)
+    ap.add_argument('--env', action='append', default=[], metavar='NAME=VALUE', help='extra game variable')
     ap.add_argument('--engine', type=Path, default=ROOT / 'build' / 'gt5p.exe')
     a = ap.parse_args()
     scratch = (ROOT / 'scratch').resolve()
@@ -81,7 +82,8 @@ def main():
         shutil.rmtree(storage / 'input')
     env = [f'{k}={v}' for k, v in SHAPES[a.shape].items()]
     env += ['RSX_SHADER_INTERP_PSO_DISK=1', 'RSX_SHADER_INTERP_PSO_ASYNC=1',
-            'RSX_SHADER_INTERP_PIPELINE_PREP=' + a.prep]
+            'RSX_SHADER_INTERP_PIPELINE_PREP=' + a.prep] + a.env
+    result['env'] = a.env
     cmd = [PY, str(ROOT / 'scripts/test/interp_game_probe.py'), 'race', '--tag', a.tag, '--cache', str(cache),
            '--fp', '1', '--vp', '1', '--frame-test', '--no-foreground', '--engine', str(a.engine.resolve())]
     if not a.seed:

@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-05, Phase 219)
+## Start here: state of play (2026-11-05, Phase 220)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
 has the evidence, newest phase first (Phase 219 is the latest).
 
 ### What works now
+
+- **Interpreter pipelines prepared (Phase 220, branch feature/interp-pipeline-prep, overlay only):** with both
+  interpreter stages on, the 173 starter classes are mapped to the settings (318 pipelines at 2/4/8x MSAA) and created
+  at startup on a lowest-priority thread (preload counters, `ipso_*` + `ipso-set-<identity>`); fragment-only
+  interpreter draws of a prepared class use the paired generic pipeline. Helper: separate final stage
+  (`interp-pipelines.json`, `--interp-pipelines-only`), never changes token/shaders/selection. Rollbacks
+  `RSX_SHADER_INTERP_PIPELINE_PREP=0`, `RSX_SHADER_INTERP_PREP_PAIR=0`, `RSX_SHADER_INTERP_PREP_YIELD=0`,
+  `GT5P_PREPARE_INTERP_PIPELINES=0`. Demand interpreter PSOs 346-482 -> 15-42, left-out FP draws -> 0; prepared+stage
+  1.9% late vs 7.0%, but default-shape cold is worse (16.8-18.4% vs 4.2-10.0%: more draws interpreted). Interpreter
+  stays default-off. Evidence: docs/progress.md Phase 220.
 
 - **0.2.4 RC UX (Phase 219, branch t3/rc024-ux):** Preload known shaders is On by default
   (pre-0.2.4 settings files switched on once via `[meta] defaults_version`; a later explicit false stays; `GT5P_SETTINGS_MIGRATE=0` skips). "Compiling shaders" now

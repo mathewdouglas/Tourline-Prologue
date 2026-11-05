@@ -14,6 +14,141 @@ Default is off. `RSX_SHADER_INTERP=0` (unset) must leave pipeline keys, HLSL,
 DXBC and pixels unchanged. Unvalidated behaviour stays on an environment
 switch.
 
+## Status (Phase 220, 2026-11-05): interpreter pipelines prepared ahead of use
+
+Branch `feature/interp-pipeline-prep`. Everything below is inside the overlay
+(`patches/ps3recomp-shader-interp.patch`) and only acts when the interpreter is configured; the interpreter itself
+stays default-off, and the main patch, starter, preparation token and cache formats are unchanged.
+
+### What was wrong with the Phase 216 picture
+
+The brief assumed interpreter pipelines are "generic shader x native class". That holds only for the paired case
+(both stages interpreted). With independent `RSX_SHADER_INTERP=1 RSX_SHADER_INTERP_VP=1`, a fragment-only interpreter
+draw (its specialized vertex shader is ready, the fragment shader or its driver pipeline is pending) used the
+**specialized vertex shader**, so its pipeline key contained that program's bytecode: no class list could cover it. In
+the user's cold play log 30,944 fragment-interpreter draws ran with only 5,840 vertex-interpreter draws, i.e. most
+interpreter pipelines were of that program-specific kind. Second, the Phase 216 prewarm used the starter's raw sample
+counts (2x/4x); at 8x MSAA none of its multisampled classes matched. That is why the user's run needed 274 pipelines
+against 173 embedded classes.
+
+### What changed
+
+1. **Class derivation** (`scripts/interp_pipeline_classes.py`, mirrored by the engine's `interp_class_map`). The
+   12,669 starter records reduce to 173 settings-independent rows (input layout, target count/format, blend, write
+   mask, cull, stencil/depth, multisampled or not); `interp_embed.py` now embeds them through this module. The engine
+   maps them to the process settings: every multisampled target gets the `RSX_MSAA` count (that is what
+   `off_rt_make_ms` does), `R16G16B16A16_UNORM` becomes `R8G8B8A8_UNORM` when `RSX_HIGH_PRECISION=0`
+   (`rsx_surface_dxgi`), and the per-sample fragment variant is used when `RSX_SSAA` is on and the target is
+   multisampled. Each class gets both fragment input variants. Result: 318 pipelines at 2x/4x/8x, 188 at 1x, 308 at
+   2x without high precision. Ultrawide-native / native-scaled change specialized shader text only and do not enter
+   these pipelines. Bounds: at most 512 rows, 32-bit fields, `nrt` 1..4, known formats, sample counts 0/2/4/8;
+   malformed input is rejected (12 unit tests, `scripts/test/interp_pipeline_classes.py`).
+2. **Startup step** (`interp_prewarm`, default on whenever both interpreter stages are configured;
+   `RSX_SHADER_INTERP_PIPELINE_PREP=0` rolls back). Queuing the 318 descriptors takes under 1 ms at device init; a
+   separate `THREAD_PRIORITY_LOWEST` thread creates them in order, waiting (at most 200 ms per job) while specialized
+   or interpreter demand pipelines are queued (`RSX_SHADER_INTERP_PREP_YIELD=0` disables the wait). Demand work keeps
+   its own worker; a draw that needs a still-queued class moves that one entry to the demand worker (`promoted`).
+   Each job counts as preload work (`g_rsx_shader_preload_busy` / `_total`, the "Loading shaders" counters), never
+   "Compiling shaders", and never enters the demand `pso_new` / `new ms total` figures. Exit cancels between jobs
+   (an in-flight driver call finishes first). Blobs persist as `ipso_<hash>.bin` with the Phase 216 validation even
+   when `RSX_SHADER_INTERP_PSO_DISK` is unset (`=0` turns persistence off for both paths); a complete set writes
+   `ipso-set-<identity>.txt`, where the identity hashes every prepared descriptor's blob key, so a settings change
+   (MSAA, precision, anisotropy via the root signature) gives a different identity and a new set.
+3. **Prepared paired routing** (`RSX_SHADER_INTERP_PREP_PAIR=0` rolls back). A fragment-only interpreter draw whose
+   native class was prepared stages its vertex program for the vertex interpreter and uses the prepared paired
+   pipeline instead of creating one for the specialized vertex shader. Only prepared classes are routed; an unknown
+   class keeps the Phase 216 path. Not done for the vertex-only case (vertex interpreter + ready specialized pixel
+   shader): routing that to the fragment interpreter would add the expensive half.
+4. **Preparation helper stage** (`scripts/interp_pipeline_prep.py`, called by `player_prepare.py` after the shader
+   preparation has completed and been validated, before the cache selection moves). It runs the installed engine
+   once offline with `RSX_SHADER_INTERP_PIPELINE_PREP=sync` and the player's MSAA / smooth colour / anisotropy read
+   from `gt5p_settings.toml`. It never changes the preparation token, prepared shaders, native blobs or packs; its
+   result is `interp-pipelines.json` in the generation folder. A failure is reported there and does not fail the
+   preparation; an engine without the overlay (every released engine) records `skipped`.
+   `player_prepare.py --interp-pipelines-only` adds it to an already completed, selected preparation without redoing
+   anything. `GT5P_PREPARE_INTERP_PIPELINES=0` skips the stage.
+
+**Startup step only when the interpreter is on.** With the interpreter off no interpreter pipeline is ever bound,
+so creating 318 resident pipelines would be pure cost: about 1 s of one low-priority thread on a warm driver cache,
+up to about 13 s driver-cold (Phase 216's cold play: 274 pipelines, 13.1 s), plus resident pipeline memory (not
+measured). The helper stage always runs because it is cheap (offline: 1.0-1.4 s cold, 0.3 s from disk on this
+machine) and makes enabling the interpreter later load everything from disk (`previously_complete=1`, 318/318 disk
+hits, 0.25-0.44 s). These timings are application-cache-cold, not driver-cache-cold: the NVIDIA driver cache had
+seen these generic shaders before.
+
+### Validation
+
+- Offline engine (`scripts/test/interp_prep_offline.py`, locked): 8x cold 318 created in 1.39 s engine wall, max
+  60 ms; warm 318/318 disk hits, 0.34 s, same identity `ca01cda3266a2464`, `previously_complete=1`. MSAA 1/2/4 and
+  2x without high precision give 188/318/318/308 pipelines, matching the Python derivation, each a distinct identity.
+  Killing the engine after 60 blobs leaves no marker and no temporary file; the rerun completes with 60 disk hits.
+  A copied cache of 351 existing entries is byte-identical afterwards.
+- Helper (`scripts/test/interp_prep_helper.py`, locked, source-run helper, 32-record subset install, 1080p/21:9/8x
+  settings): cancel at the "Interpreter pipelines" status exits 2 with the selection unmoved; resume completes
+  (318 created, 0.8 s driver); `--interp-pipelines-only` gives 318/318 disk hits and every other file of the
+  prepared cache byte-identical; `GT5P_PREPARE_INTERP_PIPELINES=0` records `skipped` and writes nothing. In a subset
+  install the engine's embedded table (full starter) differs from the installed 32 records; the report records
+  `matches_installed_template=false` instead of failing (the engine table is authoritative).
+
+### In-game measurements (High Speed Ring `-FrameTest`, private engine, one locked run per row)
+
+Interpreter on in every row (`RSX_SHADER_INTERP=1 RSX_SHADER_INTERP_VP=1`, `PSO_DISK=1`, `PSO_ASYNC=1`,
+`RSX_SSAA=1`). "User" = 1080p, 21:9 native, 8x MSAA; "default" = 1080p 16:9 2x. "Prepared" = a copy of the user's
+selected 0.2.4 preparation (its play-learned entries included, earlier `ipso_*` removed); "+ stage" ran the helper
+stage on it first. Runs used `--no-foreground`: Discord took focus during the first two attempts (rejected and
+discarded), so these are not foreground-guarded timings. Counters are cumulative over the whole run.
+
+| Run | Prep | Demand interp PSOs (ms total / max) | Wait draws | Left-out FP / VP | Interp FP draws | FPS | p99 ms | max ms | >20 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| user cold | off | 482 (10,826 / 828) | 8,187 | 6,781 / 1,368 | 30,960 | 54.8 | 43.4 | 204 | 10.5% |
+| user cold | on | 42 (1,147 / 856) | 42 | 0 / 0 | 31,580 | 54.9 | 43.1 | 257 | 8.5% |
+| user prepared | off | 346 (2,625 / 739) | 4,309 | 4,213 / 80 | 11,433 | 55.3 | 52.3 | 244 | 7.0% |
+| user prepared + stage | on | 15 (55 / 6) | 15 | 0 / 0 | 11,765 | 57.7 | 28.9 | 213 | 1.9% |
+| default cold | off | 479 (2,033 / 29) | 5,521 | 4,060 / 1,430 | 50,391 | 53.3 | 72.3 | 242 | 10.0% |
+| default cold (repeat) | off | 468 (2,528 / 941) | 5,321 | 3,899 / 1,392 | 53,247 | 56.0 | 59.2 | 205 | 4.2% |
+| default cold | on | 41 (1,060 / 907) | 41 | 0 / 0 | 56,937 | 49.8 | 70.1 | 889 | 18.4% |
+| default cold (repeat) | on | 34 (1,130 / 968) | 36 | 0 / 2 | 97,979 | 51.9 | 59.8 | 190 | 16.8% |
+| default cold | on, `PREP_PAIR=0` | 431 (2,574 / 927) | 4,111 | 4,079 / 0 | 52,851 | 56.5 | 52.0 | 181 | 4.0% |
+
+Startup (first 60 s of frames, menu and boot): p99 36.0-36.7 ms in every user run and 36.3-37.7 ms in default runs
+except `default cold on (repeat)` at 66.4 ms; worst startup frames 0.4-1.2 s occur with the step on and off, so the
+step does not add a startup hitch that these runs can resolve. The background run itself finished in 1.06-1.08 s
+(cold) and 0.44 s (from disk).
+
+What the table says:
+
+- **Interpreter pipeline creation during play is essentially gone** with the step: demand creations 468-482 -> 34-42
+  cold and 346 -> 15 prepared, total creation time 2.0-10.8 s -> 0.06-1.1 s, waiting draws -> 15-42, and no fragment
+  draw is left out for a pipeline any more. The few remaining are classes outside the starter (and the vertex-only
+  kind); one of them still took 856-968 ms of driver time on the worker (not on the replay thread).
+- **Prepared cache + stage is the best row** (57.7 FPS, p99 28.9 ms, 1.9% late against 55.3 / 52.3 / 7.0%), but it is
+  one pair of runs.
+- **Default cold gets worse with paired routing**: 49.8-51.9 FPS and 16.8-18.4% late against 53.3-56.0 and 4.2-10.0%.
+  Cause, from the counters: draws that used to be left out while their interpreter pipeline was created (or that
+  finished compiling before one existed) are now interpreted for the whole compile, so fragment-interpreter draws
+  rise from about 52k to 57-98k and every routed draw also runs the vertex interpreter. The step without pairing
+  (`PREP_PAIR=0`) is neutral (56.5 FPS, 4.0%) but then saves little (431 demand pipelines). This is the interpreter's
+  known GPU cost (Phase 216 gap 5) showing up because the pipeline wait no longer hides it.
+- Not separated: how much of the user-cold difference is noise (the default repeats differ by 6 points of late frames
+  within one mode).
+
+**Recommendation.** Keep the step and pairing as the interpreter's behaviour (they do what the interpreter is for:
+draw instead of skip, without first-use pipeline creation), keep the interpreter default-off, and treat frame-time
+consistency as separate work: a per-frame interpreter budget (interpret up to N draws or pixels a frame, leave the
+rest out) so a burst of pending shaders cannot push frames over 16.7 ms, plus the GPU profile of gap 5.
+
+### Remaining gaps
+
+- Vertex-only interpreter pipelines (vertex interpreter + specialized pixel shader) and classes absent from the
+  starter still use first use; one such creation took up to 968 ms on the worker.
+- Driver-cache-cold creation time on a clean machine was not measured (about 13 s in Phase 216's first play).
+- Resident memory of the 318 pipelines was not measured.
+- The launcher does not call `--interp-pipelines-only` for existing preparations; the game's startup step covers
+  them when the interpreter is enabled.
+- `ipso_*` / `ipso-set-*` files are not counted by the cache cleanup, and preparation reuse does not copy them
+  (they are recreated, 1 s).
+- Released engines do not contain the overlay; CI would need the embed step (see "Proposed default change").
+
 ## Status (Phase 216, 2026-11-05; re-verified on a corrected private build)
 
 Everything stays default-off. Phase 216 closed gaps 2-4 below (gap 1 is half done, gap 5 is open) and measured
@@ -124,7 +259,8 @@ limiting occupancy). A GPU profiler capture of the force run is the next tool; n
 
 1. Profile the interpreter pixel shader on the GPU (force dealership as the probe) to find what the 79 ms is.
 2. Find the Daytona warm long-frame clusters (not shown to be interpreter pipeline creation).
-3. Startup creation of observed interpreter classes (gap 1, second half; design above).
+3. Startup creation of observed interpreter classes (gap 1, second half): done in Phase 220 for the starter's
+   native classes (see the Phase 220 status above); a per-frame interpreter budget is the new item for consistency.
 4. Epilogue equivalence for the rest of the flags (WPOS host-pixel noise sample on small dither textures differs in
    form from the specialized shader's) and `tex_dz`/`tex_mip` beyond the inspected captures.
 
@@ -208,7 +344,11 @@ embedded bytecode, and gamma decode stays on unless `GAMMA_READ=0`.
 | `RSX_SHADER_INTERP=0` / `1` / `force` | Fragment interpreter off, pending-only, or every accepted draw |
 | `RSX_SHADER_INTERP_VP=0` / `1` / `force` | Same three modes for the vertex interpreter |
 | `RSX_SHADER_INTERP_PAIR=1` | While either stage or driver pipeline is pending, interpret both. Requires both stage switches |
-| `RSX_SHADER_INTERP_PREWARM=1` | Create the starter native-class pipelines at device init. Requires the embedded class list |
+| `RSX_SHADER_INTERP_PREWARM=1` | Phase 216 switch; since Phase 220 it selects `RSX_SHADER_INTERP_PIPELINE_PREP=sync` (settings-mapped classes, created at device init) |
+| `RSX_SHADER_INTERP_PIPELINE_PREP=0` / `sync` | Phase 220: unset = prepare the mapped starter classes on a lowest-priority thread at startup (both stages configured); `0` rollback; `sync` = at device init (the preparation helper) |
+| `RSX_SHADER_INTERP_PREP_PAIR=0` | Phase 220 rollback: do not route fragment-only interpreter draws to a prepared paired pipeline |
+| `RSX_SHADER_INTERP_PREP_YIELD=0` | Phase 220: class preparation does not wait for queued demand pipelines |
+| `GT5P_PREPARE_INTERP_PIPELINES=0` | Phase 220 helper: skip the interpreter pipeline stage (also for `--interp-pipelines-only`) |
 | `RSX_SHADER_INTERP_EMBED=0` | Compile the generic shaders from the private cache instead of the embedded DXBC |
 | `RSX_SHADER_INTERP_STATS=1` | Print `[interp-pending]` every five seconds |
 | `RSX_SHADER_INTERP_LOG=1` | Log interpreter pipeline keys as they are created |

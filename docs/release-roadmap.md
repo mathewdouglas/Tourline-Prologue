@@ -45,7 +45,9 @@ Evidence for finished work goes in [progress.md](progress.md).
 - **Smaller items:**
   - texture-load warning indicator;
   - keyboard alongside a connected controller;
-  - an opt-in F1 entry for the shader interpreter.
+  - an opt-in F1 entry for the shader interpreter. Status: its pipelines are now prepared ahead of use
+    (Phase 220, branch `feature/interp-pipeline-prep`, not merged): startup step plus a separate helper stage.
+    Frame-time consistency still needs a per-frame interpreter budget before an F1 entry is worth offering.
 - **Build speed:** CI cache keyed on lifter inputs, plus a persistent Ninja
   directory.
 - **Exit:** the listed bugs are fixed or explained, and there are no new hitch
