@@ -6,7 +6,8 @@ compile, and fixes a dealership loading freeze and analog trigger pressure.
 **Run preparation again after updating.** The renderer's generated shader text
 changed, and that text is the cache key, so shaders prepared with v0.2.3 are not
 reused. Your old cache is left in place but goes unused; normal launching still
-works without preparation.
+works without preparation. The first launch of this version **offers** it once
+(see [First-launch offer](#first-launch-offer)).
 
 ## Wider shader preparation
 
@@ -44,13 +45,73 @@ works without preparation.
   | Catalogue enumeration | 1,028 s | 262 s |
   | Full v0.2.3-sized (5,669-record) preparation | 731 s | 336 s |
 
-  End-to-end preparation of the full v0.2.4 starter plus enumeration on a
-  fresh cache has not been measured on the final build. Expect it to take
-  longer than v0.2.3's preparation, because it covers far more.
+- **End to end, measured:** one full fresh preparation of the shipped
+  12,669-record starter plus enumeration, through the frozen helper on this
+  machine (i5-12400F, 6 cores / 12 logical processors, so four compiler
+  workers; original GT.VOL and ELF read in place; empty storage), took
+  **579 s (9.7 minutes)** and about 0.96 GiB of disk:
+
+  | Stage | Seconds |
+  | --- | --- |
+  | Start-up, game archive check, asset reads (before each of the two phases) | 49 |
+  | Vertex shaders (627) | 23 |
+  | Fragment shaders (12,669 records) | 124 |
+  | Native pipelines (inputs, create, lookup, verify) | 127 |
+  | Shader packs | 3 |
+  | Catalogue enumeration (24,522 jobs) | 253 |
+  | **Total** | **579** |
+
+  A PC with fewer than eight logical processors uses two compiler workers
+  (about 1.4 times as long on this machine in earlier measurements), and a slower
+  CPU takes longer again; the launcher's estimate therefore says "about 10 to 20
+  minutes" with eight or more logical processors and "about 20 to 40 minutes"
+  with fewer. Only the first number was measured here; the others are scaled.
 - **Template format 3:** pipeline templates now store only shader and state
   inputs, so future renderer changes no longer need the starter re-issued.
   Older helpers cannot read format 3; keep the launcher, runtime and helper
   from the same ZIP together.
+
+## Shader preload is on by default, with its own indicator
+
+- **Preload known shaders** (F1 > Shaders, `video.shader_warmup`) now defaults
+  to **On** for a new settings file: while the game starts and the movie plays, the
+  recorded menu pipelines (then the race set during loading) are prepared in the
+  background. A settings file that already says `shader_warmup = false`
+  (the v0.2.3 default wrote that line) keeps its value; switch it on in F1 or
+  delete the line. `RSX_SHADER_WARMUP=0` still turns it off. The default applies
+  through the settings file; a bare engine run with `GT5P_NO_SETTINGS=1` is
+  unchanged.
+- **"Compiling shaders" now means a draw is waiting.** Before, the badge also lit
+  for the whole background preload, because the preload held the same busy count
+  and its driver calls went through the same counter. The backend now counts
+  preload work (startup warmup, the blocking scan, race preparation) apart.
+  `RSX_SHADER_INDICATOR_LEGACY=1` restores the old combined counting.
+- **"Loading shaders"** is a second, smaller and dimmer badge for that preload
+  work, **off by default** (F1 > Game > Shader preload indicator,
+  `video.preload_indicator`, `GT5P_PRELOAD_INDICATOR=1`). It sits in the same
+  corner and never shows together with "Compiling shaders".
+
+## First-launch offer
+
+On the first launch of this version, **after** setup is complete and before the
+game starts, the launcher offers optional shader preparation in the same styled
+dialog the post-setup offer uses. It says what preparation does, that it is
+optional and can reduce stutter, and the estimated time for your processor count
+(see above). **Prepare now** runs the existing preparation window, with the same
+cancel and resume behaviour; **Skip and play**, closing the dialog, cancelling or
+a preparation failure all continue to the game. Either way the answer is recorded
+in `prepare-offer-<version>.done` in the launcher's storage, so it is not asked
+again for this version, and **F1 > Debug > Prepare shaders** and
+**Prepare shaders.cmd** stay available.
+
+- Fresh installs get this through the existing post-setup offer; the two never
+  appear in one launch.
+- Nothing is asked if a completed preparation made by this release is already
+  selected (the helper's read-only `--check-selected`, which compares a
+  fingerprint of engine, decoder and bundled inputs recorded when the selection
+  was written). Shaders prepared by v0.2.3 do not count.
+- `GT5P_PREPARE_OFFER=0` disables the offer; `--no-prepared` skips it for that
+  launch without recording an answer.
 
 ## Fixes
 

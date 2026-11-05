@@ -7,12 +7,14 @@ import zipfile
 
 exe, root = map(Path, sys.argv[1:])
 for case, value, override, disabled, file_value, effective in (
-    ('default', '', None, False, False, False),
+    # Preload is on by default (0.2.4); a file that says false keeps false, an environment value wins.
+    ('default', '', None, False, True, True),
     ('on', 'true', None, False, True, True),
+    ('explicit_off', 'false', None, False, False, False),
     ('override_off', 'true', '0', False, True, False),
     ('override_on', 'false', '1', False, False, True),
-    ('invalid', '"yes"', None, False, False, False),
-    ('no_settings', 'true', '1', True, False, False),
+    ('invalid', '"yes"', None, False, True, True),
+    ('no_settings', 'true', '1', True, True, True),
 ):
     folder = root / ('warmup_' + case); folder.mkdir()
     settings = folder / 'settings.toml'
@@ -26,6 +28,28 @@ for case, value, override, disabled, file_value, effective in (
     if not disabled:
         assert ('shader_warmup = ' + str(not file_value).lower()) in settings.read_text()
     print('warmup_' + case + ': passed')
+
+# The quieter "Loading shaders" badge is off by default.
+for case, value, override, disabled, file_value, effective in (
+    ('default', '', None, False, False, False),
+    ('on', 'true', None, False, True, True),
+    ('override_on', 'false', '1', False, False, True),
+    ('override_off', 'true', '0', False, True, False),
+    ('invalid', '"yes"', None, False, False, False),
+    ('no_settings', 'true', '1', True, False, False),
+):
+    folder = root / ('preload_indicator_' + case); folder.mkdir()
+    settings = folder / 'settings.toml'
+    settings.write_text('[video]\n' + ('preload_indicator = ' + value + '\n' if value else ''))
+    env = os.environ.copy()
+    for key in ('GT5P_PRELOAD_INDICATOR', 'GT5P_NO_SETTINGS'): env.pop(key, None)
+    env.update(GT5P_SETTINGS=str(settings), TEST_PRELOAD_FILE=str(int(file_value)), TEST_PRELOAD_EFFECTIVE=str(int(effective)))
+    if override is not None: env['GT5P_PRELOAD_INDICATOR'] = override
+    if disabled: env['GT5P_NO_SETTINGS'] = '1'
+    subprocess.run([str(exe), 'preload-indicator-settings'], cwd=folder, env=env, timeout=10, check=True)
+    if not disabled:
+        assert ('preload_indicator = ' + str(not file_value).lower()) in settings.read_text()
+    print('preload_indicator_' + case + ': passed')
 
 for case, text, override, disabled, file_value, effective in (
     ('default', '', None, False, True, True),

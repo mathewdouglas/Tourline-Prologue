@@ -37,7 +37,7 @@ bool         g_enabled = false;
 /* The variables a setting maps to; those set before the file is applied
  * override it, and the settings page says so. */
 const char* const kEnvNames[] = {
-    "GT5P_RESOLUTION", "RSX_MSAA", "RSX_PRESENT_SYNC", "RSX_SHADER_CACHE", "GT5P_SHADER_INDICATOR",
+    "GT5P_RESOLUTION", "RSX_MSAA", "RSX_PRESENT_SYNC", "RSX_SHADER_CACHE", "GT5P_SHADER_INDICATOR", "GT5P_PRELOAD_INDICATOR",
     "PAD_NO_SDL", "PAD_NO_KEYBOARD", "PS3_VERBOSE",
     "GT5P_VBLANK_HZ", "SPURS_LANE_PIN", "SPURS_JL_SPU3", "RSX_SHADER_ASYNC", "RSX_SHADER_WARMUP", "RSX_PSO_ASYNC", "RSX_RACE_PREWARM", "PAD_SKIP_MOVIE",
 };
@@ -190,7 +190,7 @@ bool known_key(std::string_view section, std::string_view key)
         {"video", "resolution"},     {"video", "msaa"},           {"video", "aspect"},
         {"video", "window"},
         {"video", "vsync"},          {"video", "shader_cache"},
-        {"video", "shader_indicator"}, {"video", "shader_precompile"}, {"video", "shader_warmup"}, {"video", "pipeline_async"}, {"video", "race_preload"},
+        {"video", "shader_indicator"}, {"video", "preload_indicator"}, {"video", "shader_precompile"}, {"video", "shader_warmup"}, {"video", "pipeline_async"}, {"video", "race_preload"},
         {"input", "sdl_controllers"}, {"input", "keyboard"}, {"input", "button_prompts"},
         {"game", "skip_movie"},       {"game", "smooth_colour"},    {"game", "anisotropy"},
         {"performance", "vblank_hz"}, {"performance", "lane_pinning"},
@@ -260,6 +260,7 @@ void parse_into(const toml::table& tbl, Gt5pSettings& s)
     read_bool(tbl["video"]["vsync"], "video.vsync", s.vsync);
     read_bool(tbl["video"]["shader_cache"], "video.shader_cache", s.shader_cache);
     read_bool(tbl["video"]["shader_indicator"], "video.shader_indicator", s.shader_indicator);
+    read_bool(tbl["video"]["preload_indicator"], "video.preload_indicator", s.preload_indicator);
     read_bool(tbl["video"]["shader_warmup"], "video.shader_warmup", s.shader_warmup);
     read_bool(tbl["video"]["pipeline_async"], "video.pipeline_async", s.pipeline_async);
     read_bool(tbl["video"]["race_preload"], "video.race_preload", s.race_preload);
@@ -303,6 +304,7 @@ void apply_env(const Gt5pSettings& s)
      * backend keeps its own default folder. */
     if (!s.shader_cache) set_default_env("RSX_SHADER_CACHE", "0");
     if (!s.shader_indicator) set_default_env("GT5P_SHADER_INDICATOR", "0");
+    if (s.preload_indicator) set_default_env("GT5P_PRELOAD_INDICATOR", "1");
     set_default_env("RSX_SHADER_WARMUP", s.shader_warmup ? "1" : "0");
     set_default_env("RSX_SHADER_ASYNC", s.shader_precompile ? "1" : "0");
     set_default_env("RSX_PSO_ASYNC", s.pipeline_async ? "1" : "0");
@@ -338,6 +340,7 @@ void reflect_env(Gt5pSettings& s)
     { const char* e = getenv("RSX_WINDOW_MODE"); s.borderless = e && (e[0] == 'b' || e[0] == 'B'); }
     if (const char* e = getenv("RSX_SHADER_CACHE")) s.shader_cache = !(e[0] == '0' && !e[1]);
     if (const char* e = getenv("GT5P_SHADER_INDICATOR")) s.shader_indicator = e[0] != '0';
+    if (const char* e = getenv("GT5P_PRELOAD_INDICATOR")) s.preload_indicator = e[0] == '1';
     if (const char* e = getenv("RSX_SHADER_WARMUP")) s.shader_warmup = e[0] == '1';
     if (const char* e = getenv("RSX_PSO_ASYNC")) s.pipeline_async = e[0] != '0';
     if (const char* e = getenv("RSX_RACE_PREWARM")) s.race_preload = e[0] != '0';
@@ -423,17 +426,21 @@ bool gt5p_settings_save(const Gt5pSettings& s, const std::string& path)
          "# every run (the first visit to a screen can stutter while they are).\n"
          "# [RSX_SHADER_CACHE, \"0\" = off]\n"
          "shader_cache = " << (s.shader_cache ? "true" : "false") << "\n"
-         "# Show \"Compiling shaders\" over the game while it is building them.\n"
-         "# [GT5P_SHADER_INDICATOR]\n"
+         "# Show \"Compiling shaders\" over the game while a draw is waiting on a\n"
+         "# shader or pipeline. [GT5P_SHADER_INDICATOR]\n"
          "shader_indicator = " << (s.shader_indicator ? "true" : "false") << "\n"
+         "# Show a smaller, quieter \"Loading shaders\" over the game while background\n"
+         "# preload work (shader_warmup, race_preload) runs. Off by default.\n"
+         "# [GT5P_PRELOAD_INDICATOR]\n"
+         "preload_indicator = " << (s.preload_indicator ? "true" : "false") << "\n"
          "# Compile shaders the game has not shown before on background threads, all\n"
          "# at once, instead of stopping the picture to build them one by one. A new\n"
          "# screen appears at once and its last details a moment later. Needs the\n"
          "# shader cache. [RSX_SHADER_ASYNC]\n"
          "shader_precompile = " << (s.shader_precompile ? "true" : "false") << "\n"
-         "# Prepare learned menu, then race pipelines while the game starts.\n"
-         "# New tracks/cars/effects may still compile later; first run learns records.\n"
-         "# Needs shader cache. [RSX_SHADER_WARMUP]\n"
+         "# Prepare learned menu, then race pipelines in the background while the game\n"
+         "# starts (on by default). New tracks/cars/effects may still compile later;\n"
+         "# the first run learns records. Needs shader cache. [RSX_SHADER_WARMUP]\n"
          "shader_warmup = " << (s.shader_warmup ? "true" : "false") << "\n"
          "# Build unexpected driver pipelines in the background. [RSX_PSO_ASYNC]\n"
          "pipeline_async = " << (s.pipeline_async ? "true" : "false") << "\n"

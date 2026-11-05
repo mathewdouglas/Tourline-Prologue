@@ -110,6 +110,40 @@ def preparation_output(parent, token, plan=None, progress=None):
     raise ValueError('Preparation generation limit reached; existing caches preserved')
 
 
+def release_identity(install):
+    """Cheap fingerprint of what a preparation was made from: the engine, the decoder, the bundled
+    templates, the shader-pack plan and the enumeration metadata (not the player's settings).
+
+    Parsing and validating the templates for the exact preparation token takes about ten seconds, too
+    long for the launcher's one-time update check. A completed preparation records this fingerprint
+    beside prepared-cache.txt; the check compares it, so only a preparation made by this version counts.
+    """
+    digest=hashlib.sha256(b'release-identity-v1\n')
+    def add(name,path):
+        with path.open('rb') as stream:digest.update(name.encode()+b'\0'+hashlib.file_digest(stream,'sha256').digest())
+    add('engine',install/'runtime/gt5p.exe');add('decoder',install/'preparation/decoder.dll')
+    add('plan',ROOT/'config/pipeline-warmup/gt5p-disc-v2.json')
+    for name in ('pipeline-templates/gt5p-disc-v2','shader-enumeration/gt5p-disc-v1'):
+        folder=install/'assets'/name
+        for path in sorted(p for p in folder.rglob('*') if p.is_file()):
+            if path.is_symlink():raise ValueError('Preparation inputs must not be links')
+            add(path.relative_to(install).as_posix(),path)
+    return digest.hexdigest()
+
+
+def selected_is_current(storage, install):
+    """Read only. True when prepared-cache.txt selects a completed preparation made by this release."""
+    pointer=storage/'prepared-cache.txt'
+    if not pointer.is_file() or pointer.is_symlink():return False
+    try:
+        selected=regular_read(pointer,512).decode('utf-8')
+        if not re.fullmatch(r'preparation/[0-9a-f]{24}/shadercache',selected):return False
+        recorded=regular_read(storage/'prepared-identity.txt',128).decode('ascii').strip()
+        state=json.loads(regular_read(storage/selected.rpartition('/')[0]/'preparation-state.json',65536))
+    except (OSError,ValueError):return False
+    return isinstance(state,dict) and state.get('phase')=='complete' and recorded==release_identity(install)
+
+
 def safe_storage(storage):
     storage=storage.absolute()
     for p in (storage,*storage.parents):
@@ -142,11 +176,14 @@ def main():
     source.add_argument('--game',type=Path,help='The already configured disc/PS3_GAME folder')
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
+    ap.add_argument('--check-selected',action='store_true',
+                    help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
     a=ap.parse_args()
     storage=safe_storage(a.storage)
+    install=a.install.resolve()
+    if a.check_selected:sys.exit(0 if selected_is_current(storage,install) else 3)
     selection=select_settings(storage)
     translation=selection['mode']
-    install=a.install.resolve()
     def idle_for_player():
         # Verify the optional visible launcher owner. Exclude only our actual
         # parent, after verifying its full image path; never ignore another game.
@@ -251,6 +288,9 @@ def main():
     # Switch only after successful shader/native/persistence validation. Existing
     # caches remain intact; game demand can add missing/settings-specific entries.
     pointer=storage/'prepared-cache.txt';pending=pointer.with_suffix('.tmp')
+    identity=storage/'prepared-identity.txt'
+    # Recorded first: a pointer without a matching fingerprint only costs one more offer.
+    identity.write_text(release_identity(install)+'\n',encoding='ascii')
     pending.write_text((out/'shadercache').relative_to(storage).as_posix(),encoding='utf-8');pending.replace(pointer)
     status.write_text('Complete. Normal demand compilation handles uncovered pipelines.',encoding='utf-8')
 
