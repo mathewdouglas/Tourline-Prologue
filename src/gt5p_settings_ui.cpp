@@ -59,6 +59,7 @@ extern volatile uint32_t g_pad_inject_buttons;  /* cellPad.c: pressed for the ti
 void pad_set_keyboard_enabled(int on);          /* cellPad.c */
 void rsx_d3d12_set_present_sync(int interval);  /* rsx_d3d12_backend.c */
 void gt5p_shader_indicator_enable(int on);      /* gt5p_shaderbusy.cpp */
+void gt5p_preload_indicator_enable(int on);
 extern void (*g_pad_screen_hook)(const char*);  /* cellPad.c: every file the title opens */
 int  rsx_d3d12_overlay_available(void);         /* rsx_d3d12_backend.c */
 void rsx_d3d12_backbuffer_size(int* w, int* h);
@@ -150,9 +151,10 @@ const std::vector<Item>& items()
           [](const Gt5pSettings& s) { return s.shader_precompile ? 1 : 0; },
           [](Gt5pSettings& s, int v) { s.shader_precompile = v != 0; }, nullptr },
         { L"SHADERS", L"Preload known shaders",
-          L"Prepare learned menu, then race pipelines while the game starts and the movie "
-          L"plays. Live draws take priority. First visits still learn. Needs shader cache "
-          L"and background pipelines; uses more memory.",
+          L"Prepare learned menu, then race pipelines in the background while the game starts "
+          L"and the movie plays (on by default). Live draws take priority. First visits still "
+          L"learn. Needs shader cache and background pipelines; uses more memory. Takes effect "
+          L"after a restart.",
           "RSX_SHADER_WARMUP", kOnOff,
           [](const Gt5pSettings& s) { return s.shader_warmup ? 1 : 0; },
           [](Gt5pSettings& s, int v) { s.shader_warmup = v != 0; }, nullptr },
@@ -215,11 +217,20 @@ const std::vector<Item>& items()
           [](const Gt5pSettings& s) { return s.anisotropy; },
           [](Gt5pSettings& s, int v) { s.anisotropy = v; }, nullptr },
         { L"GAME", L"Shader compile indicator",
-          L"Show \"Compiling shaders\" in the corner while the game builds shaders.",
+          L"Show \"Compiling shaders\" in the corner while a draw is waiting on a shader or "
+          L"pipeline. Background preloading is not counted here.",
           "GT5P_SHADER_INDICATOR", kOnOff,
           [](const Gt5pSettings& s) { return s.shader_indicator ? 1 : 0; },
           [](Gt5pSettings& s, int v) { s.shader_indicator = v != 0; },
           [](int v) { gt5p_shader_indicator_enable(v); } },
+        { L"GAME", L"Shader preload indicator",
+          L"Show a smaller, quieter \"Loading shaders\" in the corner while the game prepares "
+          L"known shaders in the background. Off by default; \"Compiling shaders\" takes its place "
+          L"when both would show.",
+          "GT5P_PRELOAD_INDICATOR", kOnOff,
+          [](const Gt5pSettings& s) { return s.preload_indicator ? 1 : 0; },
+          [](Gt5pSettings& s, int v) { s.preload_indicator = v != 0; },
+          [](int v) { gt5p_preload_indicator_enable(v); } },
         { L"PERFORMANCE", L"Frame clock",
           L"The vblank the game paces its frames to. 59.94 Hz is the console's (30 fps at "
           L"most). 62.5 Hz allows 31 fps, but a frame that just misses two vblanks drops to 20.",

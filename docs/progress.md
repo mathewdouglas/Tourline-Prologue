@@ -9,6 +9,160 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 219 - 0.2.4 RC: preload on by default, separate indicator, one-time precompile offer (2026-11-05)
+
+The maintainer tested the 0.2.4 release candidate and asked for three changes
+(branch `t3/rc024-ux` from `feature/shader-coverage-scaling` 28e8e6d; runtime edits
+go in the main patch, which was regenerated from a clean `git archive 4e8f3ca8`
+export: only the `rsx_d3d12_backend.c` section changed, the result applies to a clean
+tree and the shader-interp, shader-source-dump and frame-hitch-trace overlays still apply).
+
+### 1. Preload known shaders defaults to On
+
+`Gt5pSettings::shader_warmup` is true, so a new settings file writes
+`shader_warmup = true` and the settings layer sets `RSX_SHADER_WARMUP=1`. A file that
+says `false` keeps false (checked: `scripts/test/debug_export_check.py` now covers
+default, explicit false, true, both overrides, an invalid value and `GT5P_NO_SETTINGS`).
+Every v0.2.3 settings file written by the game contains an explicit
+`shader_warmup = false`, so at the maintainer's request (after the merge) a file without
+the new `[meta] defaults_version` (generation 0, i.e. written before 0.2.4) is switched on
+once and rewritten at generation 1; a later explicit false is kept. `GT5P_SETTINGS_MIGRATE=0`
+skips it and leaves the generation unrecorded. `debug_export_check.py` adds upgrade-off,
+upgrade-on and migration-disabled cases (33 cases pass). The
+backend's own default (no settings layer, `GT5P_NO_SETTINGS=1`) is unchanged, so
+measurement scripts are unaffected. The F1 help text no longer says default off.
+
+### 2. "Compiling shaders" counts draws only; optional "Loading shaders" badge
+
+Cause of the old behaviour: `pso_startup_open` held `g_rsx_shader_busy` for the whole
+background warmup and every recipe's driver call (`create_guest_pso_driver`) counted
+into the same busy counter and totals as a draw's miss. The worker serves both kinds
+of job, so origin is carried by a thread-local, `t_shader_preload`, set around the
+driver call in `pso_prepare_recipe` (startup warmup, race prewarm, the optional
+directory scan) and around the blocking prewarm scan. `create_guest_pso_driver` and
+the synchronous D3DCompile path pick the busy counter from it:
+
+- demand: `g_rsx_shader_busy`, `g_rsx_shader_demand_total`;
+- preload: `g_rsx_shader_preload_busy`, `g_rsx_shader_preload_total`;
+- `g_rsx_shaders_compiled` / `g_rsx_pipelines_built` keep counting everything
+  (diagnostics, F8, `[pipeline-metrics]`).
+
+Each total is written by one increment so the badge thread never subtracts two
+counters. `RSX_SHADER_INDICATOR_LEGACY=1` routes preload work to the demand
+counters again. `src/gt5p_shaderbusy.cpp` now draws two badges from one thread:
+"Compiling shaders" (unchanged look) and a smaller, dimmer "Loading shaders" (196x30,
+alpha 170, grey-blue, 0.4 s before it shows), same bottom-right placement and still only
+an asynchronous `SetWindowPos` when the position changes. If both would show only
+"Compiling shaders" does. Toggle: F1 Game > Shader preload indicator,
+`video.preload_indicator`, `GT5P_PRELOAD_INDICATOR=1`; default off. The WARP queue test
+`scripts/test/pso_async.py` now also checks that recipes run as preload work (busy on
+the preload counter, none on the demand counter) and a draw queued during one does not.
+
+### 3. One-time precompile offer
+
+The launcher, on a configured install, asks the helper `--check-selected`. If a
+completed preparation made by this release is not selected, it shows the existing
+styled dialog (shared code with the Phase 186 post-setup offer, now parameterised by
+kind and a time estimate) before the game starts. Yes runs the existing preparation
+window and cancel/resume path; No, close, cancel and failure continue to the game; the
+answer is recorded in `prepare-offer-<port_version>.done` (`port_version` comes from
+`release.ini`). A fresh install gets the post-setup offer, which records the same
+marker, so the two never appear in one launch. `GT5P_PREPARE_OFFER=0` disables both;
+`--no-prepared` and `GT5P_PREPARE_VOLUME=0` skip the update offer without recording
+anything; an unanswerable check offers nothing and records nothing.
+
+Design note: the first version of `--check-selected` recomputed the exact preparation
+token, which needs the templates parsed and validated (profiled: about 10 s frozen, 30 s
+in the profiler, mostly `pipeline_template.read` and the enumeration loader), too long
+for a launch with no window (it measured 10.9 s before and 9.6 s after a full preparation).
+A completed preparation now writes
+`prepared-identity.txt` beside `prepared-cache.txt`: a SHA-256 over the engine, decoder,
+bundled template and enumeration files and the warmup plan, not the player's settings.
+The check compares it, the pointer's shape and the selected generation's
+`phase == complete`. A preparation made by an earlier build has no such file, so it
+counts as not prepared (one extra offer for early RC testers; none for a 0.2.4
+preparation).
+
+### Measured preparation time (the number behind the window text)
+
+One full fresh preparation through the frozen helper on the development machine (i5-12400F,
+6 cores / 12 logical processors, so four compiler workers; original GT.VOL/ELF read in
+place; empty storage; 720p/16:9 default translation; serialised by the test lock, and the
+maintainer's own RC preparation started after it finished): **578.9 s**, exit 0, 12,669
+records, 983.7 MiB of preparation data. Stages from `prepare-status.txt` sampled every
+0.5 s (`scripts/test/rc024_prepare_time.py`, evidence under `scratch/rc024/prep`):
+
+| Stage | Seconds |
+| --- | --- |
+| Start-up, archive check and asset reads (both phases) | 49 |
+| Vertex shaders (627) | 23 |
+| Fragment shaders (12,669 records) | 124 |
+| Native pipelines (input 15.5, create 83, lookup 24, verify 4) | 127 |
+| Shader packs | 3 |
+| Enumeration (24,522 jobs) | 253 |
+
+Window text: "about 10 to 20 minutes" for eight or more logical processors (the measured
+9.7 minutes plus headroom for slower CPUs), "about 20 to 40 minutes" below that (two
+workers; Phase 209 measured 632.7 s versus 457.0 s for two versus four workers on the
+5,669-record starter, about 1.4x, and slower CPUs add to that). Only the four-worker
+figure was measured in this phase; the two-worker window is scaled, not measured. One run
+on one machine.
+
+### Evidence
+
+All through the machine-wide test lock, private engine (`scripts/test/rc024_build.py`: the
+changed runtime and `src/` objects recompiled with the v0.2.3 reference build's commands and
+relinked over its objects) and a frozen helper from `build_preparer.py`:
+
+- **Runtime patch:** main patch applies to a clean 4e8f3ca8 export; shader-interp,
+  shader-source-dump and frame-hitch-trace overlays still apply on top. `scripts/test/pso_async.py`
+  (WARP, real queue) passes, including the new preload/demand attribution assertions.
+- **Settings:** `debug_export_check.py` (settings loader, 29 cases) passes: preload default
+  true, explicit false kept, both environment overrides, invalid value, `GT5P_NO_SETTINGS`, and
+  the new `preload_indicator` (default false). A new settings file written by the real engine
+  contains `shader_warmup = true` and `preload_indicator = false`; the F1 Shaders page shows
+  Preload known shaders On and the Game page shows the new row, and toggling it from the page
+  wrote `preload_indicator = true` (`rc024_settings_pages.ps1`, shots inspected).
+- **Launcher:** `launcher_first_run_native.py` now covers 20 scenarios and passes: fresh-install
+  offer (Prepare/skip/close/cancel/helper unavailable/disabled/cancelled setup), update offer
+  (Prepare/skip/close/cancel/preparation failure), no offer when already prepared, on helper
+  error, on hash mismatch, with `GT5P_PREPARE_OFFER=0`, `--no-prepared` or
+  `GT5P_PREPARE_VOLUME=0`, and after an earlier answer. A fresh install never asks the helper,
+  and a second launch never offers again. `launcher_native.py` and `launcher_pipeline_tools.py`
+  pass unchanged. One run of the first-run test failed in its first scenario because the file
+  picker's automated input was not accepted (the launcher exited as cancelled); the rerun passed.
+- **End to end** (`rc024_launcher_e2e.py`: real launcher, frozen helper, private engine, original
+  disc read in place, private data folder): the offer appeared 1.0 s after launch, Prepare now ran
+  the real preparation, the game started 615.9 s after launch and was stopped; `prepare-offer-0.2.4.done`,
+  `prepared-cache.txt` and `prepared-identity.txt` were written. A second launch showed no window
+  and started the game in 0.5 s. With the marker deleted, the helper check answered "prepared",
+  no offer appeared, and the marker was rewritten (game start 1.0 s).
+- **In game** (`rc024_badge_probe.py`, Acura dealership at 720p, private save copy and private
+  cache, badge windows polled every 100 ms and saved with PrintWindow):
+
+  | Run | Cache | Switches | Result |
+  | --- | --- | --- | --- |
+  | A | empty | preload on, indicator on | "Compiling shaders" shown five times for demand compiles (up to 193 shaders and pipelines); no recipes to preload, no loading badge |
+  | B/E/F | A's | preload on, indicator on | preload of 317-322 recipes took 0.8-1.0 s; "Loading shaders" 2.8-3.4 s (116-117 pipelines); "Compiling shaders" not lit by it, only by later demand work |
+  | C | A's | preload on, indicator off (default) | same preload, no badge at all during it |
+  | D | A's | `RSX_SHADER_INDICATOR_LEGACY=1` | "Compiling shaders" lit 2.7-3.4 s during the preload (115 pipelines): the old behaviour |
+
+  The first loading badge had no visible spinner (a 3x3 GDI ellipse draws nothing); it now uses
+  the same 5 px dots on a smaller ring, checked with an offline render and a game shot.
+- **Other tests:** `player_package.py`, `release_trigger.py`, `preparation_reuse.py`,
+  `cache_hash.py`, `pipeline_template_inputs.py` and `pipeline_warmup_plan.py` pass with the new patch.
+
+### Not verified
+
+Race loading preparation is covered by the WARP queue test but was not driven in a real race in
+this phase (its code path is the same recipe function). Only 720p was checked for the badges. The
+two-worker time window is scaled, not measured. No CI or release build was run; main, tags and
+releases are unchanged. `scripts/test/settings_test.ps1` was edited for the new default but needs
+`build\gt5p.exe`, so it was not run; `rc024_settings_pages.ps1` covers the same toggles against a
+private engine. Existing v0.2.3 settings files are switched on once (see item 1).
+Switches: `RSX_SHADER_WARMUP=0`, `RSX_SHADER_INDICATOR_LEGACY=1`, `GT5P_PRELOAD_INDICATOR`,
+`GT5P_PREPARE_OFFER=0`.
+
 ## Phase 218 - Analog L2/R2 pressure past the digital threshold (2026-11-05)
 
 The user assigned accelerate/brake to R2/L2 in the game's own Options > Change

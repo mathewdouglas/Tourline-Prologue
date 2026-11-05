@@ -36,13 +36,27 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-05, Phase 218)
+## Start here: state of play (2026-11-05, Phase 219)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 218 is the latest).
+has the evidence, newest phase first (Phase 219 is the latest).
 
 ### What works now
+
+- **0.2.4 RC UX (Phase 219, branch t3/rc024-ux):** Preload known shaders is On by default
+  (pre-0.2.4 settings files switched on once via `[meta] defaults_version`; a later explicit false stays; `GT5P_SETTINGS_MIGRATE=0` skips). "Compiling shaders" now
+  counts draws that wait; background preload (startup warmup, race prewarm) is counted apart
+  (`g_rsx_shader_preload_busy/_total`, thread-local `t_shader_preload`) and can show a quieter
+  "Loading shaders" badge (`video.preload_indicator`, `GT5P_PRELOAD_INDICATOR=1`, default off;
+  `RSX_SHADER_INDICATOR_LEGACY=1` restores the combined counting). The first launch of a version
+  offers preparation once (existing styled dialog, time window "about 10 to 20 minutes" with 8+
+  logical processors, "20 to 40" with fewer; marker `prepare-offer-<port_version>.done`; the helper's
+  read-only `--check-selected` skips it when this release's preparation is selected; fingerprint in
+  `prepared-identity.txt`). Measured full preparation: 579 s on the 12-thread dev machine. Evidence:
+  docs/progress.md Phase 219. Runtime changes are in the MAIN patch (regenerated per file from a
+  clean 4e8f3ca8 export with `scripts/test/rc024_patch_splice.py`). Private-engine builder:
+  `scripts/test/rc024_build.py`. Not merged to main; no tag or release.
 
 - **Analog L2/R2 for throttle/brake (Phase 218):** with R2/L2 assigned in the
   game's own button assignments, triggers now report their full 0-255 pressure;

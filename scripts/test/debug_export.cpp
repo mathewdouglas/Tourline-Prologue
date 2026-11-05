@@ -66,6 +66,18 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    if (mode == "preload-indicator-settings") {
+        const bool file = std::string(getenv("TEST_PRELOAD_FILE")) == "1";
+        const bool effective = std::string(getenv("TEST_PRELOAD_EFFECTIVE")) == "1";
+        assert(gt5p_settings_file().preload_indicator == file);
+        assert(gt5p_settings().preload_indicator == effective);
+        if (gt5p_settings_enabled()) {
+            auto saved = gt5p_settings_file(); saved.preload_indicator = !file;
+            assert(gt5p_settings_store(saved));
+            assert(gt5p_settings_file().preload_indicator == !file);
+        }
+        return 0;
+    }
     if (mode == "warmup-settings") {
         const bool file = std::string(getenv("TEST_WARMUP_FILE")) == "1";
         const bool effective = std::string(getenv("TEST_WARMUP_EFFECTIVE")) == "1";

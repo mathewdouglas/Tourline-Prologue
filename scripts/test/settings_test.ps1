@@ -55,10 +55,14 @@ try {
     if (-not (Select-String -LiteralPath $toml -Pattern '^window = "borderless"$' -Quiet)) { throw 'Window setting was not saved' }
     key 0x27; key 0x26 2          # back to windowed, up to Resolution
     Start-Sleep -Milliseconds 300; cap "res_1080"
-    key 0x22; key 0x28 2; key 0x27   # Page Down to Shaders, down to Preload: off -> on (restart required)
-    Start-Sleep -Milliseconds 300; cap "warmup_on"
-    if (-not (Select-String -LiteralPath $toml -Pattern '^shader_warmup = true$' -Quiet)) {
+    key 0x22; key 0x28 2; key 0x27   # Page Down to Shaders, down to Preload: on (the 0.2.4 default) -> off (restart required)
+    Start-Sleep -Milliseconds 300; cap "warmup_off"
+    if (-not (Select-String -LiteralPath $toml -Pattern '^shader_warmup = false$' -Quiet)) {
         throw 'Startup shader preload setting was not saved'
+    }
+    key 0x27; Start-Sleep -Milliseconds 300   # back on
+    if (-not (Select-String -LiteralPath $toml -Pattern '^shader_warmup = true$' -Quiet)) {
+        throw 'Startup shader preload setting was not restored'
     }
     key 0x28; key 0x27          # background pipelines: on -> off
     if (-not (Select-String -LiteralPath $toml -Pattern '^pipeline_async = false$' -Quiet)) {

@@ -6,26 +6,59 @@ import sys
 import zipfile
 
 exe, root = map(Path, sys.argv[1:])
-for case, value, override, disabled, file_value, effective in (
-    ('default', '', None, False, False, False),
-    ('on', 'true', None, False, True, True),
-    ('override_off', 'true', '0', False, True, False),
-    ('override_on', 'false', '1', False, False, True),
-    ('invalid', '"yes"', None, False, False, False),
-    ('no_settings', 'true', '1', True, False, False),
+for case, value, override, disabled, file_value, effective, meta, migrate in (
+    # Preload is on by default (0.2.4); a 0.2.4 file (meta) that says false keeps false,
+    # an environment value wins. A pre-0.2.4 file (no [meta]) is switched on once.
+    ('default', '', None, False, True, True, True, None),
+    ('on', 'true', None, False, True, True, True, None),
+    ('explicit_off', 'false', None, False, False, False, True, None),
+    ('override_off', 'true', '0', False, True, False, True, None),
+    ('override_on', 'false', '1', False, False, True, True, None),
+    ('invalid', '"yes"', None, False, True, True, True, None),
+    ('no_settings', 'true', '1', True, True, True, True, None),
+    ('upgrade_off', 'false', None, False, True, True, False, None),
+    ('upgrade_on', 'true', None, False, True, True, False, None),
+    ('upgrade_no_migrate', 'false', None, False, False, False, False, '0'),
 ):
     folder = root / ('warmup_' + case); folder.mkdir()
     settings = folder / 'settings.toml'
-    settings.write_text('[video]\n' + ('shader_warmup = ' + value + '\n' if value else ''))
+    settings.write_text('[video]\n' + ('shader_warmup = ' + value + '\n' if value else '')
+                        + ('[meta]\ndefaults_version = 1\n' if meta else ''))
     env = os.environ.copy()
-    for key in ('RSX_SHADER_WARMUP', 'GT5P_NO_SETTINGS'): env.pop(key, None)
+    for key in ('RSX_SHADER_WARMUP', 'GT5P_NO_SETTINGS', 'GT5P_SETTINGS_MIGRATE'): env.pop(key, None)
+    if migrate is not None: env['GT5P_SETTINGS_MIGRATE'] = migrate
     env.update(GT5P_SETTINGS=str(settings), TEST_WARMUP_FILE=str(int(file_value)), TEST_WARMUP_EFFECTIVE=str(int(effective)))
     if override is not None: env['RSX_SHADER_WARMUP'] = override
     if disabled: env['GT5P_NO_SETTINGS'] = '1'
     subprocess.run([str(exe), 'warmup-settings'], cwd=folder, env=env, timeout=10, check=True)
     if not disabled:
-        assert ('shader_warmup = ' + str(not file_value).lower()) in settings.read_text()
+        text = settings.read_text()
+        assert ('shader_warmup = ' + str(not file_value).lower()) in text
+        # A disabled migration leaves the generation unrecorded, so it is retried.
+        assert ('defaults_version = ' + ('0' if migrate == '0' else '1')) in text, text
     print('warmup_' + case + ': passed')
+
+# The quieter "Loading shaders" badge is off by default.
+for case, value, override, disabled, file_value, effective in (
+    ('default', '', None, False, False, False),
+    ('on', 'true', None, False, True, True),
+    ('override_on', 'false', '1', False, False, True),
+    ('override_off', 'true', '0', False, True, False),
+    ('invalid', '"yes"', None, False, False, False),
+    ('no_settings', 'true', '1', True, False, False),
+):
+    folder = root / ('preload_indicator_' + case); folder.mkdir()
+    settings = folder / 'settings.toml'
+    settings.write_text('[video]\n' + ('preload_indicator = ' + value + '\n' if value else ''))
+    env = os.environ.copy()
+    for key in ('GT5P_PRELOAD_INDICATOR', 'GT5P_NO_SETTINGS'): env.pop(key, None)
+    env.update(GT5P_SETTINGS=str(settings), TEST_PRELOAD_FILE=str(int(file_value)), TEST_PRELOAD_EFFECTIVE=str(int(effective)))
+    if override is not None: env['GT5P_PRELOAD_INDICATOR'] = override
+    if disabled: env['GT5P_NO_SETTINGS'] = '1'
+    subprocess.run([str(exe), 'preload-indicator-settings'], cwd=folder, env=env, timeout=10, check=True)
+    if not disabled:
+        assert ('preload_indicator = ' + str(not file_value).lower()) in settings.read_text()
+    print('preload_indicator_' + case + ': passed')
 
 for case, text, override, disabled, file_value, effective in (
     ('default', '', None, False, True, True),

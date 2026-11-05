@@ -1,5 +1,8 @@
 # Roadmap
 
+The release plan from 0.2.5 to 1.0 (Vulkan, Linux, wheels, unlocked frame rate,
+VR) is in [docs/release-roadmap.md](docs/release-roadmap.md).
+
 For the disc build (BCUS98158), the current state is maintained in
 [AGENTS.md](AGENTS.md) under "Start here", with evidence in
 [docs/progress.md](docs/progress.md). This file lists the work ahead. It was
