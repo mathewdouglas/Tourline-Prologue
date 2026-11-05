@@ -263,3 +263,18 @@ For the next release, change `VERSION` to `0.2`, commit/push it with the changes
 and push `v0.2`. Published releases are not overwritten; use a new version for
 changes. An interrupted publishing job can leave a draft; rerun that job to
 finish its upload and publication. Ordinary main builds never publish releases.
+
+Lessons from v0.2.4 (2026-11-05):
+
+- **A tag inherits its commit's `[skip ci]`.** GitHub skipped the v0.2.4 tag
+  push because the tagged commit's message contained `[skip ci]`. Either tag a
+  commit without it, or start the workflow by hand on the tag: Actions > Local
+  Windows player ZIP > Run workflow, choosing the tag, or
+  `POST /repos/<repo>/actions/workflows/player-release.yml/dispatches` with
+  `{"ref":"v0.2.4"}`. A dispatch on a version tag builds and publishes exactly
+  like a tag push.
+- **`FinalizeArtifact: ETIMEDOUT`.** Twice, on RC2 and on the first v0.2.4
+  attempt, the ZIP uploaded but the self-hosted runner timed out finalizing the
+  artifact. The build had passed, and the finished ZIP stays in
+  `_work\...\out\ci-player\`. Re-running only the failed jobs repeated the build
+  quickly from the incremental cache, then finalized and published.
