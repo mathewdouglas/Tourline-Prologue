@@ -166,6 +166,36 @@ def previous_cache(storage, output):
     return cache_root(selected)
 
 
+def interp_stage(install, storage, out, progress, runner):
+    """Interpreter pipelines into out/shadercache. Skips are recorded; errors are reported, not fatal."""
+    import interp_pipeline_prep
+    from shader_reconstruct import offline_env
+    cache=out/'shadercache'
+    try:
+        return interp_pipeline_prep.prepare(install/'runtime/gt5p.exe',storage,cache,storage,
+            install/'assets/pipeline-templates/gt5p-disc-v2',out,offline_env(storage,cache),runner,progress)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the shader preparation itself already succeeded
+        (out/interp_pipeline_prep.REPORT).write_text(json.dumps(dict(schema=1,status='failed',reason=str(exc))),encoding='utf-8')
+        print('Interpreter pipelines not prepared: '+str(exc),file=sys.stderr,flush=True)
+        return None
+
+
+def interp_only(install, storage, progress, runner):
+    """--interp-pipelines-only: add the stage to the selected, completed preparation without redoing it."""
+    pointer=storage/'prepared-cache.txt'
+    if not pointer.is_file() or pointer.is_symlink():raise ValueError('No completed preparation is selected')
+    selected=regular_read(pointer,512).decode('utf-8')
+    if not re.fullmatch(r'preparation/[0-9a-f]{24}/shadercache',selected):raise ValueError('Invalid cache selection')
+    out=storage/selected.rpartition('/')[0]
+    state=json.loads(regular_read(out/'preparation-state.json',65536))
+    if not isinstance(state,dict) or state.get('phase')!='complete':raise ValueError('Selected preparation is not complete')
+    report=interp_stage(install,storage,out,progress,runner)
+    if report is None or report.get('status') not in ('complete','skipped'):sys.exit(1)
+    print(json.dumps(report))
+
+
 def main():
     if shader_vertex_batch.worker_requested(sys.argv):
         sys.exit(shader_vertex_batch.worker_main(sys.argv))
@@ -176,6 +206,8 @@ def main():
     source.add_argument('--game',type=Path,help='The already configured disc/PS3_GAME folder')
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
+    ap.add_argument('--interp-pipelines-only',action='store_true',
+                    help='Only prepare shader-interpreter pipelines into the selected completed preparation')
     ap.add_argument('--check-selected',action='store_true',
                     help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
     a=ap.parse_args()
@@ -275,6 +307,10 @@ def main():
     # The same owned runner is used by native PSO and exact fragment batches.
     template.run_offline=run_owned
     shader_fragment_batch.run_offline=run_owned
+    if a.interp_pipelines_only:
+        interp_only(install,storage,progress,run_owned)
+        status.write_text('Interpreter pipelines complete.',encoding='utf-8')
+        return
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
         output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
@@ -285,6 +321,9 @@ def main():
     verify_settings(selection,storage)
     report['player_settings']=selection
     template.save_report(out/'report.json',report)
+    # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
+    # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.
+    interp_stage(install,storage,out,progress,run_owned)
     # Switch only after successful shader/native/persistence validation. Existing
     # caches remain intact; game demand can add missing/settings-specific entries.
     pointer=storage/'prepared-cache.txt';pending=pointer.with_suffix('.tmp')
