@@ -9,6 +9,68 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 224 - Per-frame interpreter budget (GPU cost cap) (2026-11-06)
+
+**Aim.** Help players with no prepared cache. With the interpreter on, every pending draw is interpreted, and an
+interpreted pixel costs several times a specialized one (Phase 216 gap 5: force mode about 79 ms GPU per frame
+against 3-5 ms). A burst of pending shaders could therefore push frames past the vblank.
+
+**Change** (`patches/ps3recomp-shader-interp.patch`, overlay only; the interpreter stays default-off):
+- `RSX_SHADER_INTERP_BUDGET` sets a GPU frame-time target in ms (default 14; `0` = unlimited, the earlier
+  behaviour).
+- The number of pending draws the interpreter may take each frame adapts to the previous frame's measured GPU
+  time (`RSX_GPU_TIME`). It is halved, from what was used, when that frame was over the target. It rises by an
+  eighth (at least 8) when the frame is under 80% of the target. The floor is 4 and the start value 64
+  (`RSX_SHADER_INTERP_BUDGET_START`).
+- Draws past the allowance are left out exactly as with the interpreter off, and appear once their shader is
+  ready. Forced mode (`=2`) is not limited.
+- `[interp-budget]` lines report frames, frames over the target, the allowance, interpreted draws per frame and
+  denied draws.
+
+The overlay was regenerated with `interp_make_patch.py` (hunk offsets now match the current main patch). New
+build script: `scripts/test/interp_hitch_build.py` builds main + interpreter + frame-hitch trace, with
+embedded interpreter DXBC. The trace overlay's three skip counters are re-applied on the interpreter's lines.
+
+**Measured.** High Speed Ring, empty cache, `hitch_capture.py hsr cold`, the same private engine, interpreter
+stages both on (`RSX_SHADER_INTERP=1`, `_VP=1`). Excess is the time above 50 ms summed over frames after the
+grid.
+
+| Settings | Mode | Excess | Frames >100 ms | Worst frames (ms) | Interpreted draws | Interpreter PSO ms (max) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 16:9 2x | budget | 12.3 / 11.6 s | 52 / 50 | 334, 237 / 530, 281 | 31,350 / 35,425 | 4 (2) / 4 (2) |
+| 16:9 2x | no budget | 13.7 / 12.7 s | 47 / 53 | 408, 369 / 422, 315 | 56,692 / 56,408 | 9 (2) / 14 (3) |
+| 16:9 2x | interpreter off | 12.1 / 11.6 s | 59 / 46 | 286, 211 / 348, 213 | - | - |
+| 21:9 8x | budget | 12.3 / 12.4 s | 47 / 39 | 281, 253 / 312, 252 | 23,807 / 28,665 | 5 (1) / 3 (1) |
+| 21:9 8x | no budget | 10.5 / 12.6 s | 37 / 42 | 745, 246 / 828, 683 | 36,730 / 36,959 | 835 (755) / 1,475 (771) |
+| 21:9 8x | interpreter off | 10.3 / 11.3 s | 44 / 46 | 538, 206 / 229, 208 | - | - |
+
+What it says:
+- **On this PC the interpreter's GPU cost is not what makes an empty cache hitch.** Total excess is 10-14 s in
+  every mode, and the pairs overlap.
+- The GPU went over the 14 ms target in only 104-131 of about 7,500 frames, even at 21:9 8x. Those frames fall
+  in the compile bursts: each halves the allowance and it recovers over tens of frames. That is why the budget
+  still denied 150-184k draws and cut interpreted draws by about 35-45%.
+- The cold hitches are shader compilation (about 1,075 compiles) and pipeline creation (about 1,900) on the
+  replay path. In long frames the replay batch time was 3.6-3.8 s with the interpreter off, 4.5-4.7 s with the
+  budget, and 4.2-5.6 s without it.
+- At 21:9 8x both no-budget runs had 745-828 ms worst frames. Their counters show interpreter pipeline creation
+  of 755-771 ms for classes outside the startup set. With the budget, fewer classes were reached and none took
+  over 1 ms. At 16:9 2x the worst frames do not separate.
+- This is two runs per row on one machine with a fast GPU. A weaker GPU, which the budget is for, was not
+  available, so the benefit there is the design intent, not a measurement.
+
+**Measurement note.** With nobody at the PC, Windows turns the display off. DXGI Present then blocks for
+about 200 ms per call (19-27 presents per 5 s), boot is about 8 s slower, and the scripted menu presses miss:
+"Starting grid not reached". Six runs failed this way and were discarded. Unattended route runs need the
+display kept on (a `SetThreadExecutionState(ES_DISPLAY_REQUIRED)` holder) and woken first. Two batches also
+overlapped once; each kept run's configuration was checked from its own interpreter counters.
+
+**Recommendation.**
+- Keep the budget as the interpreter's behaviour (`RSX_SHADER_INTERP_BUDGET=0` rolls back), and keep the
+  interpreter default-off.
+- For players without a prepared cache, the lever is the compile/creation work itself, not the interpreter:
+  e.g. preparation in the background from first launch, or more of the starter prepared before play.
+
 ## Phase 223 - Prepared pipelines at the player's MSAA sample count (2026-11-06)
 
 **Problem.** At 21:9 with 8x MSAA (the user's settings) the prepared High Speed Ring race still created about

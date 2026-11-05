@@ -36,13 +36,21 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-06, Phase 223)
+## Start here: state of play (2026-11-06, Phase 224)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 223 is the latest).
+has the evidence, newest phase first (Phase 224 is the latest).
 
 ### What works now
+
+- **Interpreter GPU budget (Phase 224, interp overlay, interpreter still default-off):** pending draws the
+  interpreter may take per frame adapt to the last frame's GPU time (`RSX_SHADER_INTERP_BUDGET`, ms target,
+  default 14; `=0` unlimited). Empty-cache HSR at 16:9 2x and 21:9 8x: excess 10-14 s in every mode (budget,
+  no budget, interpreter off). Interpreted draws -35-45%. At 21:9 8x it avoided the 745-828 ms interpreter-PSO
+  frames. The interpreter's GPU cost is not the empty-cache bottleneck on this PC; compiles and creations are.
+  Unattended routes need the display kept on (DXGI Present blocks ~200 ms when it is off).
+  Build: scripts/test/interp_hitch_build.py.
 
 - **Prepared pipelines at the player's MSAA (Phase 223, branch feature/hitch-texture-lru):** preparation
   re-targets the starter's 2x/4x multisampled pipelines (6,497) to the MSAA in gt5p_settings.toml: descriptor
