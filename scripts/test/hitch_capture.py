@@ -19,6 +19,7 @@ def main():
     ap.add_argument('--env',action='append',default=[],metavar='NAME=VALUE',help='extra game variable (e.g. RSX_TEX_LRU=1)')
     ap.add_argument('--suffix',default='',help='tag suffix for repeated/AB runs')
     ap.add_argument('--seed-cache',type=Path,help='prepared condition: copy this scratch cache instead of scratch/hitch/preparation')
+    ap.add_argument('--engine',type=Path,help='private engine (default scratch/hitch/build)')
     ap.add_argument('--no-foreground',action='store_true',help='do not reject the run when focus moves (timing then unfocused)')
     a=ap.parse_args()
     if a.producer_timeline and (a.route!='hsr' or a.condition!='warm'):ap.error('Producer diagnostic requires hsr warm')
@@ -48,7 +49,7 @@ def main():
     if a.condition=='cold' and cache.exists():raise ValueError('Cold cache already exists')
     if a.condition=='warm' and not cache.is_dir():raise ValueError('Run prepared condition first')
     cache.mkdir(parents=True,exist_ok=True)
-    engine=home/'build/install/runtime/gt5p.exe'
+    engine=(a.engine or home/'build/install/runtime/gt5p.exe').resolve()
     context=dict(route=a.route,condition=a.condition,save_sha256=seed.hexdigest(),engine_sha256=hashlib.sha256(engine.read_bytes()).hexdigest(),
         initial_dxbc_files=len(list(cache.glob('*.dxbc'))),foreground_policy='relaxed' if a.no_foreground else 'strict',extra_env=a.env,producer_timeline_seconds=130 if a.producer_timeline else 0,settings='1080p/16:9/2x MSAA, default SSAA, async on, interpreter off; OS/driver caches not cleared')
     (out/'context.json').write_text(json.dumps(context,indent=2))

@@ -1,0 +1,332 @@
+diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
+index e1063ba..1a91820 100644
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -4589,6 +4589,7 @@ static void pso_prepare_batch(const char* dir)
+  * preparation does: a demand pipeline is already held by the renderer's own
+  * cache, and retaining those too filled the resident set during long play,
+  * leaving no room for the learned race set (and doubling what stays live). */
++static volatile LONG64 s_prep_us_blob;   /* driver-blob file reads (all callers), see [race-prewarm] split */
+ static HRESULT create_guest_pso_cached_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd,
+                                           ID3D12PipelineState** out, int retain)
+ {
+@@ -4605,6 +4606,7 @@ static HRESULT create_guest_pso_cached_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DE
+     static ULONGLONG last;
+     const u64 magic = 0x31534F5035505447ull;
+     u64 offline_clock=pso_offline_clock();
++    LARGE_INTEGER _bq0, _bq1, _bqf; QueryPerformanceFrequency(&_bqf); QueryPerformanceCounter(&_bq0);
+     FILE* f = fopen(path, "rb");
+     if (f) {
+         fseek(f, 0, SEEK_END); long size = ftell(f); rewind(f);
+@@ -4620,6 +4622,8 @@ static HRESULT create_guest_pso_cached_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DE
+         if (!bytes) rejects++;
+         fclose(f);
+     }
++    QueryPerformanceCounter(&_bq1);
++    InterlockedAdd64(&s_prep_us_blob, (LONG64)((_bq1.QuadPart - _bq0.QuadPart) * 1000000ll / _bqf.QuadPart));
+     if(s_offline.profile)s_offline.hint_us+=pso_offline_clock()-offline_clock;
+     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = *pd;
+     HRESULT hr = E_FAIL;
+@@ -4994,14 +4998,19 @@ static void pso_race_notify(const char* name) {
+         if (InterlockedExchange(&s_pso_race_active, 0)) spack_race_end();
+     }
+ }
++/* Recipe preparation time split (startup warmup and race prewarm), printed with "[race-prewarm] finished". */
++static volatile LONG64 s_prep_us_recipe, s_prep_us_code, s_prep_us_create, s_prep_n;
+ static int pso_prepare_recipe(const char* dir, const char* path, u64 expected) {
+     ID3D12PipelineState* pso=NULL;
++    LARGE_INTEGER _pq0,_pq1,_pqf; QueryPerformanceFrequency(&_pqf); QueryPerformanceCounter(&_pq0);
++#define PREP_LAP(acc) do { QueryPerformanceCounter(&_pq1); InterlockedAdd64(&(acc),(LONG64)((_pq1.QuadPart-_pq0.QuadPart)*1000000ll/_pqf.QuadPart)); _pq0=_pq1; } while(0)
+     if(expected && pso_warm_get(expected,&pso)) {pso->lpVtbl->Release(pso);return 1;}
+     PsoWarmRecipe r;
+     /* A damaged recipe, or one whose bytecode was pruned, is deleted so the
+      * next creation of that pipeline records it afresh (recording skips a
+      * recipe that already exists). A missing file deletes nothing. */
+     if (!pso_warm_read_recipe(path,&r) || (expected && r.hash!=expected)) {DeleteFileA(path);return 0;}
++    PREP_LAP(s_prep_us_recipe);
+     if (pso_warm_get(r.hash,&pso)) {pso->lpVtbl->Release(pso);return 1;}
+     AcquireSRWLockShared(&s_pso_warm_lock);
+     int room=s_pso_warm_n<pso_resident_max();
+@@ -5009,6 +5018,7 @@ static int pso_prepare_recipe(const char* dir, const char* path, u64 expected) {
+     if (!room) return 0;
+     void* vs=pso_warm_read_code(dir,r.vs_hash,r.vs_bytes);
+     void* ps=pso_warm_read_code(dir,r.ps_hash,r.ps_bytes);
++    PREP_LAP(s_prep_us_code);
+     if (!vs || !ps) DeleteFileA(path);
+     int ok=0;
+     if(vs && ps) {
+@@ -5022,10 +5032,12 @@ static int pso_prepare_recipe(const char* dir, const char* path, u64 expected) {
+             t_shader_preload=1;
+             HRESULT made=create_guest_pso_cached(&r.desc,&pso);
+             t_shader_preload=0;
++            PREP_LAP(s_prep_us_create); InterlockedIncrement64(&s_prep_n);
+             if(SUCCEEDED(made) && pso) {pso->lpVtbl->Release(pso);ok=1;}
+         }
+     }
+     free(vs);free(ps);return ok;
++#undef PREP_LAP
+ }
+ static int pso_race_recipe(u64 hash) {
+     char dir[512],path[640];if(!pso_warm_dir(dir,sizeof dir))return 0;
+@@ -5179,6 +5191,8 @@ static DWORD WINAPI pso_worker_main(LPVOID unused) {
+                 fclose(preload);preload=NULL;
+                 SetEvent(s_race_ready);
+                 fprintf(stderr,"[race-prewarm] finished: ready=%u rejected=%u elapsed_ms=%llu\n",loaded,rejected,(unsigned long long)(GetTickCount64()-began));
++                fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms)\n",
++                        (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000);
+             }
+         } else if(startup.phase) {pso_startup_step(&startup,dir);Sleep(1);}
+     }
+@@ -6943,6 +6957,138 @@ void rsx_d3d12_backend_prepare_library(void)
+  * texture in RAM. Animated/streamed textures keep theirs while they change.
+  * The wait guarantees no recorded copy still reads them. RSX_TEX_UPLOAD_KEEP=0
+  * keeps every buffer, as before. */
++/* ---- Texture allocation pool and staging ring (developer experiment, default off) ----
++ * A new texture upload made two committed resources: the DEFAULT-heap texture and its own UPLOAD-heap staging
++ * buffer, about 1 ms together. A burst of new textures (cars and signs entering view at a race start) spent
++ * 100-200 ms of one frame in CreateCommittedResource.
++ *   RSX_TEX_POOL=1       a texture evicted from a slot because its shape changed is parked, not released, and a
++ *                        later texture of the identical resource description takes it (no allocation). Bounded by
++ *                        RSX_TEX_POOL_MB (default 256) and 512 entries, oldest released first.
++ *   RSX_TEX_RING_MB=<n>  with RSX_TEX_POOL=1, staging data goes through one persistently mapped upload buffer of
++ *                        n MB (default 64; 0 = off), reset after the per-batch GPU drain (wait_for_gpu at the start
++ *                        of render_frame_body). An upload that does not fit uses the old per-slot buffer.
++ * RSX_TEX_POOL unset/0 is the rollback: both paths are skipped. Stats: [tex-pool] every 5 s. */
++static int tex_pool_on(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("RSX_TEX_POOL"); on = e && !strcmp(e, "1"); }
++    return on;
++}
++#define TEX_POOL_MAX 512
++typedef struct { ID3D12Resource* res; D3D12_RESOURCE_DESC desc; u64 bytes; } TexPoolEnt;
++static TexPoolEnt s_tex_pool[TEX_POOL_MAX];
++static u32 s_tex_pool_n;
++static u64 s_tex_pool_bytes;
++static struct { u64 put, hit, miss, dropped, ring_up, ring_fallback, ring_bytes_peak; double create_ms; u64 creates; } s_tex_pool_stat;
++static u64 tex_pool_cap(void)
++{
++    static u64 cap = 0;
++    if (!cap) { const char* e = getenv("RSX_TEX_POOL_MB"); long mb = e ? atol(e) : 256; if (mb < 1) mb = 1; if (mb > 4096) mb = 4096;
++                cap = (u64)mb << 20; }
++    return cap;
++}
++static void tex_pool_drop_oldest(void)
++{
++    if (!s_tex_pool_n) return;
++    s_tex_pool[0].res->lpVtbl->Release(s_tex_pool[0].res);
++    s_tex_pool_bytes -= s_tex_pool[0].bytes;
++    memmove(&s_tex_pool[0], &s_tex_pool[1], (s_tex_pool_n - 1) * sizeof s_tex_pool[0]);
++    s_tex_pool_n--;
++    s_tex_pool_stat.dropped++;
++}
++/* Park a texture whose slot is changing shape. Its last use was recorded in an earlier batch, which the
++ * per-batch GPU drain has completed, or in this batch (then the pool keeps it alive past that use). */
++static void tex_pool_put(ID3D12Resource* r)
++{
++    D3D12_RESOURCE_DESC d; r->lpVtbl->GetDesc(r, &d);
++    D3D12_RESOURCE_ALLOCATION_INFO ai;
++    s_d3d.device->lpVtbl->GetResourceAllocationInfo(s_d3d.device, &ai, 0, 1, &d);
++    u64 bytes = ai.SizeInBytes;
++    if (bytes > tex_pool_cap()) { r->lpVtbl->Release(r); s_tex_pool_stat.dropped++; return; }
++    while (s_tex_pool_n && (s_tex_pool_n >= TEX_POOL_MAX || s_tex_pool_bytes + bytes > tex_pool_cap()))
++        tex_pool_drop_oldest();
++    s_tex_pool[s_tex_pool_n].res = r; s_tex_pool[s_tex_pool_n].desc = d; s_tex_pool[s_tex_pool_n].bytes = bytes;
++    s_tex_pool_n++; s_tex_pool_bytes += bytes; s_tex_pool_stat.put++;
++}
++static ID3D12Resource* tex_pool_take(const D3D12_RESOURCE_DESC* want)
++{
++    for (u32 i = s_tex_pool_n; i-- > 0;) {
++        const D3D12_RESOURCE_DESC* d = &s_tex_pool[i].desc;
++        if (d->Dimension == want->Dimension && d->Width == want->Width && d->Height == want->Height &&
++            d->DepthOrArraySize == want->DepthOrArraySize && d->MipLevels == want->MipLevels &&
++            d->Format == want->Format && d->SampleDesc.Count == want->SampleDesc.Count && d->Flags == want->Flags) {
++            ID3D12Resource* r = s_tex_pool[i].res;
++            s_tex_pool_bytes -= s_tex_pool[i].bytes;
++            memmove(&s_tex_pool[i], &s_tex_pool[i + 1], (s_tex_pool_n - i - 1) * sizeof s_tex_pool[0]);
++            s_tex_pool_n--; s_tex_pool_stat.hit++;
++            return r;
++        }
++    }
++    s_tex_pool_stat.miss++;
++    return NULL;
++}
++static ID3D12Resource* s_tex_ring;
++static u8* s_tex_ring_map;
++static u64 s_tex_ring_size, s_tex_ring_used;
++static int s_tex_ring_failed;
++static u64 tex_ring_bytes(void)
++{
++    static long mb = -1;
++    if (mb < 0) { const char* e = getenv("RSX_TEX_RING_MB"); mb = e ? atol(e) : 64; if (mb < 0) mb = 0; if (mb > 1024) mb = 1024; }
++    return tex_pool_on() ? (u64)mb << 20 : 0;
++}
++/* Space for one upload in the ring, 512-byte aligned (D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT). */
++static int tex_ring_take(u64 bytes, u64* off)
++{
++    if (!tex_ring_bytes() || s_tex_ring_failed) return 0;
++    if (!s_tex_ring) {
++        D3D12_HEAP_PROPERTIES hu = {0}; hu.Type = D3D12_HEAP_TYPE_UPLOAD;
++        D3D12_RESOURCE_DESC bd = {0};
++        bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = tex_ring_bytes();
++        bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc.Count = 1;
++        bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
++        void* m = NULL; D3D12_RANGE nr = {0, 0};
++        if (FAILED(s_d3d.device->lpVtbl->CreateCommittedResource(s_d3d.device, &hu, D3D12_HEAP_FLAG_NONE, &bd,
++                D3D12_RESOURCE_STATE_GENERIC_READ, NULL, &IID_ID3D12Resource, (void**)&s_tex_ring)) ||
++            FAILED(s_tex_ring->lpVtbl->Map(s_tex_ring, 0, &nr, &m)) || !m) {
++            if (s_tex_ring) { s_tex_ring->lpVtbl->Release(s_tex_ring); s_tex_ring = NULL; }
++            s_tex_ring_failed = 1;
++            fprintf(stderr, "[tex-pool] staging ring unavailable; per-texture staging kept\n");
++            return 0;
++        }
++        s_tex_ring_map = (u8*)m; s_tex_ring_size = tex_ring_bytes(); s_tex_ring_used = 0;
++    }
++    u64 o = (s_tex_ring_used + 511u) & ~(u64)511u;
++    if (o + bytes > s_tex_ring_size) { s_tex_pool_stat.ring_fallback++; return 0; }
++    s_tex_ring_used = o + bytes;
++    if (s_tex_ring_used > s_tex_pool_stat.ring_bytes_peak) s_tex_pool_stat.ring_bytes_peak = s_tex_ring_used;
++    s_tex_pool_stat.ring_up++;
++    *off = o;
++    return 1;
++}
++/* After the per-batch GPU drain: everything the previous batch copied from the ring has executed. */
++static void tex_ring_reset(void) { s_tex_ring_used = 0; }
++static void tex_pool_log(void)
++{
++    if (!tex_pool_on()) return;
++    static ULONGLONG last;
++    ULONGLONG now = GetTickCount64();
++    if (last && now - last < 5000) return;
++    last = now;
++    fprintf(stderr, "[tex-pool] put %llu hit %llu miss %llu dropped %llu parked %u (%llu MB) creates %llu (%.0f ms) "
++        "ring uploads %llu fallback %llu peak %llu KB\n",
++        (unsigned long long)s_tex_pool_stat.put, (unsigned long long)s_tex_pool_stat.hit,
++        (unsigned long long)s_tex_pool_stat.miss, (unsigned long long)s_tex_pool_stat.dropped, s_tex_pool_n,
++        (unsigned long long)(s_tex_pool_bytes >> 20), (unsigned long long)s_tex_pool_stat.creates,
++        s_tex_pool_stat.create_ms, (unsigned long long)s_tex_pool_stat.ring_up,
++        (unsigned long long)s_tex_pool_stat.ring_fallback, (unsigned long long)(s_tex_pool_stat.ring_bytes_peak >> 10));
++}
++static void tex_pool_shutdown(void)
++{
++    while (s_tex_pool_n) tex_pool_drop_oldest();
++    if (s_tex_ring) { s_tex_ring->lpVtbl->Unmap(s_tex_ring, 0, NULL); s_tex_ring->lpVtbl->Release(s_tex_ring); s_tex_ring = NULL; }
++}
++
+ static void tex_upload_sweep(void)
+ {
+     static int keep = -1;
+@@ -7447,7 +7593,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+      * cube path copies 6 subresources and writes a 6x upload buffer -- which
+      * crashes. */
+     if (t->res && (t->w != w || t->h != h || t->fmt != fmt || t->cube != cube || t->depth != depth || t->levels != levels)) {
+-        t->res->lpVtbl->Release(t->res); t->res = NULL;
++        if (tex_pool_on()) tex_pool_put(t->res); else t->res->lpVtbl->Release(t->res);
++        t->res = NULL;
+         if (t->up) { t->up->lpVtbl->Release(t->up); t->up = NULL; }
+     }
+     double alloc_begin = hitch_on() ? perf_now() : 0;
+@@ -7461,21 +7608,33 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+         td.MipLevels = (UINT16)levels;
+         td.Format = dxfmt; td.SampleDesc.Count = 1;
+         td.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+-        if (FAILED(s_d3d.device->lpVtbl->CreateCommittedResource(
+-                s_d3d.device, &hp, D3D12_HEAP_FLAG_NONE, &td,
+-                D3D12_RESOURCE_STATE_COPY_DEST, NULL,
+-                &IID_ID3D12Resource, (void**)&t->res)))
+-            return -1;
+-        fresh = 1;
++        /* A pooled texture is in PIXEL_SHADER_RESOURCE, like a reused slot: fresh stays 0 so the
++         * PSR -> COPY_DEST barrier below is recorded. */
++        if (tex_pool_on() && (t->res = tex_pool_take(&td)) != NULL) {
++            if (hitch_on()) s_hitch_tex_allocs--;   /* not an allocation */
++        } else {
++            double create_begin = tex_pool_on() ? perf_now() : 0;
++            if (FAILED(s_d3d.device->lpVtbl->CreateCommittedResource(
++                    s_d3d.device, &hp, D3D12_HEAP_FLAG_NONE, &td,
++                    D3D12_RESOURCE_STATE_COPY_DEST, NULL,
++                    &IID_ID3D12Resource, (void**)&t->res)))
++                return -1;
++            if (tex_pool_on()) { s_tex_pool_stat.creates++; s_tex_pool_stat.create_ms += (perf_now()-create_begin)*1000.; }
++            fresh = 1;
++        }
+     }
+     /* The staging buffer lives in system memory. tex_upload_sweep frees it
+      * once a texture stops changing; a later re-upload makes a new one. */
+-    if (!t->up) {
++    const u64 stage_bytes = levels > 1 ? mip_upload_bytes : (u64)pitch * (depth ? h : dxt ? blkrows : h) * (depth ? depth : cube ? 6 : 1);
++    u64 ring_off = 0;
++    const int ring = !t->up && tex_ring_take(stage_bytes, &ring_off);
++    ID3D12Resource* const stage = ring ? s_tex_ring : NULL;   /* NULL: t->up (assigned below) */
++    if (!t->up && !ring) {
+         if (hitch_on()) s_hitch_up_allocs++;
+         D3D12_HEAP_PROPERTIES hu = {0}; hu.Type = D3D12_HEAP_TYPE_UPLOAD;
+         D3D12_RESOURCE_DESC bd = {0};
+         bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+-        bd.Width = levels > 1 ? mip_upload_bytes : (u64)pitch * (depth ? h : dxt ? blkrows : h) * (depth ? depth : cube ? 6 : 1);
++        bd.Width = stage_bytes;
+         bd.Height = 1; bd.DepthOrArraySize = 1;
+         bd.MipLevels = 1; bd.SampleDesc.Count = 1; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+         if (FAILED(s_d3d.device->lpVtbl->CreateCommittedResource(
+@@ -7495,7 +7654,8 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+ 
+     void* mapped = NULL; D3D12_RANGE nr = {0,0};
+     double map_begin = hitch_on() ? perf_now() : 0;
+-    if (FAILED(t->up->lpVtbl->Map(t->up, 0, &nr, &mapped)) || !mapped) return -1;
++    if (ring) mapped = s_tex_ring_map + ring_off;
++    else if (FAILED(t->up->lpVtbl->Map(t->up, 0, &nr, &mapped)) || !mapped) return -1;
+     if (hitch_on()) s_hitch_tex_map_ms += (perf_now()-map_begin)*1000.;
+     { static int _tp=0; if (getenv("RTT_DUMP") && _tp++ < 6) {
+         const u8* sp = vm_base + off;
+@@ -7537,7 +7697,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+     if (depth) {
+         if (!rsx_texture_decode_volume(mapped, pitch, pitch*h, tex_src(off, chain_bytes),
+                                       w, h, depth, &tl, rsx_texture_argb_is_rgba())) {
+-            t->up->lpVtbl->Unmap(t->up, 0, NULL); return -1;
++            if (!ring) t->up->lpVtbl->Unmap(t->up, 0, NULL); return -1;
+         }
+     } else for (u32 _f = 0; _f < _nfaces; _f++) {
+     off    = _off0 + _f * _face_bytes;
+@@ -7833,7 +7993,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+             src_off += bytes;
+         }
+     }
+-    t->up->lpVtbl->Unmap(t->up, 0, NULL);
++    if (!ring) t->up->lpVtbl->Unmap(t->up, 0, NULL);
+ 
+     double copy_begin = hitch_on() ? perf_now() : 0;
+     if (!fresh) {   /* reused resource: PSR -> COPY_DEST first */
+@@ -7847,7 +8007,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+     }
+     D3D12_TEXTURE_COPY_LOCATION dst = {0}, src = {0};
+     dst.pResource = t->res; dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+-    src.pResource = t->up;  src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
++    src.pResource = stage ? stage : t->up;  src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+     src.PlacedFootprint.Footprint.Format   = dxfmt;
+     src.PlacedFootprint.Footprint.Width    = w;
+     src.PlacedFootprint.Footprint.Height   = h;
+@@ -7857,6 +8017,7 @@ static int vp_upload_tex_slot(u32 off, u32 w, u32 h, u32 fmt, int cube, u32 mips
+         dst.SubresourceIndex        = _f;      /* cube face = array slice */
+         src.PlacedFootprint.Offset  = (u64)_f * pitch * _face_rows;
+         if (levels > 1) src.PlacedFootprint = mip_fp[_f];
++        src.PlacedFootprint.Offset += ring_off;   /* 0 for the per-slot buffer */
+         s_d3d.cmd_list->lpVtbl->CopyTextureRegion(s_d3d.cmd_list, &dst, 0, 0, 0, &src, NULL);
+     }
+     {
+@@ -10784,6 +10945,8 @@ static void render_frame_body(void)
+       if (perf_on()) s_perf_wait += perf_now() - _w0; }
+     vp_fp_cache_flush_if_full();
+     tex_upload_sweep();          /* staging of textures that stopped changing */
++    tex_ring_reset();            /* RSX_TEX_POOL: the drained batch no longer reads the ring */
++    tex_pool_log();
+     off_rt_release_deferred();   /* the list that last referenced them is done */
+     wb_flush();                  /* last frame's small results into guest memory */
+ 
+@@ -15983,6 +16146,7 @@ void rsx_d3d12_backend_shutdown(void)
+     if (s_hitch_file) { fclose(s_hitch_file); s_hitch_file=NULL; }
+     pso_queue_stop();
+     wait_for_gpu();
++    tex_pool_shutdown();
+     spack_race_end_ex(1);   /* quitting from a race keeps what it learned */
+     dxbc_mem_clear();
+     pso_warm_clear();
