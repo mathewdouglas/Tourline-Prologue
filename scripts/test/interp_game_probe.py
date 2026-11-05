@@ -7,6 +7,7 @@ including generic interpreter DXBC. Results and screenshots stay in scratch.
 """
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -94,8 +95,14 @@ def main() -> None:
             i = args.index("-SampleDelay")
             del args[i:i + 2]
     with (owned / "probe.log").open("w", encoding="utf-8") as log:
-        result = subprocess.run(args + env, cwd=ROOT, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, errors="replace")
+        try:
+            result = subprocess.run(args + env, cwd=ROOT, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace")
+        finally:
+            # The private game root is a ~2 GB copy of the save; keep only logs/shots/dumps.
+            # RSX_INTERP_KEEP_ROOT=1 keeps it. (A matrix of runs filled the volume without this.)
+            if not os.environ.get("RSX_INTERP_KEEP_ROOT"):
+                shutil.rmtree(game, ignore_errors=True)
         log.write(result.stdout)
         print(result.stdout, end="", flush=True)
         result.check_returncode()

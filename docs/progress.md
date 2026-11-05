@@ -9,6 +9,34 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 216 - Shader interpreter fallback re-verified; not yet a default (2026-11-05)
+
+Branch `t3/interpreter-default` (development, `[skip ci]`; main, tags and releases untouched). The RSX shader
+interpreter fallback (`RSX_SHADER_INTERP=1`, `RSX_SHADER_INTERP_VP=1`: interpret only draws whose specialized shader
+or driver pipeline is pending) stays **default-off**. Details, tables and switches are in
+[coverage-shader-interpreter.md](coverage-shader-interpreter.md#status-phase-216-2026-11-05-re-verified-on-a-corrected-private-build).
+
+- **Correction to earlier readings.** Earlier private interpreter engines were linked with the v0.2.3 decoder objects
+  (no Phase 215 text); the builder now compiles the patched decoders. Every in-game number was re-measured on the
+  corrected engine; the earlier cold/warm tables are replaced.
+- **Closed, verified in game:** the ACURA wordmark (interpreted red 39-40 against specialized 39 in the alternating
+  capture; the cause was the missing "redirected stencil-mask pass forces colour to 1" behaviour); depth-copy and
+  stacked-mip draws (gap counter 0, was 780 / 3,141); the replay vertex omission rise (those were the same draws, and
+  with async pipelines the counter again counts draws waiting on a queued interpreter pipeline); interpreter pipelines
+  persisted as `ipso_*.bin` and created on a worker (0 ms on the replay thread, 0 rejected blobs, 93-142 disk hits in
+  warm runs).
+- **Not done:** creating observed interpreter classes at startup (fragment-only `=1` pipelines contain the specialized
+  vertex shader, unknown until a draw names it); cheaper interpreter shader. Two experiments (decode gating, 16-register
+  files) left the force-mode GPU cost at about 79 ms and were reverted.
+- **Measured (single locked runs, one GPU, one save; Daytona cells repeated):** draws left out fall from 44-216k to
+  1.4-6k per race run; p99 on cold caches is equal within run-to-run spread; High Speed Ring warm equal; Daytona warm
+  slightly worse (p99 27-36 against 24-25 ms; one unexplained 723 ms frame). Cold dealership shows complete materials
+  during compilation but GPU-bound windows up to 260 ms.
+- **Recommendation:** do not make it the default yet; see the document's list of what a default change would touch.
+- **Tooling.** `interp_game_probe.py` gained `--menu-delay` and `--settle`, and now deletes its ~2 GB private game-root
+  copy after each run (`RSX_INTERP_KEEP_ROOT=1` keeps it): a 60-run matrix filled the volume. `interp_matrix_summary.py`
+  tabulates probe runs. Foreground loss by other windows rejects frame tests (the driver retries them).
+
 ## Phase 215 - De-specialized shader text: cheaper to compile, same shaders (2026-11-04)
 
 Preparation cost is dominated by the D3D compiler, so the generated HLSL was made cheaper without changing what
