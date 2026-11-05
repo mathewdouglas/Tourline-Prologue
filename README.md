@@ -15,7 +15,7 @@
 ![Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078D6)
 ![Direct3D 12](https://img.shields.io/badge/graphics-Direct3D%2012-555)
 
-**[Release notes](docs/release-v0.2.3.md)** Â· **[Getting started](#getting-started)** Â· **[Known problems](#known-problems)** Â· **[Player setup](docs/player-setup.md)** Â· **[Shader preparation](docs/shader-precompile.md)** Â· **[Progress](docs/progress.md)** Â· **[Roadmap](ROADMAP.md)** Â· **[Changelog](CHANGELOG.md)** Â· **[AI use](docs/AI.md)**
+**[Release notes](docs/release-v0.2.3.md)** · **[Getting started](#getting-started)** · **[Known problems](#known-problems)** · **[Player setup](docs/player-setup.md)** · **[Shader preparation](docs/shader-precompile.md)** · **[Progress](docs/progress.md)** · **[Roadmap](ROADMAP.md)** · **[Changelog](CHANGELOG.md)** · **[AI use](docs/AI.md)**
 
 An unofficial port of **Gran Turismo 5 Prologue** (PS3, US disc BCUS98158) to Windows x64. It is a static recompilation: the game's own code, translated ahead of time to native x64, then run with a Direct3D 12 renderer. No emulator runs while you play. The player build is **Tourline Prologue**. The window title is Project Tourline Prologue.
 
@@ -55,7 +55,7 @@ More detail: [launcher/START-HERE.txt](launcher/START-HERE.txt), [docs/player-se
 - The keyboard is used when no controller is connected. Some assignment-page text still names PlayStation buttons.
 - Only the US disc build BCUS98158 v03.00 is supported.
 
-The measurement record is [docs/progress.md](docs/progress.md). For a bug report, enable **F1 â†’ DEBUG â†’ Debug export** before the fault, then use **F3 â†’ Export debug report** (or **F8** while F3 is open) and attach the ZIP from `logs/debug/`.
+The measurement record is [docs/progress.md](docs/progress.md). For a bug report, enable **F1 → DEBUG → Debug export** before the fault, then use **F3 → Export debug report** (or **F8** while F3 is open) and attach the ZIP from `logs/debug/`.
 
 ## Building from source
 
@@ -104,4 +104,4 @@ The port's own code, tools and documentation are [MIT](LICENSE). The licence cov
 
 **You need your own copy of the game.** This repository contains the port: source, tools and documentation. It contains no game code, data, assets, keys or firmware. `scripts/check_no_game_files.py` refuses those files on every push. Downloads come only from this repository's [GitHub Releases](https://github.com/mathewdouglas/Tourline-Prologue/releases).
 
-Gran Turismo 5 Prologue is Â© Sony Interactive Entertainment.
+Gran Turismo 5 Prologue is © Sony Interactive Entertainment.
