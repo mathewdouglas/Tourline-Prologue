@@ -9,6 +9,75 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 223 - Prepared pipelines at the player's MSAA sample count (2026-11-06)
+
+**Problem.** At 21:9 with 8x MSAA (the user's settings) the prepared High Speed Ring race still created about
+920-930 pipelines during play. The worst frames were 386-842 ms, and the time above budget was 3.7-4.5 s. The
+starter observed its multisampled targets at 2x (5,835 records) and 4x (662). The renderer gives every
+multisampled target the configured `RSX_MSAA` count (`off_rt.ms_n` into bits 16-19 of the key's cube field,
+then `SampleDesc.Count`), so at 8x none of those 6,497 prepared pipelines can be used.
+
+**What depends on the count.** In `vp_get_fp_pso` the sample count only sets `pd.SampleDesc.Count`. Nothing
+else in the descriptor (rasterizer, blend, sample mask) changes. The vertex shader never depends on it, and since
+Phase 213 (`RSX_FP_SAMPLE_SHARE`, default) the fragment text is the same for every count. The count is word 154
+of the 656-byte descriptor the template stores; a compiled probe against `d3d12.h` confirms offset 616 (Quality
+at 620).
+
+**Change.** New preparation stage `scripts/msaa_pipeline_map.py`, run by `player_prepare.py` after the
+default/translation passes:
+- It takes every multisampled resolved record of the translation the player runs. Translated records are
+  rebuilt from the default record plus the translated shaders in the cache, and must reproduce the translation
+  pass's own native key.
+- It sets descriptor word 154 and the key's sample bits to the MSAA in `gt5p_settings.toml`. For 1x the bits
+  are 0 and the count is 1.
+- It computes the new native key and asks the driver to create the pipeline through the existing native batch.
+  No shader is compiled. Each result must be created, with actual == expected == derived key, and every blob must
+  persist (inventory check).
+- It adds the re-targeted rows to the fast lookup table (`extra_rows`), and rewrites the preparation's own
+  menu/race lists so each re-targeted pipeline replaces its source.
+- It never changes the token, the template, prepared shaders or default records. A failure keeps the
+  preparation, and the game creates these pipelines during play as before.
+
+Rollback: `GT5P_PREPARE_MSAA_MAP=0`. A later preparation run after an MSAA change adds that count (output
+folder `ms/<count>`).
+
+**Measured (21:9 ultrawide-native preparation, 8x, build-final engine).**
+- Stage on a copy of `prep-uw`: 6,497 multisampled records were re-targeted to 5,840 distinct 8x pipelines. All
+  were created (5,840 driver calls, 0 rejected) and persisted, in 173 s: about 50 s input, 30 s driver, 80 s
+  verification.
+- The race list re-targeted 964 of 2,113 entries; the menu list 713 of 1,466. The fast lookup table went from
+  12,669 to 18,509 entries.
+- High Speed Ring prepared route, 21:9 8x, all runtime defaults:
+
+| Run | Seed | Excess >50 ms | Frames >50 / >100 ms | Worst frames (ms) | Demand pipelines | Fast-lookup hits |
+| --- | --- | --- | --- | --- | --- | --- |
+| Uon2 (Phase 221) | prep-uw | 4,469 ms | 27 / 18 | 842, 722, 380 | 1,129 | 868 |
+| M8off3 | prep-uw | 3,700 ms | 41 / 18 | 386, 252, 201 | 1,106 | 868 |
+| M8on3 | prep-uw + 8x | 601 ms | 10 / 1 | 170, 100, 86 | 301 | 1,671 |
+| M8on4 | prep-uw + 8x | 643 ms | 10 / 2 | 161, 101, 93 | 301 | 1,671 |
+
+- Without the 8x pipelines the runtime made 2,289-2,310 cached-blob driver calls and about 930 fresh ones. With
+  them it made 2,409 cached and 5 fresh calls.
+- The fast lookup had 10 absent keys, against 935 before.
+- M8off4 matched the other baselines' pipeline counts (1,127 demand, 868 hits), but its frame trace recorded no
+  intervals after the grid, so its frame numbers are left out.
+- The first four runs (M8on/M8off/M8on2/M8off2) failed to reach the grid while the machine was resuming from
+  sleep (slow loading made the scripted presses miss); they are discarded.
+- A race screenshot at 21:9 8x renders normally.
+
+**Tests.** `scripts/test/msaa_pipeline_map.py` covers:
+- the descriptor offset probe;
+- re-targeting to 1/2/4/8, including key bits, the descriptor word and refusals;
+- that only the count changes the key;
+- membership rewriting;
+- optionally (`--report`), that a real preparation reproduces every multisampled key.
+
+`scripts/test/fast_lookup_table.py` still passes.
+
+**Limits.** These are one route and one settings combination. High precision off (`smooth_colour = false`)
+changes the target format of the R16G16B16A16 records too and is not mapped. The roughly 300 remaining demand
+pipelines are draws outside the starter.
+
 ## Phase 222 - RecompLauncher manifest, launcher-edited settings, storage link (2026-11-05)
 
 Branch `feature/recomplauncher-manifest` (commit d4a0272), merged into `feature/hitch-texture-lru`; that branch and its worktree are closed. See

@@ -154,9 +154,10 @@ def enabled(environ=None):
     return value == '1'
 
 
-def write_for_preparation(output, engine, report, high_precision=True, translation_env=None):
+def write_for_preparation(output, engine, report, high_precision=True, translation_env=None, extra_rows=None):
     """Per translation mode in a completed preparation report: write warmup-v1/fp-lookup-v2-<tag>.bin into
-    output/shadercache, merging with a table the game already learned there. Returns a small summary."""
+    output/shadercache, merging with a table the game already learned there. extra_rows ({mode: records}) adds
+    records another stage prepared, e.g. the MSAA re-targeted pipelines (Phase 223). Returns a small summary."""
     ids = report.get('fp_code_identity') or {}
     summary = {}
     if not enabled() or not ids:
@@ -171,6 +172,9 @@ def write_for_preparation(output, engine, report, high_precision=True, translati
         elif extra.get('records'):
             sets[extra['translation']] = translated_records(extra['records'], sets['default'],
                                                             Path(output) / 'shadercache')
+    for mode, rows in (extra_rows or {}).items():
+        if mode in MODES and rows:
+            sets[mode] = list(sets.get(mode) or []) + list(rows)
     for mode, records in sets.items():
         if not records:
             continue

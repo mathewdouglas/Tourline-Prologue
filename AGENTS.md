@@ -36,13 +36,19 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-05, Phase 222)
+## Start here: state of play (2026-11-06, Phase 223)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 222 is the latest).
+has the evidence, newest phase first (Phase 223 is the latest).
 
 ### What works now
+
+- **Prepared pipelines at the player's MSAA (Phase 223, branch feature/hitch-texture-lru):** preparation
+  re-targets the starter's 2x/4x multisampled pipelines (6,497) to the MSAA in gt5p_settings.toml: descriptor
+  word 154 + key bits 16-19, same shaders, driver creation only (`scripts/msaa_pipeline_map.py`, 5,840 at 8x in
+  ~3 min). Fast lookup rows and menu/race lists follow. `GT5P_PREPARE_MSAA_MAP=0` skips. 21:9 8x HSR: excess
+  3.7-4.5 s -> 0.6 s, worst 386-842 -> 161-170 ms, demand pipelines ~1,110 -> 301. HP-off format not mapped.
 
 - **RecompLauncher manifest (Phase 222, from feature/recomplauncher-manifest, merged into feature/hitch-texture-lru):**
   `launcher/recomplauncher.json` starts `tourline-prologue.exe` and edits `gt5p_settings.toml`

@@ -320,6 +320,24 @@ def main():
         raise ValueError('Some entries could not be prepared; normal play remains available. See '+str(out/'report.json'))
     verify_settings(selection,storage)
     report['player_settings']=selection
+    # Phase 223: the multisampled pipelines again at the player's MSAA sample count (driver creation only; the
+    # shaders are shared). Never changes the token or prepared shaders; a failure keeps the preparation.
+    msaa_rows,msaa_mapping=None,None
+    try:
+        import msaa_pipeline_map
+        from interp_pipeline_classes import player_settings
+        shape=player_settings(storage)
+        if shape is None:
+            report['msaa_map']=dict(status='skipped',reason='settings file unreadable')
+        else:
+            result=msaa_pipeline_map.prepare(out,engine,storage,report,translation,shape[0],run_owned,progress)
+            if result['status']=='complete':
+                msaa_rows,msaa_mapping={translation:result['lookup_rows']},result['mapping']
+            report['msaa_map']=msaa_pipeline_map.compact(result)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001 - optional; the game creates these pipelines on demand
+        report['msaa_map']=dict(status='failed',reason=str(exc))
     # Phase 221: the renderer's fast pipeline lookup table for each prepared translation (hints only; never
     # changes prepared shaders, native blobs or the token). GT5P_PREPARE_FAST_LOOKUP=0 skips it.
     try:
@@ -327,7 +345,8 @@ def main():
         from interp_pipeline_classes import player_settings
         shape=player_settings(storage)
         report['fast_lookup']=fast_lookup_table.write_for_preparation(out,engine,report,
-            high_precision=shape[1] if shape else True,translation_env=shader_source_policy.overlay())
+            high_precision=shape[1] if shape else True,translation_env=shader_source_policy.overlay(),
+            extra_rows=msaa_rows)
     except Exception as exc:  # noqa: BLE001 - optional; the game learns the table during play
         report['fast_lookup']=dict(status='failed',reason=str(exc))
     if translation!='default':
@@ -339,6 +358,11 @@ def main():
                 report,out/'shadercache/warmup-v1')
         except Exception as exc:  # noqa: BLE001 - optional; the game learns membership during play
             report['translated_plan']=dict(status='failed',reason=str(exc))
+    if msaa_mapping:
+        try:
+            report['msaa_map']['membership']=msaa_pipeline_map.stage_membership(out/'shadercache/warmup-v1',msaa_mapping)
+        except Exception as exc:  # noqa: BLE001 - optional; the game learns membership during play
+            report['msaa_map']['membership']=dict(status='failed',reason=str(exc))
     template.save_report(out/'report.json',report)
     # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
     # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.
