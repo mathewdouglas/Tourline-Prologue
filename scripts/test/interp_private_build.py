@@ -1,0 +1,197 @@
+"""Private gt5p.exe with the shader-interpreter overlay on the D3D12 backend.
+
+Applies the current local ps3recomp patch, then patches/ps3recomp-shader-interp.patch,
+compiles that backend, and relinks against the read-only reference objects.
+Does not assert the runtime working tree matches an older baseline: that tree
+is dirty. Headers the overlay adds sit next to the patched .c so quoted
+includes resolve there. The reference ninja -I paths still supply the rest.
+
+Also builds fp_interp_precompile.c and vp_interp_precompile.c from the patched
+tree and runs them into scratch/interp-cache, so the interpreter's own DXBC is
+in the private shader cache before the first game launch. This helper compiles
+all variants on each invocation; INTERP_SKIP_PRECOMPILE=1 skips that expensive
+step when the private cache already contains bytecode for the same sources.
+
+Run from an x64 VS environment. The engine link is heavy: call this through
+run_locked.py. Prints the exe path on stdout.
+"""
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import interp_embed
+
+ROOT = Path(__file__).resolve().parents[2]
+RUNTIME = Path(os.environ.get(
+    "GT5P_RUNTIME", r"C:\GT5P-CI\tourline-runtime-cache\d2be355a7fe73c59750f"))
+REFERENCE = Path(os.environ.get(
+    "GT5P_REFERENCE_BUILD",
+    r"C:\actions-runner-tourline-prologue\_work\Tourline-Prologue\Tourline-Prologue\build"))
+
+
+def apply_patch(tree: Path, patch: Path, include: list[str] | None = None) -> None:
+    """git apply rejects a checkout that smudged the patch to CRLF."""
+    data = patch.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    dest = ROOT / "scratch" / "fp-interp" / (patch.name + ".lf")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.is_file() or dest.read_bytes() != data:
+        dest.write_bytes(data)
+    command = ["git", "-C", str(tree), "apply", "--whitespace=nowarn"]
+    for name in include or []:
+        command.append("--include=" + name)
+    command.append(str(dest))
+    subprocess.run(command, check=True)
+
+
+def apply_sources(tree: Path) -> Path:
+    video = tree / "libs" / "video"
+    video.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(tree)], check=True)
+    subprocess.run(["git", "-C", str(tree), "config", "core.autocrlf", "false"], check=True)
+    names = subprocess.check_output(["git", "-C", str(RUNTIME), "ls-tree", "-r", "--name-only",
+                                     "HEAD", "libs/video", "include"], text=True).splitlines()
+    for name in names:
+        target = tree / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(subprocess.check_output(["git", "-C", str(RUNTIME), "show", "HEAD:" + name]))
+    apply_patch(tree, ROOT / "patches" / "ps3recomp-4e8f3ca8-local.patch",
+                ["libs/video/*", "include/*"])
+    apply_patch(tree, ROOT / "patches" / "ps3recomp-shader-interp.patch")
+    # Quoted includes search the source directory first. The typecheck used the
+    # private post-local-patch headers, not the dirty runtime working tree.
+    scratch_video = ROOT / "scratch" / "runtime-src" / "libs" / "video"
+    for header in scratch_video.glob("*.h"):
+        target = video / header.name
+        if not target.exists():
+            shutil.copyfile(header, target)
+    backend = video / "rsx_d3d12_backend.c"
+    for extra in ("rsx_fp_interp.h", "rsx_fp_interp_hlsl.inc", "rsx_fp_interp_backend.inc",
+                   "rsx_vp_interp.h", "rsx_vp_interp_hlsl.inc", "rsx_vp_interp_backend.inc"):
+        if not (video / extra).is_file():
+            raise SystemExit("overlay did not add " + extra)
+    return backend
+
+
+def compile_backend(backend: Path, objects: Path) -> Path:
+    obj = r"ps3recomp\CMakeFiles\ps3recomp_runtime.dir\libs\video\rsx_d3d12_backend.c.obj"
+    command = subprocess.check_output(
+        ["ninja", "-t", "commands", obj], cwd=REFERENCE, text=True).splitlines()[-1]
+    runtime_src = str(RUNTIME / "libs" / "video" / "rsx_d3d12_backend.c")
+    if runtime_src not in command:
+        raise SystemExit("ninja command does not name the runtime backend")
+    (objects / "libs" / "video").mkdir(parents=True)
+    command = command.replace(runtime_src, str(backend))
+    command = command.replace(r"ps3recomp\CMakeFiles\ps3recomp_runtime.dir", str(objects))
+    if " -c -- " not in command:
+        raise SystemExit("unexpected compile command")
+    command = command.replace(" -c -- ", " /D_CRT_SECURE_NO_WARNINGS /W0 -c -- ")
+    if (backend.parent / "rsx_interp_dxbc.inc").is_file():
+        command = command.replace(" -c -- ", " /DRSX_SHADER_INTERP_EMBED_DXBC=1 -c -- ")
+    subprocess.run(command, cwd=objects, check=True)
+    out = objects / "libs" / "video" / "rsx_d3d12_backend.c.obj"
+    if not out.is_file():
+        raise SystemExit("backend object missing")
+    return out
+
+
+def compile_decompilers(fresh: Path) -> list[Path]:
+    """Override archive members with the same patched sources as the backend."""
+    objects = fresh / "decoder-objects"
+    (objects / "libs" / "video").mkdir(parents=True)
+    result = []
+    for name in ("rsx_fp_decompiler.c", "rsx_vp_decompiler.c"):
+        obj = rf"ps3recomp\CMakeFiles\ps3recomp_runtime.dir\libs\video\{name}.obj"
+        command = subprocess.check_output(["ninja", "-t", "commands", obj], cwd=REFERENCE,
+                                          text=True).splitlines()[-1]
+        original = str(RUNTIME / "libs" / "video" / name)
+        if original not in command:
+            raise SystemExit("unexpected decoder compile command: " + name)
+        command = command.replace(original, str(fresh / "tree" / "libs" / "video" / name))
+        command = command.replace(r"ps3recomp\CMakeFiles\ps3recomp_runtime.dir", str(objects))
+        subprocess.run(command, cwd=objects, check=True)
+        result.append(objects / "libs" / "video" / (name + ".obj"))
+    return result
+
+
+def link_engine(fresh: Path, backend_obj: Path, decoder_objs: list[Path]) -> Path:
+    source = REFERENCE.parent / "src" / "gt5p_present.cpp"
+    obj = r"CMakeFiles\gt5p.dir\src\gt5p_present.cpp.obj"
+    command = subprocess.check_output(
+        ["ninja", "-t", "commands", obj], cwd=REFERENCE, text=True).splitlines()[-1]
+    if str(source) not in command:
+        raise SystemExit("present compile command does not name the reference source")
+    objects = fresh / "present-objects"
+    (objects / "src").mkdir(parents=True)
+    command = command.replace(str(source), str(ROOT / "src" / "gt5p_present.cpp"))
+    command = command.replace(r"CMakeFiles\gt5p.dir", str(objects))
+    subprocess.run(command, cwd=fresh, check=True)
+    lines = (REFERENCE / "build.ninja").read_text(encoding="utf-8", errors="replace").splitlines()
+    link = next(i for i, line in enumerate(lines) if line.startswith("build gt5p.exe: "))
+    inputs = lines[link].split("Release ", 1)[1].split(" | ")[0].split()
+    libraries = next(line.split(" = ", 1)[1] for line in lines[link + 1:link + 15]
+                     if line.startswith("  LINK_LIBRARIES = ")).split()
+    runtime = fresh / "install" / "runtime"
+    runtime.mkdir(parents=True)
+    linker = r"C:\Program Files\LLVM\bin\lld-link.exe"
+    args = [linker, "/nologo", "/machine:x64", "/INCREMENTAL:NO", "/subsystem:console"]
+    args += [str(objects / "src" / "gt5p_present.cpp.obj") if item == obj else str(REFERENCE / item)
+             for item in inputs]
+    args.append(str(backend_obj))
+    args.extend(map(str, decoder_objs))
+    args += [str(REFERENCE / name) if "\\" in name else name for name in libraries]
+    exe = runtime / "gt5p.exe"
+    args += ["/out:" + str(exe), "/pdb:" + str(fresh / "gt5p.pdb"),
+             "/implib:" + str(fresh / "gt5p.lib")]
+    subprocess.run(args, cwd=fresh, check=True)
+    for dll in REFERENCE.glob("*.dll"):
+        shutil.copyfile(dll, runtime / dll.name)
+    return exe
+
+
+def install_worktree(exe: Path) -> Path:
+    dest = ROOT / "build"
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(exe, dest / "gt5p.exe")
+    for dll in exe.parent.glob("*.dll"):
+        shutil.copyfile(dll, dest / dll.name)
+    return dest / "gt5p.exe"
+
+
+def precompile_interpreters(tree: Path, cache: Path) -> None:
+    """Build the two precompile tools against the patched headers and run them."""
+    clang = r"C:\Program Files\LLVM\bin\clang-cl.exe"
+    out = ROOT / "scratch" / "fp-interp"
+    out.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
+    for name in ("fp_interp_precompile", "vp_interp_precompile"):
+        exe = out / (name + ".exe")
+        subprocess.run([clang, "/nologo", "/TC", "/O2", "/MD", "/D_CRT_SECURE_NO_WARNINGS",
+                        "/I" + str(tree / "libs" / "video"), "/I" + str(RUNTIME / "include"),
+                        "/Fo" + str(out / (name + ".obj")), "/Fe" + str(exe),
+                        str(ROOT / "scripts" / "test" / (name + ".c")),
+                        "/link", "d3dcompiler.lib"], check=True)
+        subprocess.run([str(exe), str(cache), "0"], check=True)
+
+
+def main() -> None:
+    if os.environ.get("VSCMD_ARG_TGT_ARCH", "").lower() != "x64":
+        raise SystemExit("Use an x64 VS environment")
+    fresh = ROOT / "scratch" / "interp-engine"
+    if fresh.exists():
+        shutil.rmtree(fresh)
+    fresh.mkdir(parents=True)
+    backend = apply_sources(fresh / "tree")
+    if os.environ.get("INTERP_SKIP_PRECOMPILE") != "1":
+        precompile_interpreters(fresh / "tree", ROOT / "scratch" / "interp-cache")
+    if os.environ.get("INTERP_EMBED_DXBC") != "0":
+        interp_embed.generate(backend.parent, ROOT / "scratch" / "interp-cache")
+    obj = compile_backend(backend, fresh / "backend-objects")
+    exe = link_engine(fresh, obj, compile_decompilers(fresh))
+    installed = install_worktree(exe)
+    print(installed)
+
+
+if __name__ == "__main__":
+    main()
+

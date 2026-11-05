@@ -15,6 +15,7 @@ import re
 import shutil
 import struct
 import subprocess
+import time
 
 from shader_coverage import ROOT, MAX_FP, bounded_read, fnv64, fp_identity
 
@@ -103,6 +104,9 @@ def read_slice(source):
 
 class NativeCompiler:
     def __init__(self, decoder):
+        from preparation_profile import enabled
+        self.profile = enabled()
+        self.timings = dict(translation_ns=0, compiler_ns=0, calls=0)
         self.decoder = ctypes.CDLL(str(decoder.resolve()))
         for name in ('rsx_vp_decompile', 'rsx_vp_decompile_gpufetch'):
             function = getattr(self.decoder, name)
@@ -132,6 +136,7 @@ class NativeCompiler:
         return result
 
     def vertex(self, data, gpu):
+        tick = time.perf_counter_ns() if self.profile else 0
         buffer = ctypes.create_string_buffer(data)
         output = ctypes.create_string_buffer(262144)
         name = 'rsx_vp_decompile_gpufetch' if gpu else 'rsx_vp_decompile'
@@ -139,24 +144,55 @@ class NativeCompiler:
         if count <= 0:
             raise ValueError('asset vertex translation failed')
         source = output.value
+        if self.profile:
+            self.timings['translation_ns'] += time.perf_counter_ns() - tick
+            tick = time.perf_counter_ns()
         code, error = ctypes.c_void_p(), ctypes.c_void_p()
         text = ctypes.create_string_buffer(source)
         result = self.compiler.D3DCompile(text, len(source), b'guest_async', None, None,
                                           b'main', b'vs_5_0', 0, 0, ctypes.byref(code), ctypes.byref(error))
+        if self.profile:
+            self.timings['compiler_ns'] += time.perf_counter_ns() - tick
+            self.timings['calls'] += 1
         dxbc, message = self.take_blob(code), self.take_blob(error)
         if result < 0 or not dxbc:
             raise ValueError('asset VS compilation failed: ' + message.decode(errors='replace')[:400])
         return source, dxbc
 
 
+def offline_warmup(environ=None):
+    """Native batches already create/persist their PSOs; do not replay on exit."""
+    value = (os.environ if environ is None else environ).get('GT5P_PREPARE_OFFLINE_WARMUP', '0')
+    if value not in ('0', '1'):
+        raise ValueError('GT5P_PREPARE_OFFLINE_WARMUP must be unset, 0, or 1')
+    return value
+
+
+def native_profile():
+    profile = os.environ.get('GT5P_PREPARE_NATIVE_PROFILE','0')
+    if profile not in ('0','1'):raise ValueError('GT5P_PREPARE_NATIVE_PROFILE must be unset, 0, or 1')
+    return profile
+
+
 def offline_env(game_root, cache):
+    from preparation_workers import compiler_workers
+    from preparation_profile import enabled
+    shader_profile = enabled()
+    profile = native_profile()
     env = {k: v for k, v in os.environ.items()
            if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
            and k.upper() != 'PS3_HEADLESS'}
     env.update(GT5P_ROOT=str(game_root), GT5P_NO_SETTINGS='1', PS3_VERBOSE='0',
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',
-               RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS='2', RSX_PSO_PROVENANCE='0')
+               GT5P_PREPARE_OFFLINE_WARMUP=offline_warmup(),
+               RSX_SHADER_ASYNC='1', RSX_SHADER_WORKERS=str(compiler_workers()), RSX_PSO_PROVENANCE='0')
+    if profile == '1':env['RSX_PSO_PREPARE_PROFILE']='1'
+    dump = os.environ.get('GT5P_PREPARE_SHADER_SRC_DUMP')
+    if dump:env['RSX_SHADER_SRC_DUMP'] = dump  # developer diagnostic (needs the source-dump engine overlay)
+    if shader_profile:env['RSX_PREPARE_SHADER_PROFILE']='1'
+    import shader_source_policy
+    env.update(shader_source_policy.overlay())  # renderer text rollbacks; unset keeps the defaults
     if os.environ.get('GT5P_OFFLINE_FLUSH') == '0':
         env['GT5P_OFFLINE_FLUSH'] = '0'
     return env

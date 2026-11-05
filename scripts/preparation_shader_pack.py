@@ -25,8 +25,12 @@ MAX_SECONDS = 60
 
 
 def dependencies(plan, document, report):
+    if document.get('version') == 3 and any('vp_source' not in r for r in document['records']):
+        from preparation_template_inputs import resolved_document
+        document = resolved_document(document,report)
     validate_preparation(plan, report)
-    records = {r['key']: r for r in document['records']}
+    field = 'input_key' if plan['version'] == 2 else 'key'
+    records = {r[field]: r for r in document['records']}
     if len(records) != len(document['records']):
         raise ValueError('Duplicate template pipeline key')
     expected = expected_shaders(document)  # Reject conflicting source mappings.
@@ -157,7 +161,8 @@ def main():
     ap.add_argument('--resume', action='store_true')
     args = ap.parse_args()
     template = args.template.resolve()
-    plan = read_plan(args.plan)
+    from pipeline_warmup_plan import load as load_plan
+    plan = load_plan(args.plan,template)
     if plan['template_sha256'] != template_digest(template):
         raise ValueError('Shader pack template does not match the phase plan')
     document = read(template)

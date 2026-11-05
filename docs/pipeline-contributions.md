@@ -69,7 +69,7 @@ full-game coverage, or a promise to prepare that many within current worker,
 memory and checkpoint budgets. Prologue and GT5 require separate compatibility
 contracts.
 
-Tourline already ships a version-2 template with vertex/fragment SHA-256
+Tourline ships a format-3 input template with vertex/fragment SHA-256
 identifiers and numeric translation/native pipeline state. A list of hashes
 alone cannot reproduce a pipeline: the same programs can be used with different
 samplers, targets, blend/depth state, vertex layouts and renderer settings.
@@ -144,18 +144,27 @@ outputs are preserved. This export currently requires the same default settings.
 ## File contract
 
 `tourline-pipeline-contribution`, version 1, contains only `schema`, `version`,
-`template_sha256` and the existing format-2 `template`. The SHA-256 covers the
-canonical validated template. The template pins game ELF identity, renderer
-contract/settings, key/root-signature ABI and default translation policy. Records
-contain both program identities, sizes, shader/source identifiers and complete
-numeric translation/native state. No filenames, usernames, timestamps, arbitrary
-annotations, source text, microcode, DXBC or driver blobs are allowed as fields.
+`template_sha256` and `template`. New exports use template format 3. The checksum
+covers the canonical validated template as sent. Format-2 envelopes from older
+players remain accepted: their original checksum/schema are checked before
+conversion to format 3. Renderer output differences do not create new inputs.
 
-Vertex identity is SHA-256 of the bounded original program; fragment identity
-is SHA-256 of its structural program with inline constants normalized. The
-16-character pipeline/source/bytecode identifiers are renderer hashes, not
-SHA-256. A checksum catches changes; it does not authenticate a contributor or
-prove that a pipeline was observed, reconstructed, resident or hitch-free.
+Format 3 pins the original ELF, Windows x64 recipe/key/root-signature ABI,
+default renderer settings and translation policy. It has no renderer source hash.
+Each record contains only `vp` and `fp` SHA-256 identities/sizes, `vp_gpu`, the
+complete numeric `state`, and `native.words` / ATTR input elements. The historical
+field `key` now holds a **64-character SHA-256 input identity**, with domain
+`gt5p-pipeline-input-v3\n`, over sorted, compact JSON of those five input fields.
+It is not a native pipeline key. Native descriptor shader-length words 4/5 and
+8/9 are zero: compilation supplies their actual values locally. Unknown fields,
+nonzero output lengths and an identity/content mismatch fail strict validation.
+
+No `vs`, `ps`, `vp_source`, `fp_source`, native pipeline hash, renderer-source
+pin, filenames, usernames, timestamps, annotations, source text, microcode, DXBC
+or driver blobs belong in a format-3 template. Vertex identity hashes the bounded
+original program; fragment identity hashes the structural program with inline
+constants normalized. A checksum detects changes; it does not authenticate a
+contributor or establish observation, reconstruction, residency or hitch freedom.
 
 Inputs have bounded size, nesting and record counts. Duplicate JSON fields,
 unknown fields, nonfinite numbers, incompatible versions/contracts, conflicting
@@ -178,9 +187,9 @@ python scripts/pipeline_contribution.py review `
 ```
 
 Review accepts at most 16 submissions and 32 MiB total. It deduplicates known
-records, reports additional program/pipeline identities and quarantines conflicting
-versions of a key. It preserves the baseline and never chooses a conflicting
-record by upload order or majority. `candidates.json` is an ordinary format-2
+records, reports additional program/input identities and quarantines a claimed input
+identity with different content. Different numeric inputs have different identities. It preserves the baseline and never chooses a conflicting
+record by upload order or majority. `candidates.json` is an ordinary format-3
 template containing only unambiguous additional records. `review.json` is an
 overlap/conflict report, not shader or native-pipeline verification.
 
@@ -207,8 +216,9 @@ into the player/supplemental maps, retaining exact container coverage in the
 volume map. New containers require separate verified numeric archive locations.
 
 Use the existing `pipeline_template.py prepare` with `candidates.json`, your own
-game/production decoder/engine and a fresh private output. Verify both shaders,
-exact native keys and persisted driver blobs as usual. Unsupported or unresolved
+game/production decoder/engine and a fresh private output. Require successful translation/compilation of both shaders, native pipeline creation,
+persistence and a fresh-process lookup through the runtime cache. The engine
+computes its keys; there are no shipped output expectations. Unsupported or unresolved
 records stay out. A metadata submission alone never authorizes different renderer
 settings, root signatures or capture-derived pass assumptions.
 
@@ -220,8 +230,9 @@ python scripts/pipeline_contribution.py accept `
   --proof <your-local-preparation/report.json> --output <new-merged-template.json>
 ```
 
-Acceptance requires successful default-stage preparation for every exact
-candidate key, matching native results, driver inventory and candidate-file digest.
+Acceptance requires successful default-stage preparation for every exact candidate
+input identity, matching native results, persisted-driver inventory, complete runtime
+lookup counts and candidate-file digest. Output hashes are local report fields.
 Use **your own locally generated report**, never a report supplied by a contributor.
 These files are not cryptographically authenticated against someone editing
 both a template and a purported proof. The command only writes a new merged
@@ -238,3 +249,27 @@ generation and player package, and test representative rendering. New numeric
 contexts also need live acceptance. No contributed shader/program/cache bytes
 belong in git or a release. Templates remain an observed subset; asset-derived
 rules and additional settings/context work remain separate roadmap items.
+
+## Format migration and regression references
+
+`scripts/pipeline_template_inputs.py --template <format-2 bundle> --output <new bundle>`
+converts identifier/numeric metadata only. Add `--warmup-plan <old plan>
+--output-plan <new plan>` to preserve observed membership as input identities.
+The converter preserves the four program/location maps byte for byte. Re-pin
+an enumeration plan's `template_sha256` to the new bundle index with
+`scripts/release/build_enumeration.py` (see coverage-enumeration); for the shipped
+migration it reproduced the existing plan apart from a trailing newline, so program,
+profile and job membership did not change. The shipped path retains `gt5p-disc-v2` for package
+compatibility; its index and shards declare format 3.
+
+For maintainer regression checks, `pipeline_template.py prepare` accepts
+`--reference-template <private format-2 reference>` or `--reference-report
+<private successful format-3 report.json>`. This strict mode compares every
+local source, bytecode and native identifier with that reference before successful
+publication. These references stay outside the starter and submissions. Ordinary
+acceptance proves current-engine construction/persistence/lookup instead of requiring
+an earlier renderer's outputs. A changed renderer may legitimately change outputs.
+
+See [input format design and validation](template-input-format.md). Older helpers
+cannot read format 3; package the matching helper. Format-2 contributions remain
+readable without a renderer-contract reissue, but always need fresh maintainer proof.

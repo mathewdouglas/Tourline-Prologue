@@ -1,0 +1,20 @@
+--- a/libs/video/rsx_d3d12_backend.c
++++ b/libs/video/rsx_d3d12_backend.c
+@@ -4010,6 +4010,17 @@
+     memcpy(copy, src, len);
+     j->h = h; j->src = copy; j->len = len; j->flags = flags;
+     snprintf(j->target, sizeof j->target, "%s", target);
++    /* RSX_SHADER_SRC_DUMP=<dir>[,<max>]: developer diagnostic. Writes the HLSL of each shader queued for the
++     * compiler pool as <dir>/<key>.<target>.hlsl (default-off; the files are derived from the game and must
++     * stay in ignored storage). max defaults to 100000. */
++    { static int ready = 0; static char ddir[400]; static LONG limit = 100000, written = 0;
++      if (!ready) { const char* e = getenv("RSX_SHADER_SRC_DUMP"); ddir[0] = 0;
++          if (e && e[0]) { const char* c = strchr(e, ','); size_t n = c ? (size_t)(c - e) : strlen(e);
++              if (n && n < sizeof ddir) { memcpy(ddir, e, n); ddir[n] = 0; CreateDirectoryA(ddir, NULL); }
++              if (c && atoi(c + 1) > 0) limit = atoi(c + 1); }
++          ready = 1; }
++      if (ddir[0] && written < limit) { char fn[540]; snprintf(fn, sizeof fn, "%s/%016llx.%s.hlsl", ddir, (unsigned long long)h, target);
++          FILE* f = fopen(fn, "wb"); if (f) { fwrite(src, 1, len, f); fclose(f); InterlockedIncrement(&written); } } }
+     memcpy(j->path, path, sizeof path);
+     AcquireSRWLockExclusive(&s_shc_lk);
+     st = shc_slot(h, 1);

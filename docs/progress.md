@@ -9,6 +9,944 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 217 - Dealership logo loading stall: Windows PPU join lifetime (2026-11-05)
+
+Numbered 208 on its investigation branch; renumbered 217 when merged into
+`feature/shader-coverage-scaling`, which already has a Phase 208. The fix is
+default-on; `PS3_PPU_JOIN_WAIT_HOST=0` restores the previous Windows join
+(slot freed at the guest exit event). The rollback switch was added at merge
+and is not separately exercised in game; the rendered repeated-dealer check is
+left to the user.
+
+Investigation branch `investigate/dealership-logo-freeze` starts at main
+37a696f in `../Tourline-Prologue-dealer-freeze`. The user supplied
+`gt5p-debug-20261105-085802-060-37360-1.zip` after Mazda stopped on its logo
+on approximately the fifth entry; audio continued. The private export and
+reproduction evidence stay under `scratch/dealer-freeze/`.
+
+### The supplied export identifies thread creation starvation
+
+All 64 guest thread-table slots are occupied: 34 RUNNING and 30 FINISHED.
+Thread 24 is sleeping for 2,000 microseconds at `0x00B442A0`, returning to
+`0x00B44624`. Original-disc disassembly identifies that as the retry branch
+following failed thread creation at `0x00B44648`, not an SPU ring-space wait.
+The runtime returns CELL_EAGAIN when no FREE table slot exists. The proposed
+worker has entry `0x0132A3E0`, argument `0x400CE8C0`, priority 256 and flags 1.
+
+The renderer still presents: the last present is 28 ms old; the last four
+completed frames each contain only two logo draws. The shader worker is idle,
+all 691 queued native pipelines have completed, and device_lost is zero. The
+FIFO has get=put=`00011080`; render workloads 0/1 are idle with no remaining
+jobs. These observations differ from the older ring/profiling-corruption stalls.
+The two remaining temporary workers' condition waits alone do not establish a
+lost notification. The busy guest `Main Thread` is in its timer-service loop;
+the same loop is busy in the reproduction before exhaustion, so its CPU use
+alone does not identify the cause.
+
+### Measured host join/epilogue race and correction
+
+`sys_ppu_thread_exit` publishes FINISHED and signals `finish_event` before
+longjmp unwinds to `ppu_host_thread_proc`. Windows `sys_ppu_thread_join`
+previously waited only for that event, closed the host handle and marked the
+slot FREE. The old procedure subsequently takes the table lock and writes
+FINISHED again. This can resurrect an already joined slot; early slot reuse
+can also let the old epilogue touch a new thread's descriptor. The latter is a
+structural risk, not a separately observed failure in the user's export.
+
+The compatibility overlay now waits for the host thread handle before join
+cleanup. The wait is outside the table lock, allowing the old epilogue to
+finish. The 64-slot limit, guest scheduling, shader/draw behavior and POSIX
+join path are unchanged. The shared runtime checkouts are not modified.
+
+`scripts/test/ppu_join_lifetime.py` extracts the actual pinned runtime exit,
+host procedure and join functions, with a host-profiler-exit stub holding the
+old procedure before its final table update. The unmodified source reproduces
+premature FREE followed by resurrected FINISHED on the first case. The fixed
+source passes 128 delayed exits/joins, verifying slot ownership until host
+completion and big-endian guest exit status. No game code/data is required.
+
+The original released executable also exhausts its table during a private
+315-second headless repeated-dealership route: its final dump has 32 RUNNING
+and 32 FINISHED slots and the same 2-ms creation retry. This provides an
+in-game counterpart to the deterministic native race. The fixed 315-second
+headless route completes 87 successful thread creations across 63 distinct
+created IDs, ending with 34 RUNNING slots and no retained FINISHED slots.
+The loader is no longer in the creation-retry loop. This verifies recycling
+beyond the baseline exhaustion point, without raising the table capacity.
+
+### Build, reproduction and limits
+
+The candidate recompiles only `sys_ppu_thread.c` against a private copy of
+pinned v0.18.0 plus this branch's compatibility overlay, replaces that member
+in a private runtime library and relinks the retained release object files.
+The cache's baseline executable is byte-identical to the public v0.2.3 engine
+(SHA256 `960f8ec2534b6c03f7305bcbc197ce58469411f4f59754d00fb7dd078deba887`),
+and the baseline thread source matches the release runtime cache after newline
+normalization. Candidate SHA256:
+`576d4c94f2ddc61b46164ab2f24fcafe7379c9c30dba6f48252065c99c82288f`.
+This is a private incremental candidate, not a fresh full release build.
+
+Live tests hold `Local\Tourline-Prologue-Isolated-Validation`, run sequentially,
+read the existing disc assets, and use copied saves and private cache/storage.
+The automated route schedules ten entries into the initially selected dealer,
+with right/left input and Circle between entries. It does not claim Mazda was
+selected, and scheduled button presses alone are not ten visually accepted
+visits. PS3_HEADLESS disables the D3D12 backend, so the blank window captures
+are not visual acceptance. A rendered Mazda/repeated-dealer acceptance run
+remains required before publication; the user's exact session was not replayed.
+No main/tag/release/CI change or general loading-reliability claim is made.
+
+Reproduce the native checks with the repository Python environment, inside
+`scripts/test/isolated_validation.ps1`, passing:
+
+- `scripts/test/ppu_join_lifetime.py --runtime <private-patched-runtime>`;
+- add `--source <unmodified-sys_ppu_thread.c> --expect-legacy` to verify the
+  original race. The source override still uses the selected runtime's headers.
+
+The full overlay reverse-application check passes against the isolated runtime.
+Build identities, logs, fixture output and the candidate remain private under
+`scratch/dealer-freeze/` and `scratch/ppu-join-*/`.
+
+## Phase 216 - Shader interpreter fallback re-verified; not yet a default (2026-11-05)
+
+Branch `t3/interpreter-default` (development, `[skip ci]`; main, tags and releases untouched). The RSX shader
+interpreter fallback (`RSX_SHADER_INTERP=1`, `RSX_SHADER_INTERP_VP=1`: interpret only draws whose specialized shader
+or driver pipeline is pending) stays **default-off**. Details, tables and switches are in
+[coverage-shader-interpreter.md](coverage-shader-interpreter.md#status-phase-216-2026-11-05-re-verified-on-a-corrected-private-build).
+
+- **Correction to earlier readings.** Earlier private interpreter engines were linked with the v0.2.3 decoder objects
+  (no Phase 215 text); the builder now compiles the patched decoders. Every in-game number was re-measured on the
+  corrected engine; the earlier cold/warm tables are replaced.
+- **Closed, verified in game:** the ACURA wordmark (interpreted red 39-40 against specialized 39 in the alternating
+  capture; the cause was the missing "redirected stencil-mask pass forces colour to 1" behaviour); depth-copy and
+  stacked-mip draws (gap counter 0, was 780 / 3,141); the replay vertex omission rise (those were the same draws, and
+  with async pipelines the counter again counts draws waiting on a queued interpreter pipeline); interpreter pipelines
+  persisted as `ipso_*.bin` and created on a worker (0 ms on the replay thread, 0 rejected blobs, 93-142 disk hits in
+  warm runs).
+- **Not done:** creating observed interpreter classes at startup (fragment-only `=1` pipelines contain the specialized
+  vertex shader, unknown until a draw names it); cheaper interpreter shader. Two experiments (decode gating, 16-register
+  files) left the force-mode GPU cost at about 79 ms and were reverted.
+- **Measured (single locked runs, one GPU, one save; Daytona cells repeated):** draws left out fall from 44-216k to
+  1.4-6k per race run; p99 on cold caches is equal within run-to-run spread; High Speed Ring warm equal; Daytona warm
+  slightly worse (p99 27-36 against 24-25 ms; one unexplained 723 ms frame). Cold dealership shows complete materials
+  during compilation but GPU-bound windows up to 260 ms.
+- **Recommendation:** do not make it the default yet; see the document's list of what a default change would touch.
+- **Tooling.** `interp_game_probe.py` gained `--menu-delay` and `--settle`, and now deletes its ~2 GB private game-root
+  copy after each run (`RSX_INTERP_KEEP_ROOT=1` keeps it): a 60-run matrix filled the volume. `interp_matrix_summary.py`
+  tabulates probe runs. Foreground loss by other windows rejects frame tests (the driver retries them).
+
+## Phase 215 - De-specialized shader text: cheaper to compile, same shaders (2026-11-04)
+
+Preparation cost is dominated by the D3D compiler, so the generated HLSL was made cheaper without changing what
+it computes. Four generator changes are now **default**, each with a renderer switch (`0` restores the previous text)
+and a helper-side rollback that must also be set for the game run (the text is the cache key). Full details,
+tables and the equivalence method are in
+[coverage-enumeration](coverage-enumeration.md#de-specialized-shader-text-phase-215-now-default).
+
+| Change | Renderer switch | Helper rollback |
+| --- | --- | --- |
+| Looped GPU vertex fetch (one loop over the attribute mask) | `RSX_VFETCH_LOOP` (2; 1 or 0 for older text) | `GT5P_PREPARE_VFETCH_LOOP` |
+| Fragment register files sized to the highest literal index | `RSX_FP_REG_SIZE=0` | `GT5P_PREPARE_FP_REG_SIZE=0` |
+| sRGB helper functions only when called | `RSX_FP_GAMMA_LAZY=0` | `GT5P_PREPARE_FP_GAMMA_LAZY=0` |
+| No output encode when a stencil-mask pass forces its colour to 1.0 | `RSX_FP_MASK_ENCODE=0` | `GT5P_PREPARE_FP_MASK_ENCODE=0` |
+
+The changes live in the main runtime patch (`patches/ps3recomp-4e8f3ca8-local.patch`, only the three decoder/backend
+sections changed; the standalone vertex-fetch overlay patch was folded in and removed). The format-3 starter, plan,
+maps and warmup plan are byte-identical to Phase 214: the starter holds inputs only, so no re-key was needed. Engine
+and helper hashes change, so existing generations are not reused for the new text; rollbacks get their own
+generation.
+
+**Equivalence (no output claim rests on a sample alone).**
+- Vertex: all 1,120 enumerated vertex programs bit-identical on the RTX 4060 (128,450,560 values, 0 differences).
+- Fragment registers: rollback text equals the previous decoder for 7,929 of 7,929 catalogue programs; the default
+  compiles to byte-identical bytecode for 94.6-95.0% of 4,141 sampled programs and to an identical instruction
+  stream for every other one (the declared `dcl_indexableTemp` size is the only difference).
+- Enumeration, 22,194 jobs: lazy-helper and mask-encode changes leave every DXBC unchanged; the full frozen helper run
+  with all four rollbacks set equals the format-2 reference exactly.
+
+**Measured.** Enumeration stage 504.3 -> 262.0 s (seeded). Frozen full 12,669-record preparation, consecutive runs:
+249.9 -> 158.6 s until native input is published, then 204.9 -> 176.9 s to finish (stage-times pairs: vertex
+104-107 -> 19-20 s, fragment ~150 -> 126-141 s). Cancellation at native input and resume pass (retained shaders
+4,230-4,231, 627 vertex programs and all fragment jobs reused, 12,669/12,669/12,669 native, the previous selection
+preserved). In game (dealership, High Speed Ring, Daytona; 720p 1x and 1080p 2x MSAA) GPU time and frame statistics are
+the same within noise, with no PSO failure or device removal, and the window shots look the same. The looped fetch
+has no measurable GPU cost, so `RSX_VFETCH_LOOP=1` was not needed.
+
+**Axes.** Of 19,094 distinct fragment sources, removing the sampler-lane axis could save at most 2,482 (13%), the
+gamma bits 1,810 (9.5%), both 4,360 (22.8%) if they became run-time values; that needs renderer uniform
+plumbing, is not provably identical and was not implemented (design in the coverage document). A different finding was
+implemented: 1,293 sources compile to the same bytecode as a sibling, 1,001 of them stencil-mask passes whose colour is
+forced to a constant after the output encode was added (the mask-encode change; 235 sources merge, 1.2%, within timing
+noise). 817 + 94 sibling pairs remain uninvestigated.
+
+**Limits.** One GPU, one save, a few routes, consecutive-run timings with run-to-run variation (an earlier defaults
+run on a busier machine was 619 s end to end, so do not compare numbers across sessions). Only the combination of the
+four helper rollbacks was run through the frozen helper; each switch alone was not (their plumbing is unit-tested and
+the combined rollback is exact). The 780 enumeration jobs whose bytecode differs between the first two changes and
+the full rollback were not disassembled individually. `reject` through the frozen helper and
+whole-game/other-GPU/stutter claims are not made. Published v0.2.3 is unchanged.
+
+## Phase 214 - Renderer-independent pipeline input templates (2026-11-04)
+
+Format 3 replaces shipped renderer-output expectations with canonical inputs.
+The starter remains **12,669 records / 3,446 original program identities**;
+all program identities/sizes, numeric translation/native state, GPU-fetch modes
+and ATTR layouts are preserved. Shader/source/native identifiers are removed,
+and compiled shader-length descriptor words are zero until preparation. Each
+64-character `key` is a domain-separated SHA-256 of the complete canonical
+input record. ELF, key/root-signature ABI, translation policy and default settings
+stay pinned. The renderer source fingerprint is no longer a template gate.
+There is no renderer/runtime behavior or patch change in this phase.
+
+The converter `scripts/pipeline_template_inputs.py` reads format 2, drops outputs,
+computes input identities and remaps observed phase membership. Format-2 envelopes
+keep their original checksum validation before conversion. Output-only differences
+collapse to one input; review quarantines claimed identity/content conflicts.
+The 99-shard starter/index and plan are migrated together. All four program/location
+maps remain byte-identical. Enumeration only re-pins its input-template digest;
+program/profile/job membership is unchanged. Current input bundle index SHA-256:
+`aa2e1ea6e686b9133386446e057bcb895de0414aa4d64de52df578cc02030fbc`.
+
+Preparation uses the existing bounded derive workers, actual installed engine/decoder
+and native request ABI. The host derives a proposed key from locally produced
+shaders and the pinned ABI; the engine independently computes its actual key,
+creates the pipeline and persists the result. Fresh native processes then repeat
+every unique request through the runtime's normal driver-blob lookup. Every request
+must use its persisted blob, and all final recipe/shader/driver inventory checks
+remain mandatory. Outputs exist only in local reports/checkpoints. Maintainer-only
+`--reference-report` / `--reference-template` optionally compare every local source,
+bytecode and native identifier with a private reference before publication.
+
+Warmup plan version 2 stores input identities. Successful local results supply
+native membership and shader-pack dependencies, including standalone pack generation.
+Observed membership remains **1,466 menu / 2,113 race / 3,546 distinct**; no new
+phase ownership is inferred. The plan byte ceiling grows to 1 MiB for SHA-256
+identities; its target ceiling remains 4,096. Player generations pin actual engine/
+decoder hashes and saved settings, independently of the shipped source fingerprint.
+Cancellation/failure preserves the previous selection and cache. Format-2 generations
+can supply bounded driver hints after outputs are derived; their shaders are compiled
+again because they lack input-keyed derivation manifests. Engine-matched format-3
+generations can also reuse checked shader derivations. No learned recipes, packs or
+membership are imported. Existing worker, memory, native chunk and ownership limits stay.
+
+**Full frozen proof.** A private engine recompiles only the current backend and
+links read-only reference objects; engine SHA-256 is
+`8673bc002af3aec7bc8481b643cb84a76d4599a518b9ecde2696ded3b029e0e6`.
+`scripts/release/build_preparer.py` builds the frozen helper. Direct original-volume
+preparation starts in fresh private storage with a clean PATH and no reuse. At
+native input, controlled cancellation exits 2 in 354.82 s, preserving the old
+selection/cache and retaining 4,231 shader files. Resume reuses all 627 vertex
+variants and 12,669 fragment jobs and completes in 563.32 s wall / 520.45 s internal.
+All **12,669** source/bytecode/native outputs exactly match the current format-2
+reference from `ab77487`. First native requests/created/driver calls/cached calls:
+**12,669 / 12,669 / 12,669 / 0**. Fresh-process runtime lookup:
+**12,669 / 12,669 / 12,669 / 12,669**. Inventory has 12,669 recipes, 12,669 valid
+driver blobs and zero rejected entries. Both packs publish (555 menu / 1,092 race
+source entries), and native phase indices have the unchanged observed membership.
+The separate frozen fresh 32-record smoke proof passes the same reference and
+runtime lookup checks. Shader enumeration is explicitly disabled in these native
+proofs to isolate starter preparation; its plan-load/pin/checkpoint tests run separately.
+These are application-cache-fresh/cancel-resume proofs with OS/driver caches preserved,
+not driver-cold timings, speed claims or live-draw/stutter measurements.
+
+**Compatibility and controls.** New exports use format 3; format 2 converts on load,
+including contributions in the wild and native-key plans with their original bundle.
+The directory remains `gt5p-disc-v2` for package-path compatibility. Old frozen helpers
+need updating. `GT5P_PREPARE_INPUT_TEMPLATE=0` requires a separate format-2 template
+and restores its source/output gates; it safely rejects format 3. Format 3 uses
+bounded fragment batches with existing `GT5P_PREPARE_FRAGMENT_CHUNK=1..4096`
+(default 256); legacy fragment rollback requires the format-2 path. Published
+v0.2.3, main, tags, releases, normal draw/async policy and runtime patches stay unchanged.
+
+See [format design, migration and limits](template-input-format.md),
+[contribution contract](pipeline-contributions.md#file-contract) and
+[preparation workflow](shader-precompile.md). Focused template/contribution/coverage,
+plan/pack/reuse/enumeration/package/collection/re-key/runtime-coverage regressions
+pass sequentially under `C:\tmp\gt5p-testlock\run_locked.py`. Native evidence is
+`scratch/if3/{smoke32,full}/validation.json` (private; removed after this phase,
+small summaries kept).
+
+**Remaining acceptance (all frozen helper, direct original-volume, enumeration
+disabled, one locked run each).**
+
+- *Format-2 generation -> format-3 incremental reuse (32 records).* A real format-2
+  seed (`GT5P_PREPARE_INPUT_TEMPLATE=0`) feeds a format-3 run: 32 driver blobs copied
+  (963,688 bytes), zero shaders copied (format-2 generations lack input-keyed
+  derivation manifests, so shaders compile again), none rejected. All 32 outputs
+  exactly match the reference; native 32/32/32/32, runtime lookup 32/32/32/32;
+  the old selection and cache are unchanged. 19.9 s.
+- *Format-3 growth (33 records from the 32-record cache).* Input-keyed derivation
+  manifest reuse plus one new record: 33/33 exact, native 33/33/33 with 32 driver
+  calls reusing blobs, one blob missing (the new record) and created; runtime lookup
+  33/33/33/33; old cache unchanged. 12.4 s.
+- *Renderer-source comment probe.* A harmless source change (private engine built
+  with one extra comment line, plus the helper's patch-resource) gives the **same
+  template digest** (`378f0016...`) and a **different engine hash**
+  (`8673bc00...` -> `a8011517...`); no template, plan or gate change is needed, and
+  32/32 exact outputs, native 32/32/32 and runtime lookup pass. Under format 2 this
+  change invalidated the source-contract gate.
+- *Maintainer strict reference comparison* (`--reference-template`, native
+  regression driver, 32-record fixture): 32/32 prepared against the reference with
+  native 32/32/32/32 and lookup 32/32/32/32, zero vertex/fragment workers (all
+  derivations reused), the renderer source fingerprint never read, an incorrect
+  reference rejected without a report, a corrupted derived shader refused at resume,
+  and the source cache/selection preserved. *Native pack reader* against the full
+  12,669-record generation: PASS disabled reader and production lookups (menu 555 /
+  race 1,092 entries), bytecode identities, miss fallback and blob ownership.
+
+**Defect found and fixed.** Growth from a cache with usable input-keyed hints failed
+with `'total'`: `pipeline_translation.py` reported `reusing-cache` progress with
+`completed` but no `total`, and the player's status formatter indexed `counts['total']`.
+Reuse progress now carries a total, and the formatter tolerates a missing total.
+A first reuse attempt also failed once with Windows error 1450 (insufficient system
+resources) creating vertex workers while the machine was short of memory (about
+1.7 GiB physical free at the time); the identical run alone through the lock passed
+(twice, including after the fix), so it is attributed to the environment. Job
+objects and handles are released per pool; no leak was observed, but none was
+measured directly.
+
+**Rebase onto `feature/shader-coverage-scaling` (69dcaa0).** Clean, no textual
+conflicts (the enumeration speed work touches `preparation_enumeration.py`,
+`preparation_workers.py`, `shader_vertex_batch.py` and adds opt-in overlay patches).
+The official `scripts/release/build_enumeration.py` re-pin against the format-3
+starter reproduces the shipped `plan.json` byte for byte except one trailing
+newline (kept as committed); fragment jobs 34,355 / profiles 1,540 are unchanged.
+After the rebase the focused regressions (template, inputs, contribution, coverage,
+warmup plan, shader pack, reuse, enumeration, vertex batch, package, collection x3,
+re-key, runtime coverage) pass, and the helper was rebuilt from the rebased tree for
+a repeat frozen 32-record smoke (exact 32/32, native/lookup 32/32, cancel at native
+input in 14.4 s with 38 shaders retained, resume reuses 16 vertex programs and 32
+fragment jobs, both packs written). The 12,669-record fresh run predates the rebase
+and was not repeated (hypothesis: unaffected, since the rebase only adds the
+enumeration/worker-count speed work and enumeration is disabled in that run; the
+new automatic worker default can change worker counts, not outputs).
+Two test-harness items surfaced: the 32-record cancel trigger raced the status
+debounce once native input became faster (the subset run now cancels on any
+`Native input` status and polls at 5 ms; the full run keeps the strict trigger), and
+`collection_search_map` lacked the enumeration asset the packager now requires
+(fixture fixed).
+
+No whole-game/settings, GT5, other-GPU or stutter claim follows. Push only the
+feature branch with `[skip ci]`.
+
+## Phase 213 - Fragment sample sharing by default, with a re-keyed starter (2026-11-04)
+
+`RSX_FP_SAMPLE_SHARE` (Phase 212's coverage experiment, previously opt-in `=1`)
+is now **on unless it is exactly `0`**. A one-sample and a multisample profile
+of one fragment program compile to one pixel shader; `SampleDesc.Count` and
+everything else about the pipeline is unchanged. The separate overlay patch is
+folded into `patches/ps3recomp-4e8f3ca8-local.patch`, so CI/setup apply one
+patch. See [coverage-sample-share](coverage-sample-share.md) for the design.
+
+**Patch.** The fold is a surgical 18-line edit to the existing patch (hunk
+counts/offsets adjusted), not a regenerated diff: an earlier regeneration with
+`git diff` rewrote ~19,000 lines and, through a blanket string replacement, had
+also flipped the `RSX_CLEAR_TRACE` and `RSX_TEX_DIMDBG` diagnostics to
+default-on; it was discarded. Applying the old and new patches to fresh trees
+at `4e8f3ca8` differs only in `libs/video/rsx_d3d12_backend.c`, by the two
+intended hunks (20 diff lines, no CR changes). `ps3recomp-shader-interp.patch`
+still applies. A private engine (the v0.2.3 reference objects with only the
+patched backend recompiled and relinked, SHA-256 `26ce6760...`) is built from
+it. `fp_sample_share_native.py` proves the switch (unset/`1`/`2`/empty/`00`
+share, `0` does not; units 17/18 are not cube units).
+
+**Re-key.** The renderer contract moves `e266e6af...` -> `2250280f...`. One
+fresh full preparation with the new engine (624.9 s) proposes new fragment
+identifiers and native keys; `scripts/pipeline_template_rekey.py` accepts them
+only for one-sample records and only if each native `actual` key equals the
+proposal. Result: 6,172 of 12,669 records change (6,151 new keys; 21 changed
+fragment text only, same DXBC and key); 6,497 multisample records, all vertex
+fields, the four maps and (remapped old to new key) warmup membership are
+unchanged. Distinct fragment sources 6,990 -> 3,604, pixel-shader bytecodes
+6,965 -> 3,592. The plan (1,466 menu / 2,113 race, 3,546 distinct) is re-pinned
+to template digest `d603d90d...`. `pipeline_rekey_contract.py --baseline cf08d79`
+and the synthetic `pipeline_template_rekey.py` (scope, MSAA/vertex preservation,
+creation/actual, collision, plan pin) pass.
+
+**Strict acceptance of the re-keyed starter** (private engine, cache/outputs
+removed afterwards; original game files read-only):
+
+| Check | Result |
+| --- | --- |
+| Frozen helper, direct from the game volume, clean PATH, fresh storage; cancel once native input starts | exit 2, old selection and old cache snapshot unchanged, 4,231 shader files retained, state `interrupted` (320.5 s) |
+| Resume the same generation | all 12,669 prepared; 12,669 recipes / valid driver blobs, 0 rejected; both shader packs written (555 menu / 1,092 race shaders); warmup indices written; 382.4 s wall (371.6 s internal); pointer switched only after success |
+| Same starter, old `=0` engine behaviour (old starter, non-frozen path) | 12,669 prepared, 0 rejected (723.8 s): the rollback reproduces every old record |
+| Incremental run from that pre-re-key generation (frozen helper) | 12,669 prepared in 379.4 s; reuse copied 4,013 shaders and 3,488 driver blobs (268 MB), 0 rejected, but the existing 60 s / byte budget skipped 3,500 blobs, so it is no faster than the fresh resume |
+| `ultrawide-native` and `native-scaled` additional translations, first 64 records (all one-sample) | default 64/64 and extra 64/64 prepared (39.1 s / 28.9 s) |
+
+**In game** (private engine, fresh copies of the prepared cache per run,
+`PS3_VERBOSE=0`, `GT5P_PRESENT_PROF=1`, PrintWindow shots inspected). A =
+default sharing + re-keyed cache. B = `RSX_FP_SAMPLE_SHARE=0` + the pre-re-key
+cache (previous behaviour). C = `=0` + the re-keyed cache (rollback). GPU is the
+mean of `[present-prof]` 5-second averages (first sample dropped); "new DXBC" is
+files the run added to its cache copy. No PSO failure or device-removed line in
+any log.
+
+| Scene | A GPU ms / new DXBC | B | C |
+| --- | ---: | ---: | ---: |
+| Dealership 720p, 1x MSAA | 4.30 / 10 | 4.16 / 10 | 4.47 / 250 |
+| Dealership 1080p, 2x MSAA | 6.22 / 8 | 6.05 / 8 | 6.38 / 248 |
+| HSR 720p, 1x (60 s frame test) | 4.83 / 12 | 5.09 / 12 | 5.19 / 1,721 |
+| HSR 1080p, 2x | 5.36 / 8 | 6.00 / 8 | not run |
+
+HSR frame test (FPS / median / p99 / late share): 720p A 58.2 / 16.7 / 24.1 ms /
+2.8%; B 59.1 / 16.7 / 20.5 / 1.6%; C 55.2 / 16.7 / 59.1 / 6.7%. 1080p/2x A 59.6 /
+16.7 / 20.2 / 1.1%; B 58.9 / 16.7 / 18.8 / 0.8%. All dealership runs: 30 fps,
+2,150-2,225 draws. Dealer and race frames show the same showroom (cars vary per
+visit) and the same track, HUD, crowd, shadows and mirror. These are single runs
+on one GPU/save/route: the A/B GPU and frame-time differences are inside
+run-to-run variation, shots are not phase-locked pixel-identical pairs (HSR A/B
+frames differ by mean absolute channel sum 34-36 at 1080p, with the car at a
+slightly different place), and the large C counts are the effect to note:
+with the re-keyed cache `=0` has no prepared one-sample entries, so it compiles
+them on demand and the 720p race shows more late frames (p99 59 ms). Cold
+driver-cache, other tracks/cars/settings and ultrawide in-game were not run.
+
+**Not changed.** Published v0.2.3, main, tags and releases; vertex state and
+maps; observed membership. Old ordinary player caches are left alone; recipes
+learned before this phase may still replay old-key one-sample shaders until the
+14-day pruning removes them. No whole-game, all-settings or stutter claim.
+
+Evidence/tools: `scripts/pipeline_template_rekey.py`,
+`scripts/test/{pipeline_template_rekey,pipeline_rekey_contract,player_rekey_frozen_native,fp_sample_share_native,fp_sample_share_build,fp_sample_share_batch}.py`.
+Every run used `C:\tmp\gt5p-testlock\run_locked.py` one at a time; private
+builds, caches and game copies are removed, and timing metadata stays in this
+document.
+
+## Phase 212 - Verified content-sweep starter expansion (2026-11-04)
+
+The 1080p/2x MSAA/default-16:9 content sweep contributes **7,000 verified
+records**. The development starter is **12,669 records / 3,446 original programs
+(622 VP, 2,824 FP)**; all previous 5,669 records are preserved exactly. The
+7,790-record delta reviews to 7,790 additions and zero further conflicts. Of
+these, 790 remain `unresolved-program`, depending on 185 fragment identities
+absent from the supplied catalogue and existing program-location maps. There
+are zero incompatible shader, unsupported-state or native-key rejections in
+the completed candidate reports. The sweep's earlier 47 conflicting keys remain
+quarantined and do not appear in the delta or new additions. No pending record
+is promoted because its metadata was observed or its program hash looked valid.
+Original `delta-candidates.json` SHA-256:
+`0814f1589f6f0c1881ed3dd0e100a2ba666fbd7c805b9e1c597d623b417702fe`.
+
+**Explicit contract reissue.** Despite the v0.2.3 reference engine used for the
+sweep, its exports actually pin Phase 210's renderer source hash
+`a0d3444f77ffe9d1cb0fd2301e2e76607c1d28993166f6c740975f981e802c43`,
+not the published v0.2.3 pin `227c1fcd...`. This discrepancy is recorded rather
+than silently treating the inputs as already current. The candidate ELF,
+settings, key/root-signature ABI and translation policy match the current
+starter. Only `renderer_sha256` is reissued to Phase 211's `e266e6af...` in a
+private copy; every record stays identical. Reapplying the current main patch
+to its pinned upstream sources and comparing with the reference runtime finds
+73 patched files unchanged, including both decompilers and reconstruction
+headers. The only differences are backend profiling/offline input/result
+transport and its new `rsx_offline_batch.h`; rendering keys, translation calls,
+compiler flags and descriptor construction are unaffected. Fresh exact shader
+and native proofs below independently gate acceptance. No runtime patch or
+default is changed by this metadata update; sample sharing and the other
+coverage experiments stay off.
+
+**Original assets and player lookup.** Fragment catalogue filenames hash raw
+payloads including constants; matching instead uses `fp_identity` with inline
+constants normalized. Vertex matching hashes the bounded, word-swapped program,
+including candidate lengths within original SHDS wrappers. Catalogue source
+offsets and the existing player map locate 2,436 of 2,621 candidate program
+identities, leaving the 185 FP identities above. All source container/program
+hashes and bounded slices are checked. No deleted private recorder trace is
+used, no hash is treated as an asset offset, and no new extraction is made.
+
+Independent packed resolution hashes the original 2,052,954,112-byte GT.VOL,
+the ELF, 298 containers including ELF, 1,811,994,944 decoded bytes and every one
+of the merged starter's 3,446 program slices (13.17 s). Numeric
+volume locations add 96 members already verified in the unchanged 592-member
+search map: 201 -> 297. The complete player map adds 1,565 identities (145 VP,
+1,420 FP); supplemental asset locations are extended too. Old player/archive
+rows are preserved. Maps use compact JSON to stay below the existing 1 MB Git
+file guard; no allowlist or guard is relaxed. The 99-shard bundle/index and
+warmup-plan digest are reissued together. Observed menu/race membership stays
+unchanged; new keys are not assigned invented preload ownership.
+
+**Fresh candidate and acceptance proof.** Eight separate locked preparation
+runs use fresh private outputs/application caches, the current Phase 211 backend,
+production VP decoder, default settings and `RSX_FP_SAMPLE_SHARE` unset. Their
+requested sizes are seven chunks of 1,000 and one of 790. Completed counts total
+7,000 prepared / 790 unresolved; summed internal preparation is
+618.79 s (OS/driver caches preserved). Both rebuilt shader/source
+identifiers, exact native keys and persisted driver blobs are required. The
+four partially successful chunks are filtered by successful proof and complete
+player locations, then prepared again from GT.VOL in new outputs with verified
+shader/driver reuse (112.34 s total). `pipeline_contribution.py accept` consumes each exact candidate digest and its own local complete proof;
+report digests are never relabelled to fit a subset. The coherent union is
+written only after these gates. Private engine SHA-256:
+`862f6687c6bef5d34a4b3fab87b1d159cc915fc218d31fde8d19da0e82273bc7`.
+
+**Full frozen acceptance.** A fresh private `scripts/release/build_preparer.py`
+build runs the enlarged starter directly from the original packed game, with
+a clean PATH, default translation and no previous-cache reuse. Invalid template
+rejection and vertex-stage cancellation preserve the old selection/cache.
+Cancellation retains 8 shader files; resume revalidates
+them and completes every pipeline in the same originally empty generation.
+Both shaders, all 12,669 native keys and persisted driver blobs pass; native chunks
+are 4096, 4096, 4096, 381, with requests/created/
+driver_calls/cached_blob_calls = 12669/12669/12669/0. Both local shader packs
+publish. Resume wall time is 564.62 s; its internal preparation
+is 553.85 s. This is fresh application-cache
+acceptance with checkpoint reuse, not driver-cold timing or an incremental
+growth benchmark. The complete locked harness (installation copy, rejection,
+cancellation and resume) spans 610 seconds in the second-resolution lock log.
+An initial Visual Studio diagnostic was treated as a terminating PowerShell
+wrapper error; that helper output was discarded and a fresh private helper was
+built with native stderr retained and explicit exit-code checks. No product
+validation guard was changed.
+
+Focused template, contribution, asset-map, packed-search, template-coverage,
+warmup-plan, shader-pack, catalogue-growth, search-map/package and translation
+regressions pass separately under the lock. Final coherence checks verify
+strict JSON input, quarantined keys, exact old-record/location preservation,
+complete maps, every native proof, current contract, LF index pin, unchanged
+observed membership and strict package metadata allowlists. A foreground HSR
+route uses a copy of the full prepared cache at 1080p/2x/16:9, with ordinary
+async policy; inspected window-only race samples verify representative
+presentation. It is a single route, not visual acceptance of every added state
+or a stutter measurement.
+
+Evidence: `scratch/s/` contains contract/input pins, review, map proof, chunk
+summaries, frozen/coherence results and window shots; full preparation reports
+are retained compressed in `scratch/s/evidence`. Every test, compiler/build,
+preparation/native and game run uses `C:\tmp\gt5p-testlock\run_locked.py`, the
+shared validation mutex and `tasklist` preflight. The retained private controllers
+ran `work.py prepare 0..7`, `work.py accept 0..7`, `full.py`, the ten named
+`scripts/test` suites, `coherence.py` and `live.py`, each run separately locked.
+Private build/helper outputs,
+game fixture and shader/driver caches are removed after recording evidence;
+original inputs and other checkouts remain read-only. No whole-game, all-car,
+all-camera, arbitrary-settings, GT5, multi-GPU or hitch-free claim follows.
+The 790 pending records need independently located original programs; deleting
+the sweep traces does not authorize reconstructing missing bytes from hashes.
+Published v0.2.3, main, tags and releases stay unchanged; push only this branch
+with `[skip ci]`.
+
+## Phase 211 - Shader-stage profiling and fewer preparation file opens (2026-11-03)
+
+`GT5P_PREPARE_SHADER_PROFILE=1` adds default-off aggregate instrumentation.
+Vertex workers report translation and D3DCompile intervals once at shutdown;
+the owner reports startup, dispatch, acceptance, checkpoint callbacks, idle
+polling and shutdown. Fragment batches report raw input reads, translation/queue
+submission, throttle/drain waits, accumulated compiler/persistence intervals and
+queue residence, with host staging/process/result intervals. These are elapsed
+intervals, not sampled CPU time. Worker totals, queue residence and owner waits
+overlap and must not be added to wall time. Normal gameplay never enables them.
+
+The full control's 482 vertex variants take 120.46 s wall, with 472.35 s accumulated
+in four compiler workers, 0.072 s translation and 0.479 s checkpoint callbacks.
+Its main fragment batch spends 402.35 s accumulated in compiler calls versus
+1.04 s translation/submission. The bounded queue remains occupied; its 98.02 s
+owner throttle and accumulated queue residence overlap compiler execution. This
+does not identify polling or translation as a large remaining optimization.
+The host instead spends 8.61 s staging fragment inputs and 9.37 s reading results.
+
+Native preparation now capability-gates `GT5P_OFFLINE_CODE_V1` alongside V2
+recipe/result handoff. `GT5P_PREPARE_CODE_BUNDLE=auto` is the default; `=0`
+restores individual reads and repeated code timestamp operations, while `=1`
+requires matching capabilities. The private transient transport contains a
+16-byte header, at most 8,192 numeric index entries and 128 MiB of bytecode.
+Host writes stream existing verified references without another bytecode copy;
+incomplete pooling/budget overflow falls back to the existing individual path.
+The native owner validates exact layout, sizes, offsets, uniqueness, complete
+checksums, DXBC markers and every recipe dependency before any requested driver
+call. It never mixes an invalid/incomplete bundle with disk fallback. Owned
+arena bytes are freed on completion. The successful helper removes only the
+transient request bundle after native children exit; interrupted transports are
+rebuilt on resume. Durable shader checkpoints/cache formats and full final
+persistence verification are retained. Shared durable code timestamps need the
+existing successful operation once per code per native batch, avoiding repeated
+metadata opens while preserving that generation's retention timestamps.
+
+The fragment host defaults to `GT5P_PREPARE_FRAGMENT_IO=1`; `=0` restores the
+earlier per-request checks/rereads. Raw input is checked/written once per distinct
+program per chunk, with complete-byte identity checks. Native children finish
+before results are read. The existing opened-handle size/sentinel reader checks
+each distinct output key once per chunk into the existing 128 MiB pool. A key
+seen in another chunk must match the complete retained bytes; collisions or
+changed outputs still reject. Source/code IDs, native keys, chunk callbacks,
+checkpoint publication and cancellation ownership stay mandatory/unchanged.
+
+Three ordered, profiled, application-cache-fresh full runs use default translation,
+four compiler workers, the same original packed volume/ELF and all 5,669 records.
+The first two share one private engine and the earlier fragment host; the final
+run adds the fragment host changes with another private build of the same runtime
+patch. Hardware: i5-12400F (6C/12T), 16 GB RAM, RTX 4060, driver 32.0.16.1088;
+`PS3_VERBOSE=0`. OS/driver caches are retained. This is a development series,
+not ABBA or a driver-cold test.
+
+| Measured cost | Individual code reads | Native bundle | Final fragment I/O |
+| --- | ---: | ---: | ---: |
+| Full preparation | 364.20 s | 313.25 s | 313.98 s |
+| Vertex batch wall | 120.46 s | 120.55 s | 114.77 s |
+| Fragment stage wall | 128.98 s | 120.78 s | 111.09 s |
+| Fragment host input/results | 17.98 s | 15.56 s | 1.28 s |
+| Native stage process wall | 76.67 s | 36.68 s | 53.12 s |
+| Native shader/bundle loading | 22.11 s | 0.236 s | 0.225 s |
+| Driver creation | 24.57 s | 9.57 s | 25.35 s |
+| Recipe/code persistence | 11.39 s | 8.51 s | 8.85 s |
+
+Final preparation is 50.22 s / 13.79% shorter than the control. The middle run's
+driver interval changes substantially; it must not all be credited to transport.
+The final driver interval is closer to the control, but compiler and other
+timings still vary, so this is not a universal speedup claim. Native individual
+code reads fall 4,468 -> 0, replaced by two bundle reads; 6,870 repeated timestamp
+operations are skipped. The bundle carries 4,067 code bodies / 62,189,856 payload
+bytes (62,254,944 serialized bytes). Native arena highwater is about 59.3 MiB;
+the previous first chunk's code cache was about 51.0 MiB. Final fragment input
+checks are 1,406 for 3,696 exact requests, and 3,609 distinct output reads. Output
+file count stays 20,926: this reduces opens/rereads, not the durable cache layout.
+The transient bundle is confirmed absent after successful preparation.
+
+Every full run compiles 482 VP variants / 3,696 exact fragment requests (3,609
+canonical compiler jobs), with zero application shader reuse. All 5,669 exact
+native requests and persisted blobs pass in 4,096/1,573 sequential chunks, with
+zero supplied cached-driver-blob calls. Menu/race packs match each other and
+Phase 210 byte-for-byte. No native concurrency, draw-policy, root-signature/key
+ABI, compiler/job memory cap or coverage change is introduced. The conservative
+runtime source fingerprint and all starter/plan/index pins are reissued;
+all 5,669 records, maps and observed warmup membership stay unchanged.
+
+Real native rejection checks cover corrupt/truncated bytecode bundles and a valid
+bundle missing a recipe dependency: zero requested driver calls, prior result
+manifest preserved. Existing corrupt shared code, valid-checksum pointer, recipe
+truncation and ID negatives still pass. Actual-header native tests cover bounds,
+uncached fallback, default-off clocks, bundle offsets/checksums and timestamp
+scope. Host tests cover bounded spill, old-capability fallback, interrupted bundle
+writes/rebuilds, transport removal, changed output across chunks, rollback, result
+membership, timeout and publication/cancellation failures. Metadata, translation,
+large-catalogue and package checks pass. Final frozen default/ultrawide 32-record
+acceptance cancels after eight fragments, resumes all eight, validates every
+native key/blob, preserves source/selection, and passes both native handoff
+rollbacks, chunk reuse and invalid worker/handoff/profile/fragment-I/O rejection.
+
+Evidence: ignored `scratch/native-preparation-211/{subset,full,final}/` summaries,
+acceptance/frozen reports, `policy.json` and `comparison.json`. Reproduction:
+`preparation_native_profile.py --full --code-study --fragment-io 0`, followed by
+`--full --shared-only --fragment-io 1`, with the reference/input arguments in the
+retained controller CMDs, under `isolated_validation.ps1` and an x64 VS environment.
+All private test shader/driver caches, raw intermediates, helper/PyInstaller and
+engine/build outputs are removed automatically; existing user/OS/driver caches
+stay intact. No live gameplay/stutter, whole-game or multi-GPU acceptance is
+claimed. Main, tags and published v0.2.3 stay unchanged; feature push `[skip ci]`.
+
+Cleanup exception: automatic approval review blocked deletion of the ignored
+`native-preparation-211/author-source` copy (0.87 MiB) and its two authoring scripts,
+returning only "blocked by policy". They remain private. They are runtime source,
+not game data, shader caches or build outputs; the test-output cleanup above passed.
+
+## Phase 210 - Native timing and bounded intermediate handoff (2026-11-03)
+
+Native preparation now exposes default-off aggregate timing via
+`GT5P_PREPARE_NATIVE_PROFILE=1`. One summary per native chunk separates recipe
+validation, shader reads/hashing, driver-hint reads, existing driver-call timing,
+GetCachedBlob/write/rename persistence, warmup recipe/code persistence and result
+publication. Child creation-to-batch entry is measured from Windows process
+creation time and includes initialization/manifest parsing. Other intervals use
+QPC; controller timers separate request serialization, result parsing and process
+wall time. The residual includes host launch/preflight, wait, native cleanup and
+exit. It must not be called pure startup. No per-frame trace, new native worker,
+parallel native process or live draw policy is introduced.
+
+The full legacy diagnostic control identifies file traffic, not driver creation,
+as the largest native cost. Keeping driver calls sequential, the final transport
+uses capability-gated `GT5P_OFFLINE_HANDOFF_V2`, a shared verified bytecode pool,
+one bounded numeric recipe bundle per chunk and an atomic result manifest.
+`GT5P_PREPARE_HANDOFF=auto` selects it only for matching engines; `=0` restores
+per-request inputs/results and `=1` requires the capability. The executable scan
+uses bounded buffers; larger/unknown engines conservatively fall back. A real
+32-record fresh proof with the existing release engine confirms legacy fallback,
+exact keys/persistence and cache cleanup, with timing disabled.
+
+Host bytecode references are bounded to 128 MiB and complete recipe buffering to
+16 MiB. Overflow recipes use the old file path and are read into bounded chunks;
+no records are silently omitted. A chunk has at most 4,096 records / 11,567,120
+serialized bytes, including 64-byte identifiers and the unchanged 2,760-byte
+recipe. Native input validates magic, exact size/count, identifier membership and
+every original envelope/descriptor check before the first driver call. Its code
+cache is limited to 128 MiB / 8,192 entries per process; cache-full reads use
+ordinary owned buffers. All caches free on batch completion or process teardown.
+Input arrays are private to the guarded offline owner. Normal gameplay never
+activates this state. Existing async policy, shader workers, native chunk limits,
+root signature/key ABI, process jobs and shutdown guarantees stay intact.
+
+Grouped results retain the existing result fields and publish only after every
+native creation succeeds and the stream closes without error. Publication does
+not itself establish persistence or authorize cache selection. Completion publication,
+exact membership, duplicate/missing IDs, expected/actual keys and persisted cache
+verification are independently checked by the owner. An earlier manifest is
+invalidated before each launch; partial/stale results cannot authorize success.
+Shader checkpoints stay durable; native input is rebuilt on resume from verified
+shaders plus pinned numeric metadata. Cancellation polls during input generation
+and native chunks retain their existing owned cleanup. Switching transports on
+resume preserves selection/source cache. Existing legacy files are not deleted.
+
+Three ordered full fresh runs measure legacy input, shared bytecode/results,
+then the final bundled transport. The final format adds recipe bundling after
+the first comparison showed individual recipe opens still cost about 30 seconds.
+All runs use four compiler workers, four verification readers, the original
+packed game, default translation and identical 5,669 numeric records/observed
+plan membership. All 482 vertex variants / 3,696 exact fragment requests
+(3,609 canonical compiler jobs) compile without application-cache reuse. Every
+native request/persisted blob passes, in 4,096/1,573 chunks with zero cached-blob
+calls. Menu/race pack hashes are identical. The legacy control and final format
+use separate private engine builds; the intermediate and final formats therefore
+are an ordered development series, not a single ABBA compiler/native trial.
+
+| Measured cost | Legacy control | Final bundle |
+| --- | ---: | ---: |
+| Full preparation | 451.93 s | 336.33 s |
+| Host native-input staging | 19.08 s | 3.76 s |
+| Native stage wall time | 149.50 s | 70.05 s |
+| Aggregate native batch time | 144.13 s | 65.63 s |
+| Recipe reads/validation | 32.52 s | 0.042 s |
+| Shader reads/validation | 59.42 s | 20.20 s |
+| Actual driver creation | 24.17 s | 23.92 s |
+| Blob persistence | 11.76 s | 10.20 s |
+| Warmup recipe/code persistence | 12.58 s | 9.57 s |
+| Result writes/publication | 1.964 s | 0.054 s |
+| Child startup, both chunks | 2.72 s | 2.48 s |
+
+Full preparation takes 115.60 seconds / 25.58% less time; native batch time falls
+78.50 seconds / 54.47%. Driver creation is approximately unchanged at the endpoints;
+it did vary in the intermediate run. Compiler times also vary (252.26 -> 236.51 s
+combined), so the whole preparation gain must not be attributed solely to native
+transport. Bucket/report scopes differ and must not all be added together.
+Hardware: i5-12400F, 16 GB RAM, RTX 4060, driver 32.0.16.1088, `PS3_VERBOSE=0`.
+These are profiled, application-cache-cold runs; OS/driver caches are preserved.
+No live rendering, stutter, all-settings or whole-game acceptance is claimed.
+
+Fresh working-file count falls 43,600 -> 20,926 (52.0% fewer); bytes at completion
+fall 1,016,339,582 -> 632,305,430. This counts files, not every filesystem operation.
+The owner checks/writes 4,067 shared code bodies instead of 11,338 per-request
+copies. Native reads fall 11,338 -> 4,468, with 6,870 verified in-memory hits across
+two separate processes. Peak host references are 62,189,856 bytecode bytes and
+15,646,440 recipe bytes; native cached code peaks at 53,471,336 bytes. Recipe
+serialization and current uncached payloads have additional bounded buffers.
+Maximum individual offline-engine peak commit is about 2,221 -> 2,222 MiB; this
+does not measure the parent/process-tree peak. Existing old generations retain
+their files; the lower count applies to fresh outputs.
+
+A 128-key same-cache old/new/new/old native trial creates all 128 PSOs from cached
+driver blobs each time, verifies every key and leaves selected seed blobs
+byte-identical. Wall times are 3.866 / 2.070 / 2.054 / 2.076 seconds. The first old
+trial's input-file reads are much slower than the last old trial's; after warming,
+overall wall time converges near 2.1 seconds. This does not establish a stable
+large cached-preparation gain. Per-request result writes remain about 45 ms vs
+2 ms aggregate, but startup dominates this small subset. Full fresh file creation
+and first-open behavior are separate from steady warm-cache costs.
+
+Real native negative proofs reject corrupt shared bytecode, a nonzero descriptor
+pointer with a recomputed valid envelope checksum, truncated input and a mismatched
+ID. Every failed batch performs zero requested driver calls and leaves an earlier
+result manifest unchanged. The actual header's synthetic native test proves
+byte/slot-cap fallback, ownership/freeing, default-off clocks and bundle guards;
+it stubs the loader/recipe validator, while the real negative proof exercises
+production validation. Host malformed-result, byte/recipe-budget spill, content
+conflict, marker-boundary/fallback, translation, large-catalogue, metadata-contract
+and package regressions pass. The final frozen clean-PATH default/ultrawide subset
+cancels after eight saved fragments, resumes them, validates all 32 native calls,
+reuses shaders on cached/chunk rollback and switches to legacy native handoff.
+Invalid chunk/worker/handoff/verification settings preserve selected cache, source
+and derived work. Existing UI/launch ownership is retained; no new live route is run.
+
+The runtime patch changes its conservative source fingerprint. All 45 starter
+shards and index are reissued with the same 5,669 records; maps and observed
+membership are unchanged, and the plan's template hash is re-pinned coherently.
+Bundle indices now use explicit LF generation/checkout because their bytes are
+hashed by warmup plans, matching the existing shard policy. The metadata audit
+against 7a5c950 checks records, other compatibility fields, maps and membership.
+No new shader/pipeline coverage is added. Old contribution contracts still require
+maintainer re-verification/reissue; a fingerprint change is not permission to trust
+an old claimed proof.
+
+Ignored evidence: `scratch/native-preparation-210/full/{legacy,shared}.json`
+(first transport), `final/shared.json` (final format), each `acceptance.json` and
+`frozen-validation.json`, `native-policy.json`, `old-engine.json`, controller logs
+and comparison metadata. `preparation_native_profile.py --full` builds the changed
+backend/presentation objects privately and links unchanged read-only CI objects;
+`--shared-only` runs the final proof against an already measured control. It verifies
+the pinned baseline backend before applying the authored patch. No shared runtime,
+CI objects or install are overwritten. Every build/test/compiler operation owns
+the shared validation mutex through child cleanup. All private shader/driver/raw
+program caches, engines, objects, helper/PyInstaller outputs and native test builds
+are removed; only metadata/logs remain. Original game files, user caches and driver
+caches stay intact. Main, tags, v0.2.3 and release workflows remain unchanged;
+development commits/pushes use `[skip ci]`.
+
+## Phase 209 - Compiler concurrency and size-aware cache verification (2026-11-03)
+
+Offline preparation now selects four compiler workers on CPUs reporting at
+least eight logical processors, otherwise two. Explicit
+`GT5P_PREPARE_COMPILER_WORKERS=2|3|4` overrides the selection; `=2` restores
+the previous count. This controls vertex processes and the existing fragment
+compiler threads in sequential stages, not eight simultaneous compiler jobs.
+Vertex workers retain private kill-on-close ownership, 512 MiB per-process and
+1 GiB aggregate job memory limits, existing timeouts and bytecode budgets.
+At most four requests are in flight. The runtime patch, normal game worker
+selection and async draw/queue policy are unchanged.
+
+Cache verification now separates recipe metadata, unique bytecode dependencies
+and persisted driver blobs. Four read-only workers each process at most 32
+metadata results per scheduled task, retaining only one payload at a time.
+Shared bytecode identities are checked once per scan, with errors attributed to
+every referencing recipe. Reads use the opened file's size plus a sentinel byte
+instead of speculative 4/32 MiB requests for small files. Oversize files reject
+before allocation; short reads, growth or changed size reject. Every complete
+recipe, bytecode identity and driver envelope/checksum still verifies.
+`GT5P_PREPARE_VERIFY_BATCH=1` restores the previous task/read path. Callbacks and
+publication remain on the owner; cancellation joins outstanding reads before
+returning. Neither change requires a new cache format or invalidates resumable
+work. Invalid tuning settings reject before preparation output creation.
+
+Three ordered, profiled full runs start in separate empty application caches,
+using the same private engine, original packed inputs, default translation,
+5,669-record starter, observed plan/packs and four I/O readers. Every run compiles
+all 482 vertex variants and 3,696 exact fragment requests (3,609 canonical
+compiler jobs), prepares every native key in 4,096/1,573 chunks with zero cached
+driver-blob calls, and verifies all persisted blobs. No prior application shaders
+are imported. Both shader packs have identical counts, bytes and SHA256 across
+all three runs. The two-worker control reproduces Phase 208's 631.59-second
+result within about 1.2 seconds.
+
+| Run | Full preparation | Vertex compiler | Fragment preparation | Native stage |
+| --- | ---: | ---: | ---: | ---: |
+| Two workers, original verification | 632.74 s | 181.76 s | 200.04 s | 158.97 s |
+| Three workers, batched verification prototype | 492.08 s | 138.99 s | 148.98 s | 129.62 s |
+| Four workers, final size-aware verification | 457.04 s | 117.25 s | 124.97 s | 152.70 s |
+
+The final run takes 175.69 seconds / 27.77% less preparation time than the
+two-worker control; compiler reports together fall 381.80 -> 242.22 seconds
+(36.56%). Report scopes differ and are not an additive wall-time breakdown.
+Native creation also varies despite no native scheduling change, so the whole
+gain must not be attributed solely to worker count. Three-worker verification
+used batching before the size-aware read refinement; the final four-worker run
+includes both changes. Hardware remains i5-12400F, 16 GB RAM, RTX 4060,
+driver 32.0.16.1088, `PS3_VERBOSE=0`. This is one ordered 2/3/4 local series,
+not an ABBA compiler trial or a universal CPU/GPU/storage guarantee. OS/driver
+caches remain intact. Application-cache-cold is not OS/driver-cold. No live
+rendering, hitch, whole-game or all-settings claim follows.
+
+After the final run, an unprofiled read-only same-cache original/new/new/original
+verification comparison returns exactly the same 5,669 recipes, 5,669 valid
+driver blobs and empty rejection list each time. Original scans take
+31.366 / 30.039 seconds; new scans take 1.638 / 1.596 seconds, about 94.7% less
+elapsed scan time by pair means. This comparison excludes compilation, native
+creation, report serialization and UI callbacks; it is a warm same-cache scan,
+not a fresh-storage benchmark. Final whole-stage verification timing also
+includes report/checkpoint work and must not be substituted for this scan result.
+The opened-handle size optimization avoids large read requests without skipping
+integrity checks. Synthetic shared/corrupt-code, conflicting-length, oversized,
+short/growing-file and cancellation checks pass.
+
+Observed vertex worker-job peak commit is 115.60 / 170.09 / 223.79 MiB for
+two/three/four workers, below the unchanged 1 GiB cap. Offline engine lifetime
+peak commit counters are about 2,179 / 2,198 / 2,219 MiB respectively (maximum
+across each run's engine processes). These are process/job measurements, not
+whole-machine or simultaneous process-tree peaks. The final engine-process
+maximum is about 40 MiB above the control. Parent memory and other hardware
+remain separate acceptance limits.
+
+Final source scheduler/environment, recipe/dependency, size-aware reader and
+bounded I/O cancellation regressions pass. A fresh 32-record rollback restores
+two workers, 100 ms polling, exit replay and original verification successfully.
+The private frozen helper passes a clean-PATH 32-record default/ultrawide
+checkpoint proof with four workers: cancel after eight saved fragment results,
+reuse all eight on resume, verify 32 fresh native calls and zero cached blobs,
+then reuse every fragment on the 4,096-chunk rollback. Invalid chunk, worker
+and verification settings reject while preserving source cache, selection and
+translated work. Separately, the new parent pool launches four protocol-compatible
+frozen release workers; killing its owner retires all four while the outer job
+remains open. This tests OS job ownership without starting a game. The probe uses
+the read-only release worker binary; new-helper cancellation/resume is covered
+by the separate frozen proof. All owned children exit before cleanup/release.
+
+The harness retains timing/count/hash/resource metadata under
+`scratch/preparation-speed-209/`: `workers-{2,3,4}.json`, `worker-study.json`,
+`fresh-rollback-32.json`, `frozen-validation.json` and `acceptance.json`, plus small
+controller logs. `preparation_speed_acceptance.py --worker-study` reproduces the
+owned sequential comparison using read-only CI objects and a private engine/helper
+build. The fresh harness records Windows lifetime peak process counters and
+optionally compares verification implementations on its own cache. Every full
+test cache is removed after its verification comparison. The private engine,
+helper, build outputs and PyInstaller caches are also removed after acceptance;
+existing player generations, driver caches and original files remain untouched.
+All build/compiler/test operations own the shared validation mutex and complete
+child cleanup before releasing it. Published v0.2.3, main, tags, starter/maps
+and release workflows remain unchanged. Development pushes use `[skip ci]`.
+
+## Phase 208 - Fresh preparation speed and disposable validation (2026-11-03)
+
+The fresh path now polls the existing two vertex workers every 10 ms instead
+of 100 ms. `GT5P_PREPARE_VERTEX_POLL_MS=100` restores the previous interval.
+Worker count, queue ownership, protocol, cancellation, timeout and memory caps
+are unchanged. Separately, the native startup barrier still executes the exact
+offline preparation batch, but skips its subsequent recipe replay when
+`GT5P_SHADER_PRECOMPILE_ONLY=1`: those pipelines were already created and
+persisted, and the process is about to exit. `GT5P_PREPARE_OFFLINE_WARMUP=1`
+restores replay. Ordinary gameplay retains its existing warmup behavior.
+Disabling `RSX_SHADER_WARMUP` cannot replace this guard: that flag also enables
+the startup barrier which invokes offline preparation. Completion flushing and
+strict native/persisted-blob acceptance remain intact. New engine and helper
+are required for the combined improvement; older engines remain correct.
+
+Two complete profiled runs use the original packed game files, default
+translation, the same 5,669-record starter, observed warmup plan and shader
+packs, four I/O readers and two compiler workers per stage. Both start in fresh
+application-cache directories, import no old shader/driver blobs, compile all
+482 vertex variants and 3,696 exact fragment requests (3,609 canonical compiler
+jobs), and prepare all 5,669 native requests in 4,096/1,573 chunks. Native calls
+use zero cached blobs. Every requested native key and persisted blob passes
+verification. Menu/race pack hashes and byte counts are identical.
+
+| Measured elapsed time | Baseline | Improved |
+| --- | ---: | ---: |
+| Full preparation | 731.20 s | 631.59 s |
+| Vertex compiler report | 198.82 s | 185.37 s |
+| Fragment compiler report | 202.44 s | 204.67 s |
+| Native stage wall time | 250.62 s | 150.47 s |
+
+Total preparation falls 99.60 seconds / 13.62%. Baseline exit replay attempts
+9,765 recipes across the two native chunks and reports 76.110 seconds of replay;
+the improved run performs none. These are overlapping report scopes, not an
+additive time breakdown. Hardware: i5-12400F (6 cores/12 threads), 16 GB RAM,
+RTX 4060, driver 32.0.16.1088, `PS3_VERBOSE=0`. This is one ordered local pair,
+baseline first, with profiling enabled. OS/driver caches were preserved, and
+native engine paths differ; it is not an OS/driver-cold, ABBA or universal speed
+result. Fragment timing does not improve. No live rendering, hitch reduction,
+whole-game or all-settings claim follows.
+
+The fresh native harness and private-build acceptance harness are checked in
+under `scripts/test/preparation_{fresh_native,speed_acceptance}.py`. The latter
+compiles only the changed presentation translation unit into private output,
+links read-only matching CI objects, and builds a private frozen helper. No
+game copy or shared runtime output is written. Native policy tests cover 29
+cases. Source 32-record fresh/rollback proofs pass with the same worker caps.
+Frozen packed-game ultrawide subset acceptance cancels after eight saved
+fragment results, resumes all eight, verifies 32 native calls with zero cached
+blobs, and passes old selection/source preservation, chunk rollback reuse and
+invalid-configuration rejection. Vertex scheduler, reconstruction/environment
+and package rejection regressions pass. Every test/build owns the shared named
+validation mutex through child completion and cleanup.
+
+At the user's request, all newly generated test shader/driver/raw-bytecode
+caches, private engine/object/helper outputs and private PyInstaller caches are
+deleted after validation. Existing player/driver caches and original inputs are
+untouched. Helper builds now place PyInstaller's cache under their selected
+output directory so private builds can clean it too. Both fresh summaries
+assert `test_cache_removed`; the acceptance summary asserts
+`private_build_removed`. Retained ignored evidence in
+`scratch/preparation-speed-208/` consists of timing/count/hash JSON and small
+controller logs, including `fresh-baseline.json`, `fresh-optimized.json`,
+`fresh-rollback-32.json`, `frozen-validation.json` and `acceptance.json`.
+Published v0.2.3, starter/maps, renderer/runtime patches and async draw policy
+stay unchanged. Development commits/pushes use `[skip ci]`; no release or CI
+build is requested. Remaining speed work should profile inventory and fragment
+compilation with the same cache controls rather than increase worker caps blindly.
+
 ## Phase 207 - v0.2.3 publication (2026-11-03)
 
 After accepting the candidate, the user explicitly authorized main integration

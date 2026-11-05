@@ -18,23 +18,26 @@ def footprint(document):
                 vp={(x['vp']['sha256'],x['vp']['size']) for x in r},
                 fp={(x['fp']['sha256'],x['fp']['size']) for x in r},
                 pairs={(x['vp']['sha256'],x['fp']['sha256']) for x in r},
-                vertex_variants={x['vp_source'] for x in r},
-                fragment_variants={x['fp_source'] for x in r},
+                vertex_variants={(x['vp']['sha256'], x['vp_gpu']) for x in r},
+                fragment_variants={(x['fp']['sha256'],json.dumps(x['state'],sort_keys=True,separators=(',',':'))) for x in r},
                 translation_states={json.dumps(x['state'],sort_keys=True,separators=(',',':')) for x in r})
 
 
 def analyze(baseline,sessions,quarantine_conflicts=False):
     if not 1 <= len(sessions) <= 16 or any(not re.fullmatch('[A-Za-z0-9_-]{1,64}',label) for label in sessions):
         raise ValueError('Supply 1..16 uniquely named sessions')
-    baseline=validate(baseline)
+    from pipeline_template_inputs import convert, review_inputs, identity
+    baseline=convert(baseline)
+    sessions={label:review_inputs(d) for label,d in sessions.items()}
     inputs={label:len(document['records']) for label,document in sessions.items()}
     seen={r['key']:r for r in baseline['records']}
     conflicts={}
     for label,document in sessions.items():
-        validate(document)
         # Check compatibility even when every record is later quarantined.
         merge([baseline,dict(document,records=[])])
         for r in document['records']:
+            if r['key'] != identity(r):
+                conflicts.setdefault(r['key'],set()).add('input_identity')
             if r['key'] in seen and r != seen[r['key']]:
                 conflicts.setdefault(r['key'],set()).update(k for k in r if r[k]!=seen[r['key']][k])
             else:seen.setdefault(r['key'],r)

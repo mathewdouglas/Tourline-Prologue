@@ -32,8 +32,16 @@ def handoff_enabled(environ=None):
 
 
 def expected_shaders(document):
+    """Local resolved outputs (or legacy expectations), never format-3 inputs.
+
+    Format 3 first derives its output mapping with the current engine/decoder.
+    An earlier format-3 generation can supply engine-matched, input-keyed local
+    derivations; a format-2 generation supplies driver hints after derivation.
+    """
     expected = {}
     for record in document['records']:
+        if any(k not in record for k in ('vp_source','fp_source','vs','ps')):
+            raise ValueError('Shader reuse requires locally derived outputs, not portable input identities')
         for source, code, index in (('vp_source', 'vs', 4), ('fp_source', 'ps', 8)):
             words = record['native']['words']
             value = (record[code], words[index] | (words[index + 1] << 32))

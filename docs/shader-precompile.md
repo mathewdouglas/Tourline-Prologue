@@ -1,9 +1,168 @@
 # Offline game shader preparation
 
+### Input templates (format 3, development)
+
+The 12,669-record starter now describes renderer inputs. Records contain program
+SHA-256 identities/sizes, GPU-fetch selection, complete numeric translation/native
+state and ATTR input layout. Their 64-character `key` is a canonical input identity.
+Shader/source hashes, native keys, shader bytecode lengths and the renderer source
+fingerprint are absent from the shipped expectations. ELF, key/root-signature ABI,
+translation policy and default settings remain pinned.
+
+Preparation derives outputs with the installed engine/decoder, creates each native
+pipeline, checks persistence, then starts fresh native processes that must find every
+pipeline through the runtime's own driver-cache lookup. Menu/race membership is stored
+as input identities and resolved from successful local results; shader packs use those
+results' source/code identifiers. Local reports/checkpoints retain output metadata.
+Actual engine/decoder hashes and saved settings still select separate generations.
+No renderer source edit requires reissuing the starter.
+
+Format-2 templates and contributions convert on load after their original integrity
+checks. Older prepared caches remain intact. A format-2 cache can supply bounded
+verified driver hints after the current outputs are derived; its shaders are compiled
+again because it lacks an input-keyed derivation manifest. Engine-matched format-3
+generations can also reuse checked shader derivations. Different engines rederive
+shaders. No recipes, learned membership or packs are imported from an older cache.
+
+`GT5P_PREPARE_INPUT_TEMPLATE=0` requires an explicitly supplied format-2 template and
+restores its strict source/output gate; it rejects a format-3 starter safely. Format 3
+uses bounded fragment batches and existing `GT5P_PREPARE_FRAGMENT_CHUNK=1..4096`
+(default 256) checkpoints. `--fragment-mode legacy` requires the format-2 rollback.
+Preparation remains optional. Native process/worker/memory limits, cache formats,
+normal drawing and runtime patches are unchanged.
+
+Maintainers can compare a private reference run using `--reference-report`, or an old
+format-2 reference using `--reference-template`. Neither becomes a shipped expectation.
+Phase 214 acceptance (full 12,669 fresh, cancel/resume, format-2 -> format-3 reuse,
+growth, comment probe, strict reference, pack reader) is summarised in
+[progress](progress.md) and [template-input-format](template-input-format.md#validation).
+After any starter change, re-pin the enumeration plan as described in
+[coverage-enumeration](coverage-enumeration.md#re-pinning-after-any-starter-change).
+See [format and evidence](template-input-format.md) and the
+[contribution contract](pipeline-contributions.md#file-contract).
+
+
 For measured asset/raw-program coverage, recipe dependency checks and the
 remaining provenance gap, see [shader coverage audit](shader-coverage.md).
 
 ## Road to the finished precompiler
+
+Development Phase 213 makes fragment sample sharing the default
+(`RSX_FP_SAMPLE_SHARE=0` rolls it back; see
+[coverage-sample-share](coverage-sample-share.md)). One-sample and multisample
+profiles of one program now compile to one pixel shader, so the starter's
+one-sample records were re-keyed (`scripts/pipeline_template_rekey.py`; 6,172 of
+12,669 records, new renderer contract). Preparation is unchanged in shape: a
+fresh application cache compiles 3,604 distinct fragment sources instead of
+6,990 for the full starter. Offline preparation ignores inherited `RSX_*`
+settings, so prepared caches always match the default game; a player who sets
+`RSX_FP_SAMPLE_SHARE=0` for the game gets demand compiles for the one-sample
+pipelines. An older prepared cache (previous starter) still serves multisample
+entries and is not deleted.
+
+Development Phase 211 adds opt-in shader-stage profiling with
+`GT5P_PREPARE_SHADER_PROFILE=1` (unset/`=0` is off). Vertex worker summaries
+separate translation and D3DCompile elapsed time; owner summaries separate
+startup, dispatch, result acceptance, checkpoint callbacks, polling and shutdown.
+Fragment batches separate raw reads, translation/queue submission, owner
+throttling/drain, compiler work, bytecode persistence and queue residence. The
+host adds input staging, process wall time and result checks. Worker totals and
+queue residence overlap across workers and are not additive wall/CPU time.
+No per-shader log burst or normal-play profiling is enabled.
+
+The fragment host also defaults to `GT5P_PREPARE_FRAGMENT_IO=1`: each distinct
+raw input is checked/written once per chunk, and closed native compiler outputs
+use the existing opened-handle size/sentinel reader. Complete output bytes are
+retained once per source key within the existing 128 MiB pool, avoiding an
+immediate second read of that same owned output. Expected source/code identities
+and final persisted-cache checks remain mandatory. `=0` restores the previous
+input checks and output rereads. Chunk publication and cancellation ownership
+are unchanged.
+
+Matching engines advertise `GT5P_OFFLINE_CODE_V1` in addition to the previous
+native handoff capability. `GT5P_PREPARE_CODE_BUNDLE=auto` (default) passes one
+private bytecode bundle between stages, avoiding thousands of native input
+opens. `=0` restores individual native reads and repeated code timestamps;
+`=1` requires a matching engine/handoff. Payload is bounded to 128 MiB and
+8,192 entries (plus at most 128 KiB index and a 16-byte header); incomplete
+host pooling or budget overflow falls back to the existing individual path.
+Every entry's exact offset, size, identity/checksum and DXBC marker is checked,
+and every recipe dependency must be present before the first requested driver
+call. Invalid bundles fail closed; they never mix with a disk fallback.
+The native owner frees the arena on completion. Existing durable shader files,
+checkpoints, recipe/driver formats and final persistence verification remain.
+The successful owner removes only its private transient request bundle after
+native children exit; interrupted transports are rebuilt on resume. It never
+removes a shader cache. Within this guarded bundled batch, each shared durable
+code file needs its existing successful timestamp operation only once.
+Native processes remain sequential, with unchanged key/root-signature ABI,
+compiler limits, async draw policy and process ownership. See Phase 211 in
+[progress](progress.md) for measured acceptance and practical limits.
+
+Development Phase 210 profiles and reduces native preparation file traffic.
+`GT5P_PREPARE_NATIVE_PROFILE=1` enables one aggregate timing summary per native
+chunk; unset/`=0` keeps instrumentation off. Reports separate child startup,
+recipe/shader loading, driver-hint lookup, actual driver creation, blob/recipe
+persistence, results and controller work. Startup is creation-to-batch entry
+(including initialization/manifest checks), not CPU time. Controller residual
+includes launch/preflight, wait, cleanup and exit; it is not pure startup.
+
+Matching engines advertise `GT5P_OFFLINE_HANDOFF_V2`. The helper's default
+`GT5P_PREPARE_HANDOFF=auto` selects shared, independently verified bytecode,
+binary recipe chunks and atomic batch results. `=0` restores per-request files;
+`=1` requires the matching capability. Older engines automatically keep the
+legacy path; a 32-record packed-game proof passes. Native processes still run
+sequentially in at most 4,096-request chunks, before guest entry.
+
+Host verified bytecode references are capped at 128 MiB and recipe buffering at
+16 MiB, with disk spill instead of dropped work. Each encoded chunk is under
+12 MiB; native code reuse is capped at 128 MiB / 8,192 entries, with ordinary
+owned reads if full. Every bundled recipe passes the original complete envelope
+and descriptor checks before any driver call. Expected keys, both shader hashes,
+completion and persisted blobs remain mandatory. Results publish atomically after
+all native creations and a successful stream close; publication alone does not
+authorize cache selection. Shader checkpoints remain durable; native
+inputs are regenerated/revalidated on resume. Existing generations and legacy
+files are retained. Runtime caches/draw policy, workers, jobs and shutdown
+ownership are unchanged. See Phase 210 in [progress](progress.md) for fresh,
+cached, corruption, memory and frozen-helper evidence. Published v0.2.3 is unchanged.
+
+Development after v0.2.3 reduces vertex pipe polling from 100 ms to 10 ms,
+keeping the worker job/memory limits. `GT5P_PREPARE_VERTEX_POLL_MS=100`
+restores the old interval. A matching development engine also skips replaying
+warmup recipes immediately after an offline batch, before that process exits.
+The startup barrier, exact batch creation, recipe recording and persisted-cache
+checks stay enabled. `GT5P_PREPARE_OFFLINE_WARMUP=1` restores the exit replay.
+Normal gameplay startup warmup is unchanged; both engine and helper updates are
+needed for the combined improvement. See Phase 208 in the progress log for
+fresh-compilation evidence and its limits. This is not in published v0.2.3.
+
+Development Phase 209 adds bounded offline compiler tuning:
+`GT5P_PREPARE_COMPILER_WORKERS=2|3|4` controls both vertex processes and fragment
+compiler threads. Unset selects four on CPUs reporting at least eight logical
+processors, otherwise two; `=2` restores the previous count. Shader stages run
+sequentially, so this does not start eight compiler workers together. Vertex
+workers retain their 512 MiB per-process and 1 GiB aggregate job caps, private
+kill-on-close jobs, queue ownership and existing timeouts. Normal game shader
+worker selection and async draw policy are unchanged.
+
+Later development (enumeration speed work, see
+[coverage-enumeration](coverage-enumeration.md#enumeration-speed-work)) changes the
+default: unset or `auto` selects logical processors minus two, between 2 and 10, and
+never more workers than the available RAM can hold (256 MiB each after a 1 GiB
+reserve). `legacy` restores the four-or-two rule above, and any explicit count from 2
+to 12 is accepted. Vertex workers keep the 512 MiB per-process cap; the aggregate job
+cap stays 1 GiB up to four workers and grows by 256 MiB per worker beyond that.
+
+Final cache verification groups metadata reads in batches of 32, checks shared
+bytecode dependencies once per identity, and sizes read requests from the opened
+file handle rather than the maximum permitted payload. Oversize, short, growing
+or resized files reject; recipe, DXBC and driver checksums still cover complete
+payloads. Four readers still open one payload each at a time, with no retained
+bytecode pool. `GT5P_PREPARE_VERIFY_BATCH=1` restores the old reader/task path.
+Progress and publication remain on the owner; cancellation joins pending reads.
+See Phase 209 in [progress](progress.md) for full fresh and same-cache comparisons,
+memory use, frozen-helper acceptance and the limits of these local measurements.
 
 Preparation uses up to four bounded readers for cache reuse, persisted-cache
 validation and shader-pack dependencies (Phase 205). Publication and cancellation
@@ -28,8 +187,15 @@ verification after the launcher stops the current game (Phase 204). This require
 the matching new launcher/engine/helper package. `GT5P_PIPELINE_TOOLS=0` disables
 those settings actions; the standalone CMD entries remain available.
 
-The development starter contains 5,669 verified observed pipelines /
-1,881 original program identities (477 VP, 1,404 FP). A local 1080p/16:9
+The development starter contains **12,669 verified observed pipelines /
+3,446 original program identities (622 VP, 2,824 FP)**. Phase 212 verifies 7,000
+content-sweep additions with exact rebuilt shaders/native keys/persisted blobs
+and original packed locations. Another 790 records remain unresolved. Full fresh
+frozen-helper preparation passes all 12,669 records with cancellation/resume and
+unchanged observed warmup membership. See [progress](progress.md) for timings,
+the explicit candidate contract reissue and limits; published v0.2.3 is unchanged.
+
+Phase 206 had 5,669 pipelines / 1,881 programs (477 VP, 1,404 FP). Its local 1080p/16:9
 collection contributes 1,219 additions, all located in the original volume and
 prepared with exact native keys. The previous 4,450 records stay. Phase 201 had
 reached 4,450 pipelines / 1,581 programs. Dealership test 1 contributes 1,348 additions,

@@ -9,6 +9,63 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import shader_reconstruct as m
+from preparation_workers import compiler_workers
+from preparation_profile import enabled
+
+assert not enabled({}) and enabled({'GT5P_PREPARE_SHADER_PROFILE':'1'})
+for value in ('','2','true'):
+    try:enabled({'GT5P_PREPARE_SHADER_PROFILE':value})
+    except ValueError:pass
+    else:raise AssertionError('Invalid shader profile accepted')
+with patch.dict(os.environ,{'GT5P_PREPARE_SHADER_PROFILE':'0','RSX_PREPARE_SHADER_PROFILE':'1'}):
+    assert 'RSX_PREPARE_SHADER_PROFILE' not in m.offline_env(Path('game'),Path('cache'))
+with patch.dict(os.environ,{'GT5P_PREPARE_SHADER_PROFILE':'1'}):
+    assert m.offline_env(Path('game'),Path('cache'))['RSX_PREPARE_SHADER_PROFILE']=='1'
+
+with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':'0','RSX_PSO_PREPARE_PROFILE':'1'}):
+    assert 'RSX_PSO_PREPARE_PROFILE' not in m.offline_env(Path('game'),Path('cache'))
+with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':'1'}):
+    assert m.offline_env(Path('game'),Path('cache'))['RSX_PSO_PREPARE_PROFILE']=='1'
+for value in ('','2','true'):
+    with patch.dict(os.environ,{'GT5P_PREPARE_NATIVE_PROFILE':value}):
+        try:m.native_profile()
+        except ValueError:pass
+        else:raise AssertionError('Invalid native profile setting accepted')
+
+# Default: logical processors minus two, 2..10, no RAM limit applied when unknown; `legacy` is the old 4-or-2 rule.
+for cpus, expected, legacy in ((None,2,2),(2,2,2),(4,2,2),(7,5,2),(8,6,4),(12,10,4),(64,10,4)):
+    with patch('preparation_workers.os.cpu_count',return_value=cpus), patch('preparation_workers._available_memory',return_value=None):
+        assert compiler_workers({}) == compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':'auto'}) == expected
+        assert compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':'legacy'}) == legacy
+with patch('preparation_workers.os.cpu_count',return_value=12):
+    for memory, expected in ((64*1024**3,10),(6*1024**3,10),(3*1024**3,8),(2*1024**3,4),(1024**3,2),(1,2)):
+        with patch('preparation_workers._available_memory',return_value=memory):
+            assert compiler_workers({}) == expected
+os.environ['GT5P_PREPARE_COMPILER_WORKERS'] = '2'  # Controlled fixture for existing environment checks.
+for count in ('2','3','4','6','10','12'):
+    assert compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count}) == int(count)
+    with patch.dict(os.environ, {'GT5P_PREPARE_COMPILER_WORKERS':count, 'RSX_SHADER_WORKERS':'32'}):
+        assert m.offline_env(Path('game'),Path('cache'))['RSX_SHADER_WORKERS'] == count
+for count in ('','1','13','32','02','4 ','-3','x',True):
+    try:compiler_workers({'GT5P_PREPARE_COMPILER_WORKERS':count})
+    except ValueError:pass
+    else:raise AssertionError('Unbounded compiler count accepted')
+
+assert m.offline_warmup({}) == m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'0'}) == '0'
+assert m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':'1'}) == '1'
+for warmup in ('','2','auto','1 ','01'):
+    try:
+        m.offline_warmup({'GT5P_PREPARE_OFFLINE_WARMUP':warmup})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Invalid offline warmup choice accepted')
+with patch.dict(os.environ, {'GT5P_PREPARE_OFFLINE_WARMUP':'0','RSX_SHADER_WARMUP':'1','RSX_SHADER_WORKERS':'32'}):
+    env = m.offline_env(Path('private-game'), Path('private-cache'))
+    assert env['RSX_SHADER_WARMUP']=='1' and env['GT5P_PREPARE_OFFLINE_WARMUP']=='0'
+    assert env['RSX_SHADER_WORKERS']=='2' and env['RSX_PSO_ASYNC']=='0'
+with patch.dict(os.environ, {'GT5P_PREPARE_OFFLINE_WARMUP':'1'}):
+    assert m.offline_env(Path('private-game'), Path('private-cache'))['GT5P_PREPARE_OFFLINE_WARMUP']=='1'
 
 with patch.dict(os.environ, {'GT5P_OFFLINE_FLUSH':'0', 'GT5P_NO_PRESENT':'1', 'RSX_PSO_ASYNC':'1'}):
     env = m.offline_env(Path('private-game'), Path('private-cache'))

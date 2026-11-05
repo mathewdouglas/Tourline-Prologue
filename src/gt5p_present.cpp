@@ -681,6 +681,7 @@ extern "C" volatile long g_rsx_gpu_n;
 
 extern "C" void rsx_d3d12_backend_prewarm(void);
 extern "C" void rsx_d3d12_backend_prepare_library(void);
+#include "gt5p_offline_prepare.h"
 static HANDLE s_startup_ready;
 
 /* Offline callers authorize a batch from its completion log as well as its
@@ -832,7 +833,11 @@ static DWORD WINAPI present_thread(LPVOID)
     if (s_startup_ready) {
         if (rsx_ok && !s_rsx_live) {
             rsx_d3d12_backend_prepare_library();
-            rsx_d3d12_backend_prewarm();
+            if (gt5p_replay_prepared_pipelines(getenv("GT5P_SHADER_PRECOMPILE_ONLY"),
+                                              getenv("GT5P_PREPARE_OFFLINE_WARMUP")))
+                rsx_d3d12_backend_prewarm();
+            else
+                fprintf(stderr, "[shader-warmup] offline batch complete; exit replay skipped\n");
         }
         else fprintf(stderr, "[shader-warmup] skipped: standard windowed D3D12 backend required\n");
         gt5p_flush_offline_output();

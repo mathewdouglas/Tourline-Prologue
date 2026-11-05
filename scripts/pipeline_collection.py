@@ -211,7 +211,8 @@ def _verify(install, storage, session, notify=None):
             checked=contribution.parse_report(proof)
             if proof['template_sha256']!=template.template_digest(ready_path):
                 raise ValueError('Verification report differs from captured input')
-            successful=set(checked['default_keys'])
+            from preparation_template_inputs import successful_inputs
+            successful=set(successful_inputs(proof))
         verified=dict(document,records=[r for r in document['records'] if r['key'] in successful])
         pending=dict(document,records=[r for r in document['records'] if r['key'] not in successful])
         progress('publishing')

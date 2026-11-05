@@ -5,6 +5,42 @@ include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` fiel
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
 not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
 
+## Shader enumeration in development builds
+
+Optional **Prepare shaders**, the first-run **Prepare now** choice and F1
+**Debug > Prepare shaders** now also prepare asset shaders after the existing
+template stages. The new **Enumerating shaders** step handles 36,595 fragment
+and vertex jobs using your original GT.VOL and ELF. No catalogue, unpacker or
+extra asset copy is needed. The package includes 2.62 MiB of metadata before ZIP compression;
+shader bytecode is generated locally. Published v0.2.3 is unchanged.
+
+This adds preparation time and local cache space. On the development machine a
+full first preparation took about 10.5 minutes for the template stages, and the
+enumeration step added about 24 minutes of shader compilation (36,473 of 36,595
+shaders; the rest are left to normal in-game compilation) and about 220 MiB of
+disk. Repeating the preparation re-checks rather than rebuilds. Your time depends
+on your CPU. Development builds now default to logical processors minus two compiler workers
+(2 to 10, limited by free RAM; `GT5P_PREPARE_COMPILER_WORKERS=legacy` restores four or two) and larger
+compiler launches (`GT5P_PREPARE_ENUMERATE_BATCH=256` restores the old size). On the development machine the
+enumeration step alone then took about 8 minutes instead of about 17 (measured in isolation with the template
+stage's cache present; the full first preparation was not re-timed). Cheaper generated shader text (looped vertex
+fetch and sized fragment registers, default since Phase 215) brings the same
+enumeration step to about 4.4 minutes and the template stages' shader work from about 4.2 to about 2.6 minutes
+(consecutive runs, rollbacks with `GT5P_PREPARE_VFETCH_LOOP=0` and `GT5P_PREPARE_FP_REG_SIZE=0`; see
+[de-specialized shader text](coverage-enumeration.md#de-specialized-shader-text-phase-215-now-default)). Details:
+[player enumeration acceptance](coverage-enumeration.md#packed-player-acceptance-2026-11-04-12669-record-starter).
+Cancel/close/Escape retains completed chunks. Repeat preparation to resume;
+completed bytecode is checked before reuse. The previous selected cache stays
+available until preparation succeeds. Individual shader rejections are reported
+and left to normal demand compilation. Native pipeline creation still uses the
+starter templates and the runtime worker, so preparation cannot remove every hitch.
+
+Set `GT5P_PREPARE_ENUMERATE=0` before launching the preparation command to restore
+the previous template-only preparation path. Existing caches are retained;
+switching modes can therefore leave more than one generation on disk. Enumeration
+currently adds default-translation shaders; the existing settings-aware template
+preparation still handles its supported additional translation modes.
+
 ## Pipeline tools in v0.2.3
 
 F1 **PC Settings > Debug** offers **Collect pipelines**, **Verify last collection**
@@ -14,6 +50,10 @@ keeps resumable work. Only verified metadata becomes shareable, and nothing is
 uploaded automatically. The starter contains 5,669 verified observed pipelines;
 coverage remains partial. See [v0.2.3 notes](release-v0.2.3.md) and
 [contribution instructions](pipeline-contributions.md).
+
+Development Phase 212 expands the source starter to 12,669 verified pipelines
+(3,446 programs: 622 VP / 2,824 FP). It is not part of the published v0.2.3 ZIP.
+See [progress](progress.md) for the fresh frozen preparation and remaining limits.
 
 ## Shader packs in v0.2.2
 

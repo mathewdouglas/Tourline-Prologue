@@ -1,6 +1,15 @@
 # Shader and pipeline coverage audit
 
-Phase 206's development starter contains 5,669 verified observed pipelines /
+Phase 212's development starter contains **12,669 verified observed pipelines /
+3,446 original programs (622 VP, 2,824 FP)**. The content sweep contributes 7,000
+fully reconstructed/native-verified additions; 790 unresolved records stay out.
+All programs resolve from the original packed game. Full fresh frozen preparation
+passes every key/persisted blob, cancellation/resume and both shader packs.
+Observed warmup membership is unchanged. See [progress](progress.md) for evidence
+and the explicit compatibility-only candidate reissue. This is partial observed
+default-context coverage, with no whole-game or stutter claim.
+
+Phase 206's development starter contained 5,669 verified observed pipelines /
 1,881 original programs (477 VP, 1,404 FP). The later player collection adds
 1,219 unambiguous records; the final frozen helper grows the earlier cache and
 verifies every native key/persisted blob in 4,096/1,573 chunks. Maps cover all

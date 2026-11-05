@@ -76,9 +76,9 @@ def _code(entry, cache):
 
 
 def prepare(document, decoder, engine, game_root, output, parent_contract, vertices,
-            fragments, mode, runner, progress=None, vertex_mode='batch'):
+            fragments, mode, runner, progress=None, vertex_mode='batch', *, input_template=False, reuse_cache=None):
     """Prepare one extra translation mode; default preparation already succeeded."""
-    if mode not in MODES or mode == 'default':
+    if mode not in MODES or (mode == 'default' and not input_template):
         raise ValueError('Select an explicit additional translation')
     chunk_size = fragment_batch_size(os.environ)
     from pipeline_template import cached_shaders, envelope
@@ -89,18 +89,62 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
 
     started = time.perf_counter()
     cache = output/'shadercache'
-    root = sidecar(output, mode)
+    root = output/'di' if input_template else sidecar(output, mode)
     root_hash = root_signature_hash()
-    defaults = cached_shaders(document, cache)
-    # Calibrate against every default record before writing any derived shader.
-    calibrate(document['records'], defaults, root_hash)
-    del defaults
+    if not input_template:
+        defaults = cached_shaders(document, cache)
+        # Calibrate against every default record before writing any derived shader.
+        calibrate(document['records'], defaults, root_hash)
+        del defaults
     contract = dict(parent_contract, translation=mode+'-v1', root_signature=f'{root_hash:016x}')
     allowed_v = {r['vp']['sha256']+':'+str(r['vp_gpu']) for r in document['records']}
     allowed_f = {_sha(r['key'].encode()) for r in document['records']}
     with Checkpoint(root, contract, resume=root.exists(), progress=progress) as checkpoint:
         digest = checkpoint.state.get('progress', {}).get('manifest_sha256')
         manifest = dict(vertices={}, fragments={})
+        imported = dict(vertices=0, fragments=0)
+        if input_template and digest is None and reuse_cache is not None:
+            # Only local engine-matched derivations are hints. The source is
+            # read-only; every bytecode is checked and native keys are rederived.
+            from preparation_reuse import cache_root
+            source = cache_root(reuse_cache)
+            if source == cache or source in cache.parents or cache in source.parents:
+                raise ValueError('Reuse source and destination caches must be separate')
+            state_path = source.parent/'di/preparation-state.json'
+            if state_path.exists():
+                source_derived = cache_root(source.parent/'di')
+                cache_root(source_derived/'manifests')
+                state = json.loads(regular_read(state_path, 65536))
+                previous = state.get('contract', {})
+                if all(previous.get(k) == contract.get(k) for k in ('engine','decoder','translation','root_signature')):
+                    pin = state.get('progress', {}).get('manifest_sha256')
+                    if isinstance(pin,str) and re.fullmatch('[0-9a-f]{64}',pin):
+                        payload = regular_read(source.parent/'di/manifests'/(pin+'.json'),4*1024**2)
+                        if _sha(payload) != pin:
+                            raise ValueError('Reuse derivation manifest checksum mismatch')
+                        hints = json.loads(payload)
+                        copy_started = time.monotonic()
+                        copied = {}
+                        copied_bytes = 0
+                        for group, allowed in (('vertices',allowed_v),('fragments',allowed_f)):
+                            for identity, entry in hints[group].items():
+                                if identity in allowed:
+                                    if time.monotonic()-copy_started > 60:
+                                        break
+                                    if progress:progress('reusing-cache',dict(completed=sum(imported.values()),total=len(allowed_v)+len(allowed_f)))
+                                    pair = (entry.get('code'),entry.get('length'))
+                                    if entry.get('source') in copied:
+                                        if copied[entry['source']] != pair:
+                                            raise ValueError('Reuse shader source conflict')
+                                    else:
+                                        code = _code(entry, source)
+                                        if copied_bytes+len(code) > MAX_POOL:
+                                            continue
+                                        copied_bytes += len(code)
+                                        copied[entry['source']] = pair
+                                        save_code(cache/(entry['source']+'.dxbc'),code)
+                                    manifest[group][identity] = entry
+                                    imported[group] += 1
         if digest is not None:
             if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
                 raise ValueError('Malformed translation checkpoint manifest identity')
@@ -189,7 +233,8 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             publish('translation-vertex', completed=len(vertex_codes), total=len(allowed_v))
 
         _, failures, vertex_report = compile_jobs(list(jobs.values()), decoder, root/'vertex-workers',
-            translation=mode, derive=True, workers=1 if vertex_mode == 'serial' else 2,
+            translation=mode, derive=True, workers=1 if vertex_mode == 'serial' else
+                __import__('preparation_workers').compiler_workers() if input_template else 2,
             poll=lambda: progress('translation-vertex', dict(completed=len(vertex_codes), total=len(allowed_v)))
                 if progress else None, on_ready=ready)
         if failures or set(vertex_codes) != allowed_v:
@@ -226,37 +271,67 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
         publish('translation-native', requested=len(document['records']))
         native_root = root/'r'
         native_root.mkdir(exist_ok=True)
-        requests, derived, seen = [], [], {}
-        for record in document['records']:
+        from preparation_native_handoff import NativeRequests
+        handoff = NativeRequests(engine,cache)
+        requests, derived, seen, resolved = [], [], {}, []
+        for number,record in enumerate(document['records']):
+            if progress and number%32==0:
+                progress('translation-native-input',dict(completed=number,total=len(document['records'])))
             vi = record['vp']['sha256']+':'+str(record['vp_gpu'])
             fi = _sha(record['key'].encode())
             vs, ps = vertex_codes[vi], fragment_codes[fi]
             row = derive_record_from_ids(record, manifest['vertices'][vi]['source'], vs,
                                 manifest['fragments'][fi]['source'], ps, root_hash)
+            if input_template:
+                row['input_key'] = record['key']
+            resolved.append(row)
             if row['key'] not in seen:
                 identity = _sha(row['key'].encode())
                 proof = native_root/identity/'pipeline'
-                proof.mkdir(parents=True, exist_ok=True)
-                (proof/'request.recipe').write_bytes(envelope(row, vs, ps))
-                for code in (vs, ps):
-                    save_code(proof/f'code_{fnv64(code):016x}.dxbc', code)
-                (proof/'result.json').write_text('{"pending":true}\n')
+                handoff.write(proof,envelope(row,vs,ps),vs,ps)
                 requests.append(identity)
                 seen[row['key']] = identity
             derived.append(dict(template_key=record['key'], key=row['key'],
                                 vp_source=row['vp_source'], fp_source=row['fp_source']))
+        seed_report = None
+        if input_template and reuse_cache is not None:
+            from preparation_reuse import seed_cache
+            seed_report = seed_cache(dict(document, records=resolved), reuse_cache, cache, progress)
         native_counts = None
+        handoff.release(native_root, lambda: progress('translation-native-input',
+            dict(completed=len(document['records']),total=len(document['records']))) if progress else None)
+        native_timings=[]
         if requests:
             env = offline_env(game_root, cache)
             env.update(RSX_PSO_PREPARE_BATCH=str(native_root), RSX_PSO_TEMPLATE_PREPARE='1',
                        RSX_PSO_RECIPE_KEEP_DAYS='0')
+            handoff.environment(env,native_root)
             native_counts = run_batches(requests, native_root, engine, game_root, env, root/'native.log', runner,
-                lambda done, total: stage('translation-native', completed=done, total=total, requested=total))
+                lambda done, total: stage('translation-native', completed=done, total=total, requested=total),
+                results=handoff.results,timings=native_timings,
+                recipes=lambda identity:handoff.recipe(native_root,identity))
         for row in derived:
-            result = json.loads(bounded_read(native_root/seen[row['key']]/'pipeline/result.json', 65536))
+            result = handoff.result(native_root,seen[row['key']])
             if not result.get('created') or result.get('actual') != result.get('expected') or result['actual'] != row['key']:
                 raise ValueError('Derived native pipeline key/creation rejected')
+            if input_template:
+                row['result'] = result
+        lookup_counts = None
+        if input_template and requests:
+            # A fresh process must find the persisted driver blobs through the
+            # runtime's ordinary key lookup, independently of host inventory.
+            lookup_counts = run_batches(requests, native_root, engine, game_root, env,
+                root/'lookup.log', runner,
+                lambda done, total: stage('native-lookup', completed=done, total=total),
+                results=handoff.results, recipes=lambda identity:handoff.recipe(native_root,identity))
+            if lookup_counts != [len(requests)] * 4:
+                raise ValueError('Runtime did not find every persisted pipeline')
+            for row in derived:
+                result = handoff.result(native_root,seen[row['key']])
+                if result.get('created') is not True or result.get('actual') != row['key'] or result.get('expected') != row['key']:
+                    raise ValueError('Runtime persisted pipeline lookup rejected')
         stage('translation-verifying')
+        handoff.finish()
         checked = inventory(cache, True)
         if checked['rejected'] or not set(seen) <= set(checked['valid_driver_blobs']):
             raise ValueError('Derived native cache persistence failed')
@@ -264,9 +339,14 @@ def prepare(document, decoder, engine, game_root, output, parent_contract, verti
             vertex_preparation=vertex_report, vertex_variants_reused=reused_v,
             fragment_jobs_reused=reused_f, fragment_preparation=json.loads(
                 bounded_read(fp_root/'fragment-preparation-report.json', 1024*1024)),
-            native_counts=native_counts, records=derived, root_signature=f'{root_hash:016x}',
+            native_counts=native_counts, native_timings=native_timings,native_handoff=handoff.report,
+            records=derived, root_signature=f'{root_hash:016x}',
             seconds=time.perf_counter()-started,
             limitation='Additional translations of observed numeric state; other settings and unseen draws use demand compilation.')
+        if input_template:
+            report.update(resolved_records=resolved, inventory=checked,
+                          runtime_lookup_counts=lookup_counts, cache_reuse=seed_report,
+                          imported_derivations=imported)
         save_report(root/'report.json', report)
         stage('complete', prepared=len(derived))
         return report

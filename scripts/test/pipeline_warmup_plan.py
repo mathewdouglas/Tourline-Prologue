@@ -117,7 +117,8 @@ def main():
     plan_file.write_text(json.dumps(plan))
     identity = folder/'identity.txt'
     identity.write_text('synthetic compiler identity')
-    fake_document = dict(compatibility={}, records=[dict(key=key(n)) for n in (1, 2, 3)])
+    fake_document = dict(version=2, compatibility={'renderer_sha256':template.renderer_contract()},
+                         records=[dict(key=key(n)) for n in (1, 2, 3)])
     def native_producer(*args):
         out = args[7]
         directory = out/'shadercache/warmup-v1'

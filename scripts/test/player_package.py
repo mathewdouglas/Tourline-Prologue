@@ -25,6 +25,8 @@ def put(path, content):
 def main():
     reviewed=package.template_files()
     assert any(n.endswith('/player-map.json') for n in reviewed)
+    assert all('assets/shader-enumeration/gt5p-disc-v1/'+n in reviewed
+               for n in ('plan.json','programs-0000.json','volume.json'))
     with tempfile.TemporaryDirectory(prefix='gt5p-package-fixture-') as temp:
         root = Path(temp)
         package.ROOT = root / 'repo'

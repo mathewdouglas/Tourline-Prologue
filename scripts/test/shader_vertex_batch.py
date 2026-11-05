@@ -7,12 +7,14 @@ from io import BytesIO, StringIO
 from pathlib import Path
 import struct
 import sys
+import os
 import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 import pipeline_template
 import shader_vertex_batch as batch
+os.environ['GT5P_PREPARE_COMPILER_WORKERS'] = '2'  # Existing protocol fixtures deliberately use two workers.
 from prepare_material_shaders import source_key
 from shader_coverage import fnv64
 
@@ -143,7 +145,7 @@ class ScriptWorker:
 
 def opener_for(handler, launches):
     def open_workers(count, decoder, work):
-        assert 1 <= count <= 2
+        assert 1 <= count <= 4
         launches.append(count)
         workers = [ScriptWorker(handler) for _ in range(count)]
         return Pool(workers), workers
@@ -166,6 +168,11 @@ def clock():
 
 
 # Mode, command and ownership flags. No compiler and no process.
+assert batch.poll_seconds({}) == .01
+assert batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': '10'}) == .01
+assert batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': '100'}) == .1
+for invalid_interval in ('', '0', '1', '20', '1000', '010', '10 ', 'auto'):
+    assert_raises(lambda: batch.poll_seconds({'GT5P_PREPARE_VERTEX_POLL_MS': invalid_interval}), ValueError)
 assert batch.player_mode({}) == 'batch'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '0'}) == 'serial'
 assert batch.player_mode({'GT5P_PREPARE_VERTEX_BATCH': '1'}) == 'batch'
@@ -316,9 +323,81 @@ assert not failures and set(compiled) == {(digest, 1), (other_digest, 0), (diges
 assert compiled[(digest, 1)][2] == dxbc and compiled[(digest, 0)][2] == dxbc
 assert report['launches'] == 2 and report['workers'] == 2 and launches == [2]
 assert report['inflight_jobs_max'] <= 2 and report['compiled_variants'] == 3
-assert report['limits']['workers'] == 2
+assert report['limits']['workers'] == 12
+assert report['limits']['worker_job_commit_bytes'] == 1024**3
 assert seen_kinds == ['exact', 'exact', 'exact']
 assert report['translation'] == 'default' and report['derive'] is False and report['duplicate_variants'] == 0
+
+four_requests = requests + [dict(requests[1], gpu=1)]
+for count in (3,4):
+    launches = []
+    with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'GT5P_PREPARE_COMPILER_WORKERS':str(count)}):
+        more, errors, stats = batch.compile_jobs(four_requests, 'decoder.dll', Path(folder),
+            opener=opener_for(answer, launches), monotonic=monotonic, sleep=sleep)
+    assert len(more) == 4 and not errors and launches == [count]
+    assert stats['inflight_jobs_max'] <= count and stats['workers'] == count
+    assert stats['limits']['worker_job_commit_bytes'] == 1024**3
+# Aggregate commit stays 1 GiB up to four workers (previous contract), then 256 MiB per worker; per-process cap unchanged.
+assert [batch.job_commit_limit(n) for n in (1, 2, 4)] == [1024**3] * 3
+assert batch.job_commit_limit(10) == 10 * 256 * 1024**2 and batch.job_commit_limit(12) == 12 * 256 * 1024**2
+assert batch.WORKER_MEMORY == 512 * 1024**2
+for count in (0, 13):
+    try:
+        batch.open_workers(count, 'decoder.dll', Path('unused'))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Vertex worker cap not enforced')
+
+# GT5P_PREPARE_VFETCH_LOOP (rollback switch, scripts/shader_source_policy.py): unset leaves the renderer default,
+# 0/1/2 reach the workers' environment explicitly, overriding any inherited RSX_VFETCH_LOOP.
+import shader_source_policy as policy
+assert policy.vfetch_loop({}) == '' and policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '0'}) == '0'
+assert policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '1'}) == '1' and policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': '2'}) == '2'
+for bad in ('', '3', 'yes', '1 '):
+    assert_raises(lambda: policy.vfetch_loop({'GT5P_PREPARE_VFETCH_LOOP': bad}))
+seen_env = []
+class FakePool:
+    def __init__(self, count): self.count = count
+    def spawn(self, slot, decoder, work, environment):
+        seen_env.append(dict(environment)); return object()
+for value, expected in (('0', '0'), ('2', '2'), (None, None)):
+    seen_env.clear()
+    inherited = {'RSX_VFETCH_LOOP': '1', 'RSX_FP_REG_SIZE': '0'}
+    if value is not None: inherited['GT5P_PREPARE_VFETCH_LOOP'] = value
+    with patch.dict(os.environ, inherited), patch.object(batch, '_WinPool', FakePool):
+        if value is None: os.environ.pop('GT5P_PREPARE_VFETCH_LOOP', None)
+        batch.open_workers(2, 'decoder.dll', Path('unused-not-created'))
+    assert [env.get('RSX_VFETCH_LOOP') for env in seen_env] == [expected, expected]
+    assert all('RSX_FP_REG_SIZE' not in env for env in seen_env)
+
+# Delay complete replies independently of the scheduler. Both intervals must
+# return identical verified results, with unchanged two-worker ownership/caps.
+def delayed_replies(interval):
+    now, wait = clock()
+    owned = []
+    class DelayedWorker(ScriptWorker):
+        ready_at = 0
+        def read_available(self):
+            return super().read_available() if now() >= self.ready_at else b''
+    def delayed(echoed, payload, worker):
+        worker.ready_at = now() + .015
+        return answer(echoed, payload, worker)
+    def open_delayed(count, decoder, work):
+        owned.extend(DelayedWorker(delayed) for _ in range(count))
+        return Pool(owned), owned
+    with tempfile.TemporaryDirectory() as folder, patch.dict(batch.os.environ, {'GT5P_PREPARE_VERTEX_POLL_MS': interval}):
+        result = batch.compile_jobs(requests, 'decoder.dll', Path(folder), opener=open_delayed,
+                                    monotonic=now, sleep=wait)
+    assert all(w.retired for w in owned)
+    return result, now()
+
+(quick_codes, quick_errors, quick_report), quick_time = delayed_replies('10')
+(old_codes, old_errors, old_report), old_time = delayed_replies('100')
+assert quick_codes == old_codes and not quick_errors and not old_errors
+assert quick_time < old_time
+assert quick_report['limits'] == old_report['limits'] and quick_report['workers'] == old_report['workers'] == 2
+assert quick_report['poll_seconds'] == .01 and old_report['poll_seconds'] == .1
 
 def garbage(echoed, payload, worker):
     return b'GT5P_VP_UNKNOWN_V1\n'
@@ -469,7 +548,7 @@ assert_raises(lambda: batch.compile_jobs(
     'decoder.dll', Path('unused'), derive=True, workers=1))
 assert_raises(lambda: batch.compile_jobs(
     [dict(sha256=digest, gpu=1, program=program)], 'decoder.dll', Path('unused')))
-for bad_workers in (0, 3, True):
+for bad_workers in (0, 13, True):
     assert_raises(lambda: batch.compile_jobs([derive_one], 'decoder.dll', Path('unused'), derive=True, workers=bad_workers))
 assert_raises(lambda: batch.compile_jobs(
     [derive_one], 'decoder.dll', Path('unused'), translation='1440p', derive=True, workers=1))

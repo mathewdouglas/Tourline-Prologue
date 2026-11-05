@@ -36,6 +36,11 @@ BRAND_ICONS = {
 # passed 1 MB in Phase 60. Text diffs there get a larger limit; anything else
 # keeps MAX_BYTES.
 MAX_PATCH_BYTES = 4_000_000
+# The player shader-enumeration plan (assets/shader-enumeration/**/*.json) is
+# metadata only (identifiers, numeric profiles, job index pairs). Its job list
+# grows with the starter and passed 1 MB when re-pinned to 12,669 records.
+# Plain-text JSON there gets a larger limit; its loader independently caps it.
+MAX_ENUMERATION_BYTES = 2_000_000
 
 # Lower-cased. Extensions of game data, licences, keys, and analysis databases.
 EXTENSIONS = {
@@ -86,7 +91,9 @@ def verdict(path, size, head):
         return None
     is_patch = (low.startswith("patches/") and low.endswith(".patch")
                 and head.startswith(b"diff --git") and b"\x00" not in head)
-    limit = MAX_PATCH_BYTES if is_patch else MAX_BYTES
+    is_enumeration = (low.startswith("assets/shader-enumeration/") and low.endswith(".json")
+                      and b"\x00" not in head)
+    limit = MAX_PATCH_BYTES if is_patch else MAX_ENUMERATION_BYTES if is_enumeration else MAX_BYTES
     if size > limit:
         return "larger than %d bytes" % limit
     if b"\x00" in head and size > MAX_BINARY_BYTES:

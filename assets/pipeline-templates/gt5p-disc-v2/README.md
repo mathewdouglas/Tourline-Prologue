@@ -1,80 +1,74 @@
-This optional developer starter contains 5,669 verified pipeline records for
-BCUS98158 version 3. It contains program identifiers and numeric translation/native
-state only. It contains no shader microcode, source, DXBC or driver binaries.
+This optional development starter contains **12,669 verified pipeline records**
+for BCUS98158 version 3, with **3,446 original program identities (622 VP /
+2,824 FP)**. It contains identifiers and numeric state only, without program,
+HLSL, DXBC or driver-cache bytes.
 
-A local 1080p/16:9 collection adds 1,219 verified records and preserves the previous 4,450.
-There are 1,881 original program identities (477 VP / 1,404 FP). Of 1,368 verified
-collected records, 149 were already present and none conflicted. Three branching
-vertex contexts were excluded before the share file was written. All 300 new
-programs were located in the original volume, and all 1,219 new records passed
-a fresh default native prepare. This is observed default-context coverage, not
-every car, track, or graphics setting.
+Phase 212 accepts 7,000 content-sweep additions and preserves all previous 5,669
+records. Another 790 records depending on 185 unresolved FP identities stay out;
+47 earlier conflicting keys remain quarantined. Every accepted record passes
+original-asset reconstruction of both shaders, exact native keys and persistence.
+All programs are verified directly from the original GT.VOL/ELF. The complete
+player map has 3,446 locations; the volume map has 297 required archive members,
+adding 96 members already present in the unchanged 592-container search map.
+The supplemental asset map is extended with the newly located programs.
 
-Phase 201 adds 1,348 verified dealership records and preserves the previous 3,102.
-The separate search-map.json adds verified numeric locations for 592 original
-shader-bearing containers for post-play contribution verification. It contains
-no program contents and adds no pipeline coverage by itself. The player map and
-ordinary preparation volume map still describe exactly the starter's programs.
-The volume map has 201 archive members: the previous 165 plus 36 containers
-already verified in search-map.json. The observed warmup plan keeps its previous
-menu/race membership, so these additions stay on the demand path.
+The candidate source-contract pin is explicitly reissued from Phase 210 to
+Phase 211 after source comparison, preserving all record fields and rendering
+keys. Full fresh frozen-helper preparation passes all 12,669 native pipelines in
+4,096/4,096/4,096/381 chunks with cancellation/resume and persisted blobs. The
+observed warmup membership is unchanged and pinned to the new bundle index;
+new keys remain on demand. A representative HSR replay is checked; this does not
+establish every car/camera/state, whole-game, arbitrary-settings, GT5 or stutter
+coverage. Published v0.2.3 is unchanged. See [Phase 212](../../../docs/progress.md).
 
-The records came from local menu/High Speed Ring/Daytona play and an additional
-Fuji Speedway F (Course Select slot 2) session covering the grid/opening section. Both
-shader stages were reconstructed from original assets, their identifiers checked,
-and native keys reproduced and pipelines created on the test machine. Unsupported
-or unavailable programs and branching vertex contexts are excluded. This is an
-observed-state template, not independent recovery of material/pass ownership or
-whole-game coverage. It does not cover every car or every part of these tracks.
+Phase 213 makes fragment sample sharing the default renderer behaviour
+(`RSX_FP_SAMPLE_SHARE=0` rolls it back) and re-keys the 6,172 one-sample records:
+their fragment source/bytecode identifiers and pipeline keys change, while the
+6,497 multisample records, all vertex state, the maps and the (remapped) observed
+warmup membership are unchanged. The renderer contract is reissued explicitly.
+Fresh frozen-helper preparation of all 12,669 re-keyed records passes. See
+[Phase 213](../../../docs/progress.md).
 
-Phase 197 preserves all previous 2,892 records and adds 210 records from a real
-1080p/2x High Speed Ring player collection. All 210 pass both-stage reconstruction,
-exact native keys and persisted native creation in an empty application cache.
-Nineteen additional program locations verify directly in the original ELF/GT.VOL;
-no new archive members are needed. Branching contexts remain excluded.
+`index.json` verifies the 99 **format-3** metadata shards. The bundle pins
+Windows x64 recipe/key/root-signature ABI, default settings, translation policy
+and original ELF, independently of renderer source. Each record's `key` is a
+64-character canonical input SHA-256, not a native pipeline hash. Program
+identities/sizes, `vp_gpu`, numeric translation/native state and input layout
+are the complete record inputs. Shader length words are zero until preparation;
+no shader/source/native output hashes are shipped.
 
-Earlier history: the previous 2,334 records are unchanged. Phase 180 adds 558 verified records;
-nine conflicting session keys were quarantined, and three branching contexts and
-eleven missing joins were excluded at export. The original 2,334-record batch
-and the new 558-record batch each passed an empty-application-cache shader/native
-proof. This is not a single fresh-cache 2,892-record compilation experiment.
-OS/driver caches remained warm. No consistent stutter improvement is claimed.
+Preparation derives both shaders and native keys locally, requires creation and
+persistence, then confirms every driver blob through a fresh-process runtime
+lookup. A maintainer can compare a private reference for regressions. Format-2
+contributions still convert on load; older helpers need updating for this starter.
+See [input format](../../../docs/template-input-format.md).
 
-`index.json` verifies the metadata shards. Format 2 pins the renderer source
-contract, Windows x64 recipe/key ABI, explicit default settings and original ELF.
-The preparer verifies locally rebuilt shaders and actual root-signature/native
-keys before accepting anything. Incompatibilities remain on the demand path.
-Driver results are constructed locally for the user's GPU and stay local.
+`player-map.json` covers exactly all 3,446 bundled original programs.
+`volume-map.json` covers their 297 archive members plus parameter locations in
+the verified ELF, without keys or filenames. Both ELF and whole-volume hashes,
+every decoded member and every selected slice must verify. Other builds or
+modified volumes require separately verified maps.
 
-Developer preparation uses exact fragment batching by default;
-`--fragment-mode legacy` is the rollback.
-Matching checkpointed template output supports `--resume`, verifying cached
-shader identifiers and revalidating native pipelines before acceptance. A changed
-template can read verified hints from an older cache using `--reuse-cache`.
+`asset-map.json` contains 1,870 supplemental developer locations: the previous
+305 plus 1,565 new identities. It can overlap supported SHDS lookup. The legacy
+unpacked-assets path uses verified container hashes, offsets, sizes and byte order;
+the optional player helper can read the packed game without a developer catalogue
+or another unpacked asset copy. The separate 592-container `search-map.json`
+supports post-play verification and adds no pipeline coverage by itself.
 
-`asset-map.json` is a separately versioned hash/offset map with 305 supplemental
-locations: the earlier 119 programs outside supported SHDS tables, 167 Phase 180
-program identities and 19 Phase 197 program identities. The new locations can overlap supported SHDS lookup.
-Supply `--assets <original unpacked GT.VOL directory>`
-to select it automatically. It contains container/program hashes, file offsets,
-sizes and byte order only. Container hashes and program identities are verified
-locally before compilation; captured programs are not needed by users.
+The warmup plan retains 1,466 menu / 2,113 race input identities (3,546 distinct), including
+previously observed prepass requests. Its new template digest does not infer
+material/pass ownership or phase membership for the additions.
 
-See [the preparation workflow](../../../docs/shader-precompile.md). Pass this
-directory to `scripts/pipeline_template.py prepare --template`. The optional
-player preparation helper uses `player-map.json`, a complete
-hash/offset map for all 1,881 unique programs (477 vertex, 1,404 fragment), using
-the user's original game files and verified ELF, without a developer
-catalogue. The smaller `asset-map.json` remains the supplemental developer map.
-Templates do not establish menu/race preload ownership. The separately verified
-warmup plan contains observed notifier membership, including prepass requests;
-unknown keys stay out. This update changes development metadata, not the published
-release, async draw policy or preparation choice. No zero-stutter claim is made.
+See [the preparation workflow](../../../docs/shader-precompile.md) and
+[contribution acceptance](../../../docs/pipeline-contributions.md). Preparation
+remains optional. `--resume` verifies matching retained work and revalidates native
+pipelines; `--reuse-cache` reads verified hints into a separately owned output.
+`GT5P_PREPARE_INPUT_TEMPLATE=0` with a separate format-2 template restores strict
+legacy preparation; it does not reinterpret format-3 inputs as output expectations. Driver blobs and
+shader bytecode remain local to the user's GPU/cache and never ship here.
 
-Development direct preparation uses `volume-map.json`, numeric locations for 201 required
-archive members plus parameter locations in the user's verified ELF. It contains
-no keys or file names. The optional helper can read the original GT.VOL directly,
-verify each decoded container and all 1,881 programs, and avoid an unpacked asset
-copy. Both ELF and volume SHA-256 must match this supported disc build. The
-legacy unpacked-assets flow remains available. Other builds/modded volumes need
-separately verified maps. The published v0.2 package remains unchanged.
+Historical expansions and their narrower controls remain in the progress log:
+Phase 201 reached 4,450 records, Phase 206 reached 5,669, and Phase 212 preserves
+every one of those earlier records. This update changes development metadata;
+published v0.2.3, runtime defaults and async draw policy are unchanged.

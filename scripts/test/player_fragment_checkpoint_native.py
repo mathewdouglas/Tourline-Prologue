@@ -63,7 +63,7 @@ def main():
     command=[str(install/'preparation/GT5P-Prepare.exe'),'--install',str(install),
              '--storage',str(storage),'--game',str(a.game.resolve())]
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
-    env.update(PS3_VERBOSE='0',GT5P_PREPARE_TRANSLATION='ultrawide-native',
+    env.update(PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',GT5P_PREPARE_TRANSLATION='ultrawide-native',
                GT5P_PREPARE_FRAGMENT_CHUNK=str(a.chunk),
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
     cancel=storage/'prepare.cancel'
@@ -115,15 +115,39 @@ def main():
     cached=json.loads((generation/'report.json').read_text())['additional_translation']
     assert cached['fragment_jobs_reused']==a.count and cached['fragment_preparation']['processes']==0
     assert pointer.read_text()==selected_pointer and snapshot(source)==before
+    run('cached-handoff-rollback',{'GT5P_PREPARE_HANDOFF':'0'})
+    rollback=json.loads((generation/'report.json').read_text())
+    assert rollback['native_handoff']['enabled'] is False
+    assert rollback['additional_translation']['native_handoff']['enabled'] is False
+    assert rollback['additional_translation']['fragment_jobs_reused']==a.count
+    assert pointer.read_text()==selected_pointer and snapshot(source)==before
+    run('cached-code-rollback',{'GT5P_PREPARE_CODE_BUNDLE':'0'})
+    code_rollback=json.loads((generation/'report.json').read_text())
+    assert not code_rollback['native_handoff']['code_bundle']
+    assert not code_rollback['additional_translation']['native_handoff']['code_bundle']
+    assert pointer.read_text()==selected_pointer and snapshot(source)==before
     preserved=snapshot(state.parent)
     run('invalid-chunk',{'GT5P_PREPARE_FRAGMENT_CHUNK':'0'},False)
     assert pointer.read_text()==selected_pointer and snapshot(source)==before
     # Parent report/checkpoint can report rejection; all derived work stays intact.
     assert snapshot(state.parent)==preserved
+    for name, overrides in (
+            ('invalid-workers',{'GT5P_PREPARE_COMPILER_WORKERS':'5'}),
+            ('invalid-handoff',{'GT5P_PREPARE_HANDOFF':'2'}),
+            ('invalid-code-bundle',{'GT5P_PREPARE_CODE_BUNDLE':'2'}),
+            ('invalid-shader-profile',{'GT5P_PREPARE_SHADER_PROFILE':'2'}),
+            ('invalid-fragment-io',{'GT5P_PREPARE_FRAGMENT_IO':'2'}),
+            ('invalid-verification',{'GT5P_PREPARE_VERIFY_BATCH':'0'})):
+        run(name,overrides,False)
+        assert pointer.read_text()==selected_pointer and snapshot(source)==before
+        assert snapshot(state.parent)==preserved
     (out/'validation.json').write_text(json.dumps(dict(records=a.count,checkpointed_fragments=len(kept),
         resumed_fragments=extra['fragment_jobs_reused'],native_counts=extra['native_counts'],
         clean_path=True,old_selection_preserved_on_cancel=True,source_unchanged=True,
         chunk_rollback_reused_all=True,invalid_chunk_preserved_selection=True,
+        invalid_worker_and_verification_preserved_selection=True,
+        native_handoff_rollback_reused_all=True,
+        code_bundle_rollback_reused_all=True,invalid_code_bundle_and_shader_profile_rejected=True,
         seconds=time.perf_counter()-started,
         limitation='Frozen offline subset on one GPU; no live rendering or stutter measurement.'),indent=2)+'\n')
     print('Frozen fragment checkpoint, resume, rollback and selection/source preservation passed:',out)

@@ -1,9 +1,12 @@
 # Drive to the Car Dealer page (milestone.ps1), wait -Settle seconds, and
 # save the game window's own contents (PrintWindow: no desktop grab).
 #   scripts\test\winshot.ps1 -Tag t [-Settle 20] [-Shots 1] [-Gap 2] NAME=VALUE ...
+#   -Engine/-GameRoot/-OutputDirectory select a private exe and shot directory.
 #   -> scratch\pv\<t>.win.png (and <t>.win2.png ... with -Shots)
 [CmdletBinding(PositionalBinding = $false)]
 param([string]$Tag = "win", [int]$Settle = 20, [int]$Shots = 1, [int]$Gap = 2,
+      [string]$Engine = "", [string]$GameRoot = "", [string]$OutputDirectory = "",
+      [int]$TimeoutSec = 90, [ValidateRange(0,120)][int]$MenuDelaySec = 0,
       [Parameter(ValueFromRemainingArguments = $true)] $Vars)
 . "$PSScriptRoot\milestone.ps1"
 Add-Type -AssemblyName System.Drawing
@@ -15,17 +18,26 @@ public class WinShot { [DllImport("user32.dll")] public static extern bool Print
  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; } }
 '@ }
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$dir = "$root\scratch\pv"; New-Item -ItemType Directory -Force $dir | Out-Null
-$set = @{ GT5P_NO_SETTINGS = "1"; FS_HIDE = "grim/file/contents"; PS3_VERBOSE = "0"; PAD_HOLD = $DealerHold; GT5P_PROFVIEW = "0" }
+if (-not $Engine) { $Engine = "$root\build\gt5p.exe" }
+if (-not $GameRoot) { $GameRoot = $root }
+$dir = if ($OutputDirectory) { $OutputDirectory } else { "$root\scratch\pv" }
+New-Item -ItemType Directory -Force $dir | Out-Null
+$set = @{ GT5P_NO_SETTINGS = "1"; FS_HIDE = "grim/file/contents"; PS3_VERBOSE = "0"; PAD_HOLD = $DealerHold; GT5P_PROFVIEW = "0"; GT5P_ROOT = $GameRoot }
+if ($MenuDelaySec) {
+    $set['PAD_HOLD'] = [regex]::Replace($DealerHold, '@TopMenuTemplate\+(\d+)-(\d+)', {
+        param($m)
+        "@TopMenuTemplate+$([int]$m.Groups[1].Value + 1000*$MenuDelaySec)-$([int]$m.Groups[2].Value + 1000*$MenuDelaySec)"
+    })
+}
 foreach ($v in $Vars) { if (-not $v) { continue }; $k, $val = "$v" -split "=", 2; $set[$k] = $val }
 try {
-Stop-Stragglers
+if (@(Get-Process gt5p -ErrorAction SilentlyContinue).Count) { throw "Another gt5p.exe is running; no process was stopped" }
 foreach ($k in $set.Keys) { Set-Item "Env:$k" $set[$k] }
-$p = Start-Process -FilePath "$root\build\gt5p.exe" -WorkingDirectory $root -PassThru `
+$p = Start-Process -FilePath $Engine -WorkingDirectory $GameRoot -PassThru `
     -RedirectStandardOutput "$dir\$Tag.out" -RedirectStandardError "$dir\$Tag.err"
 foreach ($k in $set.Keys) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
 $tl = New-LogTail "$dir\$Tag.out"
-$tp = Wait-Milestone $p $tl "DealerTopRoot" 90
+$tp = Wait-Milestone $p $tl "DealerTopRoot" $TimeoutSec
 if ($tp -lt 0 -or (Wait-Draws $p 1000 60) -lt 0) { "page not reached" }
 else {
     Start-Sleep -Seconds $Settle
@@ -42,5 +54,5 @@ else {
     "page at $tp s; title: $($p.MainWindowTitle)"
 }
 } finally {
-    Get-Process gt5p -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    if ($p) { $p.Refresh(); if (-not $p.HasExited) { $p | Stop-Process -Force -ErrorAction SilentlyContinue } }
 }

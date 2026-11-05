@@ -34,7 +34,8 @@ def main():
         '--add-data',str(ROOT/'config/ps3recomp.json')+os.pathsep+'config',
         '--add-data',str(plan)+os.pathsep+'config/pipeline-warmup',
         '--add-data',str(ROOT/manifest['patch'])+os.pathsep+'patches',
-        str(ROOT/'scripts/player_prepare.py')],cwd=ROOT,check=True)
+        str(ROOT/'scripts/player_prepare.py')],cwd=ROOT,check=True,
+        env=dict(os.environ,PYINSTALLER_CONFIG_DIR=str(out/'pyinstaller-cache')))
     folder=out/'dist/GT5P-Prepare'
     runtime=a.runtime.resolve()
     command=[a.clang_cl,'/nologo','/O2','/MT','/LD','/D_CRT_SECURE_NO_WARNINGS',
