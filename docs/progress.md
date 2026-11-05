@@ -9,6 +9,26 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 218 - Analog L2/R2 pressure past the digital threshold (2026-11-05)
+
+The user assigned accelerate/brake to R2/L2 in the game's own Options > Change
+Button Assignments. Partial throttle and brake work only for the first part of
+the trigger travel; after that both read 100%. Cause, from the runtime source:
+an analog trigger also sets its L2/R2 digital bit once the SDL axis exceeds
+3000 of 32767 (about 9%; XInput uses PAD_TRIGGER_THRESHOLD). The pressure
+fix-up added for injected input then raised every pressure below 255 to 255
+whenever the digital bit was set, discarding the real analog value.
+
+The fix-up now fills only a pressure the host left at zero, which is the
+injected-input case it was written for (PAD_HOLD/PAD_SCRIPT, keyboard; the
+keyboard already writes 255 for L2/R2). Real controller values pass through
+unchanged, so L2/R2 report 0-255 across their whole travel. Face buttons are
+unaffected: the host only reports 0 or 255 for them. `PAD_PRESS_FORCE_FULL=1`
+restores the old rule. The main runtime patch applies to a clean 4e8f3ca8 tree,
+the overlays apply on it and cellPad.c compiles. Not yet tested in game; the
+user will test the trigger response. No response curve or dead-zone setting is
+added; add one only if the linear 0-255 range proves wrong in play.
+
 ## Phase 217 - Dealership logo loading stall: Windows PPU join lifetime (2026-11-05)
 
 Numbered 208 on its investigation branch; renumbered 217 when merged into
