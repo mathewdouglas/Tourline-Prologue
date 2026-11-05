@@ -44,6 +44,13 @@ has the evidence, newest phase first (Phase 219 is the latest).
 
 ### What works now
 
+- **RecompLauncher manifest (Phase 220, branch feature/recomplauncher-manifest):**
+  `launcher/recomplauncher.json` starts `tourline-prologue.exe` and edits `gt5p_settings.toml`
+  (10 settings). Relocated storage is followed through the junction
+  `%LOCALAPPDATA%\GT5PRecomp\selected-storage` (`GT5P_STORAGE_LINK=0` off). Keep the manifest's
+  `config.new` and the launcher's first-run preset identical. See docs/recomplauncher.md.
+  Untested inside RecompLauncher itself; not merged or released.
+
 - **0.2.4 RC UX (Phase 219, branch t3/rc024-ux):** Preload known shaders is On by default
   (pre-0.2.4 settings files switched on once via `[meta] defaults_version`; a later explicit false stays; `GT5P_SETTINGS_MIGRATE=0` skips). "Compiling shaders" now
   counts draws that wait; background preload (startup warmup, race prewarm) is counted apart

@@ -18,6 +18,7 @@
 #include <cwctype>
 #include "preparation_ui.h"
 #include "first_run_preparation.h"
+#include "storage_link.h"
 #include "../src/gt5p_restart.h"
 
 namespace fs = std::filesystem;
@@ -48,6 +49,18 @@ static std::wstring env(const wchar_t* key) {
     std::vector<wchar_t> b(n);
     GetEnvironmentVariableW(key, b.data(), n);
     return b.data();
+}
+// Keep <home>\selected-storage (read by recomplauncher.json) naming the selected storage.
+// Best effort: a failure is logged and never stops the game. GT5P_STORAGE_LINK=0 disables it.
+static void link_storage(const fs::path& home, const fs::path& selected) {
+    if (env(L"GT5P_STORAGE_LINK") == L"0") return;
+    auto problem = storage_link::sync(home, selected);
+    if (problem.empty()) return;
+    fwprintf(stderr, L"%ls\n", problem.c_str());
+    try {
+        fs::create_directories(data/L"logs");
+        std::wofstream(data/L"logs"/L"storage-link.err", std::ios::app) << problem << L'\n';
+    } catch (...) {}
 }
 static void setenv(const wchar_t* key, const std::wstring& value) {
     if (!SetEnvironmentVariableW(key, value.c_str())) fail(L"Could not set launch environment.");
@@ -478,12 +491,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         CoTaskMemFree(local);
         bool override_data = !env(L"GT5P_USER_DIR").empty();
         data = override_data ? fs::absolute(env(L"GT5P_USER_DIR")) : home;
+        bool relocated = false;
         runtime_path(home);
         if (override_data && (choose_storage || !storage.empty())) fail(L"Unset GT5P_USER_DIR before changing the remembered storage location.");
         if (!override_data) {
             auto saved = profile(home/L"storage.ini", L"game", L"directory");
             if (!saved.empty()) {
-                data = saved;
+                data = saved; relocated = true;
                 if (!fs::is_directory(data)) {
                     data = home;
                     fail(L"Your selected Project Tourline Prologue storage is unavailable:\n\n" + saved + L"\n\nReconnect the drive and try again. Your saved selection has been kept.");
@@ -501,6 +515,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         if (!override_data) fs::create_directories(home);
         Handle home_lock(override_data ? INVALID_HANDLE_VALUE : CreateFileW((home/L"storage.lock").c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr));
         if (!override_data && home_lock.h == INVALID_HANDLE_VALUE) fail(L"Project Tourline Prologue is already running or storage setup is in use.");
+        // Also repairs a link from before this version or after storage.ini was removed.
+        if (!override_data) link_storage(home, relocated ? data : fs::path{});
         Handle lock(CreateFileW((data/L"launcher.lock").c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr));
         if (lock.h == INVALID_HANDLE_VALUE) fail(L"Project Tourline Prologue is already running or this user-data folder is not writable.");
         auto expected = release_value(L"elf_sha256");
@@ -517,6 +533,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             auto previous = data;
             relocate(selected, home);
             if (data != previous) {
+                link_storage(home, data);
                 CloseHandle(lock.h);
                 lock.h = CreateFileW((data/L"launcher.lock").c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
                 if (lock.h == INVALID_HANDLE_VALUE) fail(L"The selected storage folder is in use or not writable.");
@@ -562,7 +579,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         auto settings = data/L"gt5p_settings.toml";
         if (!fs::exists(settings)) {
             std::ofstream f(settings);
-            f << "# First-run preset. Change this in the game's F1 settings.\n[video]\nresolution = \"720p\"\naspect = \"16:9\"\nmsaa = 2\nshader_precompile = true\npipeline_async = true\n";
+            // Keep in step with config.new in recomplauncher.json, which writes this preset
+            // when RecompLauncher starts the game before this launcher has run.
+            f << "# First-run preset. Change this in the game's F1 settings.\n[video]\nresolution = \"720p\"\naspect = \"16:9\"\nmsaa = 2\nshader_precompile = true\npipeline_async = true\n\n[meta]\ndefaults_version = 1\n";
             if (!f) fail(L"Could not write initial video settings.");
         }
         setenv(L"PS3_TITLE", L"Project Tourline Prologue");
