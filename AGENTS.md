@@ -36,13 +36,19 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-06, Phase 226)
+## Start here: state of play (2026-11-06, Phase 227)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 226 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 227 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **DXC for guest shaders (Phase 227, opt-in, main patch):** `RSX_SHADER_COMPILER=dxc` compiles guest shaders
+  with DXC to SM 6.0 (`dxcompiler.dll` + `dxil.dll` beside gt5p.exe, from the Windows SDK; target vs_6_0/ps_6_0 in
+  the cache key; resource arrays split for DXIL). Offline on the HSR race set: 84.8 -> 32.1 s of compile time.
+  Empty-cache HSR excess 11.2/12.2 -> 6.6/6.8 s. Not default: preparation still makes FXC bytecode, the DLLs are
+  not packaged, no per-pixel parity check yet. Tools: scratch-only harness described in progress Phase 227.
 
 - **Trickled race files, pause at the race start (Phase 226, branch feature/hitch-texture-lru):** while the race
   stage runs, its complete shaders and driver blobs are copied into the live cache every few seconds

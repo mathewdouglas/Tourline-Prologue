@@ -56,7 +56,7 @@ index ca8c384..0f5935a 100644
      volatile LONG* busy = shader_busy_ctr(preload);
      InterlockedIncrement(busy);
 +    double hitch_compile_begin = hitch_on() ? perf_now() : 0;
-     HRESULT hr = D3DCompile(src, len, name, NULL, NULL, "main", target, flags, 0, out, err);
+     HRESULT hr = shader_compile(src, len, name, target, flags, out, err);
 +    if(hitch_on()) { double ms=(perf_now()-hitch_compile_begin)*1000.; InterlockedAdd64(&s_hitch_compile_us,(LONG64)(ms*1000.)); if(s_hitch_replay) s_hitch_sync_compile_ms += ms; }
      InterlockedIncrement(&g_rsx_shaders_compiled);
      shader_work_done(preload);
@@ -66,7 +66,7 @@ index ca8c384..0f5935a 100644
          ID3DBlob* out = NULL; ID3DBlob* err = NULL;
          InterlockedIncrement(&g_rsx_shader_busy);
 +        double hitch_worker_begin = hitch_on() ? perf_now() : 0;
-         HRESULT hr = D3DCompile(j->src, j->len, "guest_async", NULL, NULL, "main", j->target, j->flags, 0, &out, &err);
+         HRESULT hr = shader_compile(j->src, j->len, "guest_async", j->target, j->flags, &out, &err);
 +        if(hitch_on()) InterlockedAdd64(&s_hitch_compile_us,(LONG64)((perf_now()-hitch_worker_begin)*1e6));
          if(s_shader_profile.on)InterlockedAdd64(&s_shader_profile.compile_us,shader_prepare_clock()-shader_clock);
          shader_clock=shader_prepare_clock();

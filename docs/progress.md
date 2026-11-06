@@ -9,6 +9,54 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 227 - DXC for guest shaders (opt-in): compile time 2.6x lower (2026-11-06)
+
+**Aim.** On an empty cache a High Speed Ring race compiles about 1,075 shaders on demand. Make the compiles
+themselves quicker.
+
+**Where the time goes.** The engine with the source-dump overlay (`RSX_SHADER_SRC_DUMP`) recorded the real
+on-demand set of one empty-cache race: 1,075 HLSL sources (854 pixel, 221 vertex). Offline, one thread,
+FXC (`D3DCompile`, the engine's flags): 86.7 s in total, median 74 ms, p90 151 ms, worst 437 ms; the slowest
+100 shaders are only 24% of it. Our own translation is negligible (Phase 211: 0.07 s against 472 s compiler).
+- **FXC flags do not help:** optimisation level 0 = the default (level 1); `SKIP_OPTIMIZATION` is ~30%
+  faster but the bytecode is 2.2x larger.
+- **Text ablations** (time, and whether the bytecode stays identical): an empty `main` compiles 80 pixel
+  shaders in 0.17 s (fixed cost negligible); the body is the cost. Plain variables instead of the `r[]`/`h[]`
+  register arrays: -15%, 70 of 80 bytecodes identical. Hoisting `1/w`: -4%. Vertex shaders: 74% of their
+  time is the GPU vertex-fetch decoder (5.24 -> 1.37 s for 40 without it); unrolling it is slower (9.1 s).
+- **DXC** (`dxcompiler.dll` 1.8.2502 from the Windows SDK, shader model 6.0, `-HV 2018` because the text
+  uses vector `?:`), in process, same files: **32.1 s against 84.8 s**, no failures. Pixel 57.1 -> 23.7 s
+  (median 55 -> 24 ms, worst 419 -> 122 ms); vertex 27.7 -> 8.4 s (median 129 -> 39 ms, worst 334 -> 69 ms).
+  `-O0..-O3` take the same time (the cost is DXC's front end).
+
+**What changed (main patch, default off).** `RSX_SHADER_COMPILER=dxc` compiles guest vertex and fragment
+shaders with DXC: `dxcompiler.dll` (and `dxil.dll`, which signs the DXIL) beside the engine, loaded at run
+time; one compiler object per thread; COM declared by hand (the backend is C). The target becomes
+`vs_6_0`/`ps_6_0` before the source key is computed, so cache file names and native pipeline keys never mix
+with FXC's. DXIL declares a resource array's whole range, so for DXC the `rsx_samp[16]` and `rsx_tex[16]`
+arrays (constant indices only) are rewritten into separate declarations; without that every pixel shader
+failed pipeline creation ("Shader sampler descriptor range ... not fully bound in root signature", D3D12 debug
+layer). No DLL: FXC with one log line. The port's own helper shaders stay on FXC. The frame-trace overlay's
+context lines were updated.
+
+**Measured.** High Speed Ring, 1080p 16:9 2x, empty cache, no helper, same private engine, one locked run per row.
+
+| Compiler | Excess | >50 / >100 ms | Worst (ms) | Frame test | Shader compiles / pipelines |
+| --- | --- | --- | --- | --- | --- |
+| FXC | 11.2 / 12.2 s | 147, 171 / 49, 40 | 318, 554 | 56.1, 55.9 FPS; p99 46, 49 ms | 1,064-1,071 / 1,880-1,885 |
+| DXC | 6.6 / 6.8 s | 89, 86 / 27, 31 | 300, 372 | 57.9, 58.6 FPS; p99 33, 26 ms | 1,098-1,099 / 1,971-2,184 |
+
+- No compile or pipeline failures with DXC (D3D12 debug layer clean on the dealership route); dealership and
+  race screenshots look the same as FXC's. This is a visual check, not a per-pixel comparison of one frame.
+- Driver time in slow frames is about the same (pso ms in >50 ms intervals 1,110-1,264 against 1,145-1,511):
+  pipeline creation from DXIL is not slower here.
+
+**Not done (needed before it can be the default).** Preparation still produces FXC bytecode, so a prepared
+cache is not used by a DXC game: the offline engine and the helper's cached-shader checks need the same
+compiler and target. `dxcompiler.dll`/`dxil.dll` must be packaged (from the Windows SDK or the DXC release;
+redistribution terms to confirm). Rendering parity needs per-pixel comparisons on fixed frames. Other GPUs and
+drivers untested. The interpreter overlay's own compiles are unchanged.
+
 ## Phase 226 - Background preparation: trickled race files, pause at the race start (2026-11-06)
 
 **Aim.** Phase 225 helped only a player who stayed in the menus for about 1.5 minutes: the race stage's files
