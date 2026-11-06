@@ -13,12 +13,18 @@ priority in its own kill-on-close job, logging to `logs/prepare-background.out/.
 
 1. **Race stage:** the bundled plan's 2,113 race pipelines are prepared and proven like any preparation,
    then copied into the cache the game is using and added to its race list. The next race loading screen
-   prepares them (about 90 s after launch on the 12-thread development PC).
+   prepares them (about 90 s after launch on the 12-thread development PC). While the stage runs, its
+   finished shaders and driver blobs are copied in every few seconds already (Phase 226; complete files
+   only), so a race started before the stage finishes still finds most shaders on disk.
+   `GT5P_PREPARE_BACKGROUND_TRICKLE=0` copies only at the end.
 2. **Full stage:** the ordinary full preparation, reusing the race stage; selected only when it completes,
    so the next launch uses it.
 
-While a race runs (race loading screen until the next menu, results and replays included) the helper's
-processes are suspended; the game signals this through `GT5P_RACE_EVENT`, which the launcher creates.
+While a race runs (from the race start until the next menu, results and replays included) the helper's
+processes are suspended; the game signals this through `GT5P_RACE_EVENT`, which the launcher creates. The
+race start is the first Cross or Start press at least 1 s after the race loading screen (the grid
+preview's Start), or 45 s after it (`GT5P_RACE_SIGNAL_CAP_MS`); `GT5P_RACE_SIGNAL_AT=loading` pauses from
+the loading screen instead (Phase 225).
 A settings restart keeps the helper; quitting stops it at a checkpoint (`prepare.cancel`), and the next
 launch resumes. `logs/prepare-background-pause.txt` records the pauses.
 

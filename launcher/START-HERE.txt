@@ -23,7 +23,8 @@ Do not move/delete the selected dump while using the port.
 Background shader preparation (default):
 Until shaders are prepared for this version, the launcher prepares them in the
 background while you play, at low priority. Race shaders come first; once they
-are ready, the next race loading screen loads them. It pauses during races and
+are ready, the next race loading screen loads them, and finished ones are used
+straight away. It pauses during races (from the grid preview's Start) and
 stops when you quit, then carries on next time. When it has finished, the next
 launch uses the full preparation. Logs: logs\prepare-background.out/.err.
 Set GT5P_PREPARE_BACKGROUND=0 to turn it off (the launcher then offers

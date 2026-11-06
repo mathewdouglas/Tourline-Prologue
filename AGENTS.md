@@ -36,13 +36,20 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-06, Phase 225)
+## Start here: state of play (2026-11-06, Phase 226)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 225 is the latest).
+has the evidence, newest phase first (Phase 226 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **Trickled race files, pause at the race start (Phase 226, branch feature/hitch-texture-lru):** while the race
+  stage runs, its complete shaders and driver blobs are copied into the live cache every few seconds
+  (`GT5P_PREPARE_BACKGROUND_TRICKLE=0`: only at the end). The renderer arms the race signal at the loading
+  screen and sets it on the first Cross/Start press >= 1 s later (grid preview Start) or after
+  `GT5P_RACE_SIGNAL_CAP_MS` (45 s); `GT5P_RACE_SIGNAL_AT=loading` restores Phase 225. Empty-cache HSR straight
+  to the race: excess 11.2 -> 3.2-3.9 s (trickle alone 4.5 s); with 90 s of menus 3.0-3.6 s. Packaged e2e passes.
 
 - **Background preparation (Phase 225, launcher default, branch feature/hitch-texture-lru):** with nothing
   current prepared, the launcher starts `GT5P-Prepare.exe --background --live-cache <cache in use>` beside the

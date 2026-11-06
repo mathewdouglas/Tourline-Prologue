@@ -42,6 +42,8 @@ Evidence for finished work goes in [progress.md](progress.md).
   race pipelines first, copied into the live cache (next race loading screen prepares them), helper paused
   during races, full preparation selected next launch. Empty-cache HSR first race with ~2.5 min of menus
   first: excess 10.5-11.1 s -> 3.5-4.5 s; straight to the race: unchanged (10.3 s), later races benefit.
+  Phase 226: the race stage's finished shaders and blobs are copied in while it runs, and the helper pauses at
+  the race start (grid preview Start press) instead of the loading screen: straight to the race 11.2 -> 3.2-3.9 s.
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;

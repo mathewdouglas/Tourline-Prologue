@@ -122,7 +122,7 @@ def launch(label, install, data, env, want, timeout):
             text = out.read_text(encoding='utf-8', errors='replace') if out.exists() else ''
             if want in text:
                 row['wanted_s'] = round(time.perf_counter() - begin, 1)
-                row['line'] = next(line for line in text.splitlines() if want in line)[:400]
+                row['line'] = next(line for line in text.splitlines() if want in line)[:1000]
                 break
             time.sleep(1)
         # Close the game the way a player does; the launcher must then stop the helper and exit.

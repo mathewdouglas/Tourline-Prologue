@@ -172,15 +172,15 @@ def race_stage(folder, document, bundle, translation, live, storage, engine, dec
     stage follows either way."""
     import background_preparation, msaa_pipeline_map
     from pipeline_warmup_plan import load as load_plan
-    def prepare_stage(subset, output, resume):
+    def prepare_stage(subset, output, resume, staged):
         return template.prepare(subset,None,storage/'input/EMAIN.ELF',engine,decoder,storage,output,
-            assets=assets,asset_map=location_map,resume=resume,output_validator=lambda p:p,progress=progress,
+            assets=assets,asset_map=location_map,resume=resume,output_validator=lambda p:p,progress=staged,
             volume=volume,volume_map=volume_map,vertex_mode=shader_vertex_batch.player_mode(),translation=translation)
-    def msaa_stage(output, report):
+    def msaa_stage(output, report, staged):
         from interp_pipeline_classes import player_settings
         shape=player_settings(storage)
         if shape is None:return None
-        result=msaa_pipeline_map.prepare(output,engine,storage,report,translation,shape[0],runner,progress)
+        result=msaa_pipeline_map.prepare(output,engine,storage,report,translation,shape[0],runner,staged)
         report['msaa_map']=msaa_pipeline_map.compact(result)
         return result['mapping'] if result['status']=='complete' else None
     try:
