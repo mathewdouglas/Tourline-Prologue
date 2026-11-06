@@ -39,6 +39,31 @@ int wmain(int argc, wchar_t** argv) {
         wchar_t cancelled[8]{};
         return GetEnvironmentVariableW(L"GT5P_PROBE_TOOL_CANCEL",cancelled,8) ? 2 : 0;
     }
+    bool background=false;
+    for (int i=1;i<argc;i++) if (!wcscmp(argv[i],L"--background")) background=true;
+    if (background) {
+        // Phase 225 background helper: its own record (the game writes probe.txt meanwhile). Runs until
+        // prepare.cancel appears or GT5P_PROBE_BACKGROUND_MS passes; records which, and its priority class.
+        FILE* record=nullptr;
+        if (_wfopen_s(&record,L"background.txt",L"a, ccs=UTF-8") || !record) return 2;
+        fwprintf(record,L"argc=%d\npriority=%lu\n",argc,GetPriorityClass(GetCurrentProcess()));
+        for (int i=0;i<argc;i++) fwprintf(record,L"arg%d=%ls\n",i,argv[i]);
+        fclose(record);
+        wchar_t limit[32]{};
+        int ms=GetEnvironmentVariableW(L"GT5P_PROBE_BACKGROUND_MS",limit,32) ? _wtoi(limit) : 60000;
+        const wchar_t* outcome=L"finished";
+        for (int elapsed=0,beat=0;elapsed<ms;elapsed+=20) {
+            if (GetFileAttributesW(L"prepare.cancel")!=INVALID_FILE_ATTRIBUTES) { outcome=L"cancelled"; break; }
+            FILE* heart=nullptr;   // advances only while this process runs (the launcher suspends it in races)
+            if (!_wfopen_s(&heart,L"heartbeat.tmp",L"w") && heart) {
+                fprintf(heart,"%d",++beat); fclose(heart);
+                MoveFileExW(L"heartbeat.tmp",L"heartbeat.txt",MOVEFILE_REPLACE_EXISTING);   // never a partial file
+            }
+            Sleep(20);
+        }
+        if (!_wfopen_s(&record,L"background.txt",L"a, ccs=UTF-8") && record) { fwprintf(record,L"outcome=%ls\n",outcome); fclose(record); }
+        return wcscmp(outcome,L"cancelled") ? 0 : 2;
+    }
     FILE* f = nullptr;
     if (_wfopen_s(&f, L"probe.txt", L"w, ccs=UTF-8") || !f) return 2;
     wchar_t cwd[32768];
@@ -52,6 +77,23 @@ int wmain(int argc, wchar_t** argv) {
         fwprintf(f, L"%ls=%ls\n", key, value);
     }
     fclose(f);
+    wchar_t race[8]{}, race_event[256]{};
+    if (GetEnvironmentVariableW(L"GT5P_PROBE_RACE",race,8) && GetEnvironmentVariableW(L"GT5P_RACE_EVENT",race_event,256)) {
+        // Phase 225: act as the renderer does at a race and back in the menus; the background helper's
+        // heartbeat must stop while racing and advance again afterwards.
+        auto beat=[] { FILE* h=nullptr; int n=-1; if (!_wfopen_s(&h,L"heartbeat.txt",L"r") && h) { if (fscanf_s(h,"%d",&n)!=1) n=-1; fclose(h); } return n; };
+        HANDLE e=OpenEventW(EVENT_MODIFY_STATE,FALSE,race_event);
+        int a=-1,b=-1,c=-1;
+        if (e) {
+            Sleep(300); SetEvent(e); Sleep(800); a=beat(); Sleep(600); b=beat();
+            ResetEvent(e); Sleep(800); c=beat(); CloseHandle(e);
+        }
+        FILE* r=nullptr;
+        if (!_wfopen_s(&r,L"probe.txt",L"a, ccs=UTF-8") && r) {
+            fwprintf(r,L"race_event=%ls\nrace_paused=%d\nrace_resumed=%d\n",e?L"opened":L"missing",a>0 && a==b,c>b);
+            fclose(r);
+        }
+    }
     wchar_t action[32]{};
     if (GetEnvironmentVariableW(L"GT5P_PROBE_PIPELINE_ACTION",action,32) && tourline_restart::tools_available() &&
             (argc<2 || wcscmp(argv[1],L"--install"))) {

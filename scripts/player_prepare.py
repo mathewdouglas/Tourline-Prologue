@@ -166,6 +166,33 @@ def previous_cache(storage, output):
     return cache_root(selected)
 
 
+def race_stage(folder, document, bundle, translation, live, storage, engine, decoder, location_map, assets,
+               volume, volume_map, progress, runner):
+    """Phase 225 race stage (scripts/background_preparation.py). Errors are reported, never fatal: the full
+    stage follows either way."""
+    import background_preparation, msaa_pipeline_map
+    from pipeline_warmup_plan import load as load_plan
+    def prepare_stage(subset, output, resume):
+        return template.prepare(subset,None,storage/'input/EMAIN.ELF',engine,decoder,storage,output,
+            assets=assets,asset_map=location_map,resume=resume,output_validator=lambda p:p,progress=progress,
+            volume=volume,volume_map=volume_map,vertex_mode=shader_vertex_batch.player_mode(),translation=translation)
+    def msaa_stage(output, report):
+        from interp_pipeline_classes import player_settings
+        shape=player_settings(storage)
+        if shape is None:return None
+        result=msaa_pipeline_map.prepare(output,engine,storage,report,translation,shape[0],runner,progress)
+        report['msaa_map']=msaa_pipeline_map.compact(result)
+        return result['mapping'] if result['status']=='complete' else None
+    try:
+        plan=load_plan(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',bundle)
+        return background_preparation.prepare_race(folder,document,plan,translation,live,prepare_stage,msaa_stage,progress)
+    except KeyboardInterrupt:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the full stage still runs
+        print('Background race stage not merged: '+str(exc),file=sys.stderr,flush=True)
+        return dict(status='failed',reason=str(exc))
+
+
 def interp_stage(install, storage, out, progress, runner):
     """Interpreter pipelines into out/shadercache. Skips are recorded; errors are reported, not fatal."""
     import interp_pipeline_prep
@@ -196,6 +223,20 @@ def interp_only(install, storage, progress, runner):
     print(json.dumps(report))
 
 
+def process_image(pid):
+    """Full image path of a running process, or None."""
+    api=ctypes.WinDLL('kernel32',use_last_error=True)
+    api.OpenProcess.argtypes=[ctypes.c_ulong,ctypes.c_bool,ctypes.c_ulong];api.OpenProcess.restype=ctypes.c_void_p
+    api.QueryFullProcessImageNameW.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_wchar_p,ctypes.POINTER(ctypes.c_ulong)]
+    api.CloseHandle.argtypes=[ctypes.c_void_p]
+    handle=api.OpenProcess(0x1000,False,pid)
+    if not handle:return None
+    try:
+        path=ctypes.create_unicode_buffer(32768);size=ctypes.c_ulong(len(path))
+        return Path(path.value).resolve() if api.QueryFullProcessImageNameW(handle,0,path,ctypes.byref(size)) else None
+    finally:api.CloseHandle(handle)
+
+
 def main():
     if shader_vertex_batch.worker_requested(sys.argv):
         sys.exit(shader_vertex_batch.worker_main(sys.argv))
@@ -210,10 +251,23 @@ def main():
                     help='Only prepare shader-interpreter pipelines into the selected completed preparation')
     ap.add_argument('--check-selected',action='store_true',
                     help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
+    ap.add_argument('--background',action='store_true',
+                    help='Phase 225: run beside the game at idle priority; race stage merged into --live-cache first')
+    ap.add_argument('--live-cache',type=Path,help='With --background: the shader cache the running game uses')
     a=ap.parse_args()
     storage=safe_storage(a.storage)
     install=a.install.resolve()
     if a.check_selected:sys.exit(0 if selected_is_current(storage,install) else 3)
+    live=None
+    if a.background:
+        import background_preparation
+        if a.live_cache is None or a.interp_pipelines_only:raise ValueError('--background needs --live-cache and a full preparation')
+        live=a.live_cache.absolute()
+        if not live.is_relative_to(storage):
+            raise ValueError('The live cache must be inside the player storage')
+        # Before any compiler pool sizes itself. An explicit GT5P_PREPARE_COMPILER_WORKERS still wins.
+        os.environ.setdefault('GT5P_PREPARE_COMPILER_WORKERS',str(background_preparation.workers()))
+        background_preparation.lower_priority()
     selection=select_settings(storage)
     translation=selection['mode']
     def idle_for_player():
@@ -238,6 +292,9 @@ def main():
         result=subprocess.run(['tasklist','/FI','IMAGENAME eq gt5p.exe','/FO','CSV','/NH'],capture_output=True,text=True,check=True)
         for row in csv.reader(result.stdout.splitlines()):
             if len(row)>1 and row[0].lower()=='gt5p.exe' and int(row[1])!=allowed:
+                # Background mode works beside this install's own game (and its restarts). A game of any
+                # other install, or one whose image cannot be read, still stops preparation.
+                if a.background and process_image(int(row[1]))==install/'runtime/gt5p.exe':continue
                 raise ValueError('Another GT5P process is running; nothing was stopped')
     template.idle=idle_for_player
     engine=install/'runtime/gt5p.exe';decoder=install/'preparation/decoder.dll'
@@ -311,6 +368,15 @@ def main():
         interp_only(install,storage,progress,run_owned)
         status.write_text('Interpreter pipelines complete.',encoding='utf-8')
         return
+    race_folder=None
+    if a.background:
+        race_folder=parent/('race-'+token)
+        race=race_stage(race_folder,document,bundle,translation,live,storage,engine,decoder,location_map,
+                        a.assets.resolve() if a.assets else None,volume,volume_map,progress,run_owned)
+        print('Background race stage: '+json.dumps(race),flush=True)
+        # The full stage reuses the race stage's verified shaders and driver blobs.
+        if (race_folder/'stage/shadercache').is_dir() and not a.no_reuse and os.environ.get('GT5P_PREPARE_REUSE')!='0':
+            reuse=race_folder/'stage/shadercache'
     report=template.prepare(bundle,None,storage/'input/EMAIN.ELF',engine,decoder,storage,out,
         assets=a.assets.resolve() if a.assets else None,asset_map=location_map,resume=out.exists(),
         output_validator=lambda p:p,progress=progress,reuse_cache=reuse,volume=volume,volume_map=volume_map,
@@ -375,6 +441,10 @@ def main():
     identity.write_text(release_identity(install)+'\n',encoding='ascii')
     pending.write_text((out/'shadercache').relative_to(storage).as_posix(),encoding='utf-8');pending.replace(pointer)
     status.write_text('Complete. Normal demand compilation handles uncovered pipelines.',encoding='utf-8')
+    if race_folder is not None and race_folder.is_dir() and not race_folder.is_symlink():
+        # Its files are in the live cache and in the selected preparation now.
+        import shutil
+        shutil.rmtree(race_folder,ignore_errors=True)
 
 
 if __name__=='__main__':

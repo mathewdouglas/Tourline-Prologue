@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-06, Phase 224)
+## Start here: state of play (2026-11-06, Phase 225)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 224 is the latest).
+has the evidence, newest phase first (Phase 225 is the latest).
 
 ### What works now
+
+- **Background preparation (Phase 225, launcher default, branch feature/hitch-texture-lru):** with nothing
+  current prepared, the launcher starts `GT5P-Prepare.exe --background --live-cache <cache in use>` beside the
+  game (idle priority, own job; no offer). Race stage first (2,113 plan records, same proofs), copied into the
+  live cache and appended to its race list; then the full preparation, selected next launch. Paused while
+  racing: the renderer sets `GT5P_RACE_EVENT` from the race loading script to the next menu script, the
+  launcher suspends the helper's job. Empty-cache HSR with ~2.5 min of menus first: excess 10.5-11.1 -> 3.5-4.5 s;
+  straight to the race unchanged (10.3 s; 15-17 s unpaused). Rollbacks `GT5P_PREPARE_BACKGROUND=0` (offer),
+  `GT5P_PREPARE_BACKGROUND_PAUSE=0`, `GT5P_PREPARE_BACKGROUND_WORKERS`. Packaged launcher + frozen helper +
+  engine pass `scripts/test/background_launcher_e2e.py`.
 
 - **Interpreter GPU budget (Phase 224, interp overlay, interpreter still default-off):** pending draws the
   interpreter may take per frame adapt to the last frame's GPU time (`RSX_SHADER_INTERP_BUDGET`, ms target,

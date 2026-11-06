@@ -20,6 +20,16 @@ restarts into recording mode; close that game to verify afterward. Launch the
 game normally after a tool finishes. Use a matching launcher/engine/helper package.
 Do not move/delete the selected dump while using the port.
 
+Background shader preparation (default):
+Until shaders are prepared for this version, the launcher prepares them in the
+background while you play, at low priority. Race shaders come first; once they
+are ready, the next race loading screen loads them. It pauses during races and
+stops when you quit, then carries on next time. When it has finished, the next
+launch uses the full preparation. Logs: logs\prepare-background.out/.err.
+Set GT5P_PREPARE_BACKGROUND=0 to turn it off (the launcher then offers
+preparation once instead), or GT5P_PREPARE_BACKGROUND_PAUSE=0 to keep it
+running during races.
+
 Optional experimental shader preparation:
 After setup, close the game and run Prepare shaders.cmd. Preparation reads the
 game folder already selected for play. No separate GT.VOL extraction, second

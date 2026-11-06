@@ -85,9 +85,10 @@ def main():
             env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0',
                        GT5P_PROBE_DELAY_MS='100',
                        GT5P_PROBE_PREPARE_DELAY_MS='30000' if 'cancel-' in label else '100')
-            for name in ('GT5P_PREPARE_OFFER','GT5P_PREPARE_UI','GT5P_PREPARE_VOLUME','GT5P_PROBE_SELECTED','GT5P_PROBE_PREPARE_EXIT'):
+            for name in ('GT5P_PREPARE_OFFER','GT5P_PREPARE_UI','GT5P_PREPARE_VOLUME','GT5P_PROBE_SELECTED','GT5P_PROBE_PREPARE_EXIT','GT5P_PREPARE_BACKGROUND'):
                 env.pop(name,None)
             env['GT5P_PROBE_SELECTED']='0'   # not prepared, unless the scenario says otherwise
+            env['GT5P_PREPARE_BACKGROUND']='0'   # the offer flow; Phase 225 background: launcher_background_native.py
             env.update(spec['extra'])
             if label=='offer-disabled': env['GT5P_PREPARE_OFFER']='0'
             if label=='cancel-legacy': env['GT5P_PREPARE_UI']='0'

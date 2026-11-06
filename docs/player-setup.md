@@ -5,6 +5,31 @@ include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` fiel
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
 not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
 
+## Background preparation (Phase 225, replaces the offer by default)
+
+When no completed preparation made by this release is selected, the launcher no longer asks. It starts the
+helper beside the game (`GT5P-Prepare.exe --background --live-cache <the cache this run uses>`) at idle
+priority in its own kill-on-close job, logging to `logs/prepare-background.out/.err`:
+
+1. **Race stage:** the bundled plan's 2,113 race pipelines are prepared and proven like any preparation,
+   then copied into the cache the game is using and added to its race list. The next race loading screen
+   prepares them (about 90 s after launch on the 12-thread development PC).
+2. **Full stage:** the ordinary full preparation, reusing the race stage; selected only when it completes,
+   so the next launch uses it.
+
+While a race runs (race loading screen until the next menu, results and replays included) the helper's
+processes are suspended; the game signals this through `GT5P_RACE_EVENT`, which the launcher creates.
+A settings restart keeps the helper; quitting stops it at a checkpoint (`prepare.cancel`), and the next
+launch resumes. `logs/prepare-background-pause.txt` records the pauses.
+
+- `GT5P_PREPARE_BACKGROUND=0` restores the one-time offer below. `GT5P_PREPARE_BACKGROUND_PAUSE=0` never
+  pauses. `GT5P_PREPARE_BACKGROUND_WORKERS=<2..12>` sets the compiler workers (default half the logical
+  processors). `GT5P_PREPARE_OFFER=0`, `GT5P_PREPARE_VOLUME=0` and `--no-prepared` start nothing.
+- A current preparation is remembered in `prepare-current-<port version>.txt` (the selection it was
+  confirmed for), so later launches skip the helper check.
+- Tests: `scripts/test/launcher_background_native.py` (11 scenarios against the probe),
+  `scripts/test/background_preparation.py`. Measurements: docs/progress.md Phase 225.
+
 ## First-launch preparation offer, preload default and indicators (v0.2.4)
 
 Shaders prepared by an earlier version are not reused by v0.2.4 (the shader text

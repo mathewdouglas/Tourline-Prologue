@@ -9,6 +9,82 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 225 - Background preparation, race pipelines first (2026-11-06)
+
+**Aim.** A player who never runs preparation gets about 1,075 shader compiles and 1,900 pipeline creations in
+their first race (Phase 224: 11-13 s of excess on an empty High Speed Ring). Preparation itself works, but
+it is a 10-20 minute wait the player has to choose. Do it while they play, starting with what races need.
+
+**What it does.** `launcher/launcher.cpp`, `scripts/player_prepare.py --background --live-cache <dir>`,
+`scripts/background_preparation.py`, one renderer function in the main patch.
+- **Launcher:** when no completed preparation of this release is selected (`--check-selected`, now asked on
+  every launch until it answers "current", then remembered in `prepare-current-<version>.txt` beside the
+  selection), the helper starts beside the game: idle priority (inherited by its compiler and offline
+  processes; the helper does not enter `PROCESS_MODE_BACKGROUND_BEGIN`, which measured as resetting the class
+  its children inherit to normal), its own kill-on-close job, logs in `logs/prepare-background.*`. There is no offer dialog in
+  this mode. Settings restarts keep it; any other game exit stops it (`prepare.cancel`, 30 s, then the job
+  closes); it resumes next launch from its checkpoints. `GT5P_PREPARE_BACKGROUND=0` restores the one-time
+  offer; `GT5P_PREPARE_OFFER=0`, `GT5P_PREPARE_VOLUME=0` and `--no-prepared` start nothing.
+  Prepare shaders.cmd and F1 > Debug > Prepare shaders still run the foreground preparation (the background
+  helper is stopped first).
+- **Race stage:** the 2,113 race records of the bundled warmup plan (557 of 2,824 fragment programs) as their
+  own template bundle, through the same preparation, translation and MSAA re-target stages and the same proofs,
+  into `preparation/race-<token>/stage`. Its shader bytes, driver blobs and code files are then copied into
+  the cache the game is using (atomic rename, never replacing a file the game has), recipes last, and the
+  race keys are appended to that cache's `warmup-v1/race-v1.txt`, which the renderer reads at every race
+  loading screen. Done once per live cache (`merged-v1.json`).
+- **Full stage:** the ordinary full preparation, reusing the race stage's verified shaders and driver blobs
+  (4,230 present, 2,113 blobs copied), selected only on success as before, so the next launch uses it. The
+  race stage folder is removed then.
+- **Paused while racing:** the renderer sets `GT5P_RACE_EVENT` (a manual-reset event the launcher creates)
+  at the race loading script and resets it when a menu script loads (results and replays count as racing).
+  A launcher thread suspends every process of the helper's job while it is set and resumes them in the
+  menus (`NtSuspendProcess`, polled every 250 ms; the totals go to `logs/prepare-background-pause.txt`).
+  `GT5P_PREPARE_BACKGROUND_PAUSE=0` never pauses. Without the launcher's variable the renderer does nothing.
+- **Workers:** half the logical processors (2..12; 6 here), `GT5P_PREPARE_BACKGROUND_WORKERS` overrides.
+
+**Measured.** High Speed Ring, 1080p 16:9 2x, empty cache, one locked run per row, private engine (main
+patch + frame trace), source helper started with the game as the launcher does (`hitch_capture.py
+--background-helper`). Excess = time above the frame budget in display intervals over 50 ms from the grid.
+
+| Case | Excess | >50 / >100 ms | Worst (ms) | Note |
+| --- | --- | --- | --- | --- |
+| Empty cache | 12.8 / 12.0 s | 177, 164 / 50, 44 | 349, 324 / 452, 293 | race loading ~55 s after launch |
+| Helper running, no pause (3 workers)* | 17.0 / 15.0 s | 197, 182 / 75, 70 | 556, 422 / 506, 370 | race stage still compiling in the race; 51 FPS frame test |
+| Helper, paused while racing | 10.3 s (11.1 s*) | 156 (151*) / 30 (49*) | 230, 227 (246, 208*) | paused 119 s; race stage not finished before the race |
+| Empty cache, 90 s more in the menus | 10.5 / 11.1 s | 162, 148 / 29, 39 | 224, 184 / 783, 210 | |
+| Helper, paused, 90 s more in the menus | 3.5 / 4.5 s (3.1 / 3.0 s*) | 35, 38 / 15, 18 | 856, 240 / 840, 399 | race stage merged 89-91 s after launch (111 s*), race at 153-156 s |
+| Race stage copied in only (no helper running) | 2.6 / 3.8 s | 27, 30 / 14, 14 | 329, 245 / 795, 785 | stands for a later race of the same session |
+| Full preparation selected | 0.36 s | 9 / 0 | 67 | next launch |
+
+\* Runs before the priority fix: the helper itself was idle, but `PROCESS_MODE_BACKGROUND_BEGIN` had put its
+compiler and offline children back to normal priority. The unpaused case was not repeated at idle priority.
+
+- The race stage alone (no game) takes 106 s with 3 workers; the whole background preparation 20 min.
+  Beside the game in the menus, 6 workers at idle priority: merged 89-91 s after launch (88 s in the packaged
+  run below).
+- In the menus the helper costs a little: over about 120 s of menus 30.4-31.1 against 31.4 FPS, frames over
+  50 ms 20-30 against 11-13, over 100 ms 4-13 against 0-3, p99 39-45 against 37 ms.
+- A first race started within about two minutes of launch is the same as before; it is no worse because the
+  helper is paused. The next race loading screen prepares the race set.
+
+**Tests.** `scripts/test/background_preparation.py` (switches, race selection on the starter, merge rules);
+`scripts/test/launcher_background_native.py` (11 cases with the probe: started at idle priority with the
+live cache, old selection as live cache, finishes or is cancelled with the game, survives a settings restart,
+suspended while the probe signals a race and resumed after, no event with `_PAUSE=0`, current preparation
+remembered, check error, disabled switches); `launcher_first_run_native.py` (20 offer cases, run with
+`GT5P_PREPARE_BACKGROUND=0`) and `launcher_native.py` pass. `scripts/test/background_launcher_e2e.py` runs the
+real launcher, the frozen helper (`build_preparer.py`) and the engine with nothing prepared: no offer, game at
+1.1 s, helper and its workers at idle priority, race stage merged at 88 s (2,113 race keys, 2,116 recipes in the
+live cache), game window closed -> launcher exits 4.1 s later with no helper or game process left, nothing
+selected, work resumable; the second launch reports the race stage already merged at 11.5 s. The route
+measurements use the source helper with the same arguments, priority, job and pause rule (that run stays on
+the menus, so the race pause itself is covered by the route runs and the probe test).
+
+**Limits.** Race membership is the observed plan (High Speed Ring, Daytona, Fuji runs); other tracks gain from
+the shared states only. The menus are not prepared first. A player who changes resolution while it runs
+gets a race stage for the old mode (the full stage then fails its settings check and restarts next launch).
+
 ## Phase 224 - Per-frame interpreter budget (GPU cost cap) (2026-11-06)
 
 **Aim.** Help players with no prepared cache. With the interpreter on, every pending draw is interpreted, and an

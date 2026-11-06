@@ -448,6 +448,136 @@ static int selected_preparation(const fs::path& disc) {
         return code==0 || code==3 ? (int)code : -1;
     } catch (const Failure&) { return -1; } catch (const std::exception&) { return -1; }
 }
+// Phase 225: background preparation beside the game. Started (idle priority, own kill-on-close job) when no
+// completed preparation of this release is selected; it prepares the race pipelines first and copies them into
+// the cache the game is using, then runs the full preparation, which the next launch selects. Stopped with the
+// game: prepare.cancel at a checkpoint (work kept for resume), then the job closes. GT5P_PREPARE_BACKGROUND=0
+// restores the one-time offer instead.
+// While a race runs the helper is paused: the game sets GT5P_RACE_EVENT (a manual-reset event this launcher
+// creates) from the race loading screen until a menu loads, and a watcher suspends every process in the
+// helper's job meanwhile (resumed in the menus). Measured: a helper still compiling during the race added
+// 3-4 s of hitching to the first race. GT5P_PREPARE_BACKGROUND_PAUSE=0 never pauses.
+struct Background {
+    HANDLE process=nullptr, job=nullptr, race=nullptr, stop=nullptr, watcher=nullptr;
+    volatile LONG pauses=0; volatile LONG64 paused_ms=0;
+};
+static bool background_enabled() { return env(L"GT5P_PREPARE_BACKGROUND")!=L"0"; }
+static DWORD WINAPI background_watch(LPVOID arg) {
+    auto& b=*static_cast<Background*>(arg);
+    using NtProcess=LONG (NTAPI*)(HANDLE);
+    HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
+    auto suspend=ntdll ? reinterpret_cast<NtProcess>(GetProcAddress(ntdll,"NtSuspendProcess")) : nullptr;
+    auto resume=ntdll ? reinterpret_cast<NtProcess>(GetProcAddress(ntdll,"NtResumeProcess")) : nullptr;
+    if (!suspend || !resume) return 0;
+    std::vector<HANDLE> held;   // processes this watcher suspended, resumed exactly once
+    ULONGLONG since=0;
+    auto release=[&] {
+        for (HANDLE h : held) { resume(h); CloseHandle(h); }
+        held.clear();
+        if (since) { InterlockedAdd64(&b.paused_ms,(LONG64)(GetTickCount64()-since)); since=0; }
+    };
+    while (WaitForSingleObject(b.stop,250)!=WAIT_OBJECT_0) {
+        if (WaitForSingleObject(b.race,0)!=WAIT_OBJECT_0) { release(); continue; }
+        if (!since) { since=GetTickCount64(); InterlockedIncrement(&b.pauses); }
+        // Every process in the job, including ones started since the last pass.
+        struct { JOBOBJECT_BASIC_PROCESS_ID_LIST list; ULONG_PTR more[511]; } ids{};
+        if (!QueryInformationJobObject(b.job,JobObjectBasicProcessIdList,&ids,sizeof ids,nullptr)) continue;
+        for (DWORD i=0;i<ids.list.NumberOfProcessIdsInList;++i) {
+            const DWORD pid=(DWORD)ids.list.ProcessIdList[i];
+            if (std::any_of(held.begin(),held.end(),[&](HANDLE h){ return GetProcessId(h)==pid; })) continue;
+            HANDLE h=OpenProcess(PROCESS_SUSPEND_RESUME|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+            if (h && suspend(h)>=0) held.push_back(h);
+            else if (h) CloseHandle(h);
+        }
+    }
+    release();
+    return 0;
+}
+static void watch_background(Background& b) {
+    if (!b.process || !b.race) return;
+    b.stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    if (b.stop) b.watcher=CreateThread(nullptr,0,background_watch,&b,0,nullptr);
+}
+static Background start_background(const fs::path& disc, const fs::path& live) {
+    Background b;
+    try {
+        auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
+        if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256")) return b;
+        fs::create_directories(data/L"logs");
+        fs::remove(data/L"prepare.cancel");
+        SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+        Handle out(CreateFileW((data/L"logs"/L"prepare-background.out").c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        Handle err(CreateFileW((data/L"logs"/L"prepare-background.err").c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        Handle input(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr));
+        if (out.h==INVALID_HANDLE_VALUE || err.h==INVALID_HANDLE_VALUE || input.h==INVALID_HANDLE_VALUE) return b;
+        STARTUPINFOW si{}; si.cb=sizeof si; si.dwFlags=STARTF_USESTDHANDLES;
+        si.hStdInput=input.h; si.hStdOutput=out.h; si.hStdError=err.h;
+        HANDLE job=CreateJobObjectW(nullptr, nullptr);
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits)) {
+            if (job) CloseHandle(job);
+            return b;
+        }
+        std::wstring command=quote(helper)+L" --install "+quote(install)+L" --storage "+quote(data)+L" --game "+quote(disc)+
+            L" --launcher-pid "+std::to_wstring(GetCurrentProcessId())+L" --background --live-cache "+quote(live);
+        PROCESS_INFORMATION pi{};
+        // Idle priority is inherited by the helper's compiler and offline processes.
+        if (!CreateProcessW(helper.c_str(), command.data(), nullptr, nullptr, TRUE,
+                CREATE_NO_WINDOW|CREATE_SUSPENDED|IDLE_PRIORITY_CLASS, nullptr, data.c_str(), &si, &pi)) {
+            CloseHandle(job);
+            return b;
+        }
+        if (!AssignProcessToJobObject(job, pi.hProcess) || ResumeThread(pi.hThread)==(DWORD)-1) {
+            TerminateProcess(pi.hProcess, 1);  // only the suspended child created above
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(job);
+            return b;
+        }
+        CloseHandle(pi.hThread);
+        b.process=pi.hProcess; b.job=job;
+        if (env(L"GT5P_PREPARE_BACKGROUND_PAUSE")!=L"0") {
+            // The game opens it by name; created before the game starts.
+            const std::wstring name=L"Local\\TourlinePrologue-Race-"+std::to_wstring(GetCurrentProcessId());
+            b.race=CreateEventW(nullptr,TRUE,FALSE,name.c_str());
+            if (b.race) setenv(L"GT5P_RACE_EVENT",name);
+        }
+    } catch (...) {}
+    return b;
+}
+// Cancel at the helper's next checkpoint (it keeps completed work), then close its job.
+static void stop_background(Background& b) {
+    if (!b.process) return;
+    if (b.watcher) {   // resumes anything paused, so the helper can see the cancel request
+        SetEvent(b.stop); WaitForSingleObject(b.watcher,INFINITE); CloseHandle(b.watcher); b.watcher=nullptr;
+    }
+    if (WaitForSingleObject(b.process, 0)!=WAIT_OBJECT_0) {
+        try { std::ofstream(data/L"prepare.cancel") << "cancel\n"; } catch (...) {}
+        WaitForSingleObject(b.process, 30000);
+    }
+    try {
+        std::ofstream(data/L"logs"/L"prepare-background-pause.txt") << "pauses=" << b.pauses << "\npaused_ms=" << b.paused_ms << "\n";
+    } catch (...) {}
+    CloseHandle(b.process); CloseHandle(b.job);   // the job kills anything still running
+    for (HANDLE* h : {&b.race,&b.stop}) if (*h) { CloseHandle(*h); *h=nullptr; }
+    b.process=b.job=nullptr;
+    try { fs::remove(data/L"prepare.cancel"); } catch (...) {}
+}
+// Whether this release's completed preparation is selected. The helper's check costs a few seconds, so a
+// positive answer is remembered beside the selection it was given for.
+static bool preparation_current(const fs::path& disc) {
+    const std::wstring version=release_value(L"port_version");
+    const auto pointer=utf8_file(data/L"prepared-cache.txt");
+    const fs::path done=data/(L"prepare-current-"+version+L".txt");
+    if (plain_version(version) && !pointer.empty() && utf8_file(done)==pointer) return true;
+    int state=selected_preparation(disc);
+    if (state==0 && plain_version(version) && !pointer.empty()) {
+        try { std::ofstream f(done, std::ios::binary); auto n=WideCharToMultiByte(CP_UTF8,0,pointer.c_str(),(int)pointer.size(),nullptr,0,nullptr,nullptr);
+              std::string t(n,'\0'); WideCharToMultiByte(CP_UTF8,0,pointer.c_str(),(int)pointer.size(),t.data(),n,nullptr,nullptr); f<<t; } catch (...) {}
+    }
+    return state!=3;   // unknown (-1) starts nothing
+}
 // The same offer, preparation and failure handling for both launches.
 static void offer_preparation(const fs::path& disc, first_run_preparation::Kind kind, const std::wstring& version) {
     DWORD cpus = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
@@ -558,8 +688,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             prepare_cache(disc,prepare_assets,false);
             CoUninitialize();return 0;
         }
-        // At most one offer per launch. GT5P_PREPARE_OFFER=0 disables both.
-        if (env(L"GT5P_PREPARE_OFFER")!=L"0") {
+        // Phase 225: with background preparation (the default) there is no offer; preparation starts beside
+        // the game below. At most one offer per launch otherwise. GT5P_PREPARE_OFFER=0 disables both.
+        bool background=false;
+        if (background_enabled() && !no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" && env(L"GT5P_PREPARE_OFFER")!=L"0")
+            background=!preparation_current(disc);
+        else if (env(L"GT5P_PREPARE_OFFER")!=L"0") {
             const std::wstring version=release_value(L"port_version");
             if (completed_setup) offer_preparation(disc,first_run_preparation::Kind::AfterSetup,version);
             else if (!no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" && plain_version(version) &&
@@ -606,8 +740,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         const bool pipeline_tools = env(L"GT5P_PIPELINE_TOOLS")!=L"0" &&
             fs::is_regular_file(tools) && hash(tools)==release_value(L"prepare_sha256");
         setenv(L"GT5P_PIPELINE_TOOLS", pipeline_tools ? L"1" : L"0");
+        Background helper;
+        if (background) {
+            // The cache this game run uses: the old selection, or the ordinary cache.
+            fs::path live = prepared.empty() ? data/L"shadercache" : fs::weakly_canonical(data/fs::path(prepared));
+            fs::create_directories(live);
+            helper=start_background(disc, live);
+            watch_background(helper);
+        }
+        struct StopHelper { Background& b; ~StopHelper() { stop_background(b); } } stop_helper{helper};
         for (;;) {
             DWORD code = run(game, quote(data/L"input"/L"EMAIN.ELF"), data, L"play");
+            // Settings restarts keep the background helper; anything else stops it first.
+            if (!(code==tourline_restart::exit_code && tourline_restart::managed())) stop_background(helper);
             // run() has waited for the old process and closed its private job
             // before another instance starts. Keep both storage locks throughout.
             if (code==tourline_restart::exit_code && tourline_restart::managed()) continue;

@@ -38,6 +38,10 @@ Evidence for finished work goes in [progress.md](progress.md).
   texture creation and the first launch before the lookup table is learned.
   Phase 223: preparation also creates the multisampled pipelines at the player's MSAA count (driver only,
   shared shaders); 21:9 8x High Speed Ring excess 3.7-4.5 s -> 0.6 s, worst frame 386-842 -> 161-170 ms.
+  Phase 225: background preparation is the launcher default when nothing current is prepared (no offer):
+  race pipelines first, copied into the live cache (next race loading screen prepares them), helper paused
+  during races, full preparation selected next launch. Empty-cache HSR first race with ~2.5 min of menus
+  first: excess 10.5-11.1 s -> 3.5-4.5 s; straight to the race: unchanged (10.3 s), later races benefit.
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;
