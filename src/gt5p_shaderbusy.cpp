@@ -26,6 +26,12 @@
  * preload_indicator, the F1 page, or GT5P_PRELOAD_INDICATOR=1 turn "Loading
  * shaders" on (off by default). RSX_SHADER_INDICATOR_LEGACY=1 makes the
  * backend count preload work as demand work again, as before the split.
+ *
+ * The race loading gate blocks the guest on LoadingRoot, so the GT logo stays
+ * the last presented frame and this thread is what can still draw. A thin bar
+ * under that mark tracks pipelines finished in the race set
+ * (g_rsx_race_load_done / g_rsx_race_load_total while g_rsx_race_load_waiting).
+ * GT5P_RACE_LOAD_BAR=0 leaves it off. It is not an F1 row.
  */
 #include <windows.h>
 #include <math.h>
@@ -40,6 +46,9 @@ extern volatile LONG g_rsx_shader_busy;            /* rsx_d3d12_backend.c */
 extern volatile LONG g_rsx_shader_demand_total;
 extern volatile LONG g_rsx_shader_preload_busy;
 extern volatile LONG g_rsx_shader_preload_total;
+extern volatile LONG g_rsx_race_load_done;
+extern volatile LONG g_rsx_race_load_total;
+extern volatile LONG g_rsx_race_load_waiting;
 }
 
 namespace {
@@ -69,6 +78,12 @@ struct Badge {
 HWND s_game;
 volatile LONG s_enabled = 1;           /* "Compiling shaders" */
 volatile LONG s_preload_enabled = 0;   /* "Loading shaders" */
+volatile LONG s_bar_enabled = 1;       /* race-load bar under the GT logo */
+
+/* The guest's GT mark sits in the middle of the frozen loading frame. */
+const double kRaceBarTop = 0.62;
+const int kRaceBarH = 6;
+const ULONGLONG kRaceBarDelayMs = 200;
 
 Badge s_main = { L"gt5p_shaderbusy", L"Compiling shaders", "shader-badge", 236, 38, -15, 2, 8,
                  RGB(20, 23, 30), RGB(52, 120, 220), RGB(230, 233, 240), RGB(52, 140, 255), 235, 200,
@@ -206,12 +221,122 @@ void update(Badge& b, bool want, ULONGLONG now)
     }
 }
 
+/* Track and fill only. The window is the bar, so layered alpha is enough. */
+struct RaceBar {
+    HWND wnd;
+    bool shown;
+    int w, h;
+    POINT last_pos;
+    ULONGLONG wait_since, shown_at;
+};
+
+RaceBar s_bar = {};
+
+void paint_bar(HDC dc, int w, int h)
+{
+    RECT all = { 0, 0, w, h };
+    HBRUSH track = CreateSolidBrush(RGB(58, 62, 70));
+    FillRect(dc, &all, track);
+    DeleteObject(track);
+    LONG total = g_rsx_race_load_total;
+    LONG done = g_rsx_race_load_done;
+    if (w <= 0 || h <= 0 || total < 1) return;
+    if (done < 0) done = 0;
+    if (done > total) done = total;
+    int fw = (int)((long long)done * w / total);
+    if (done > 0 && fw < 2) fw = 2;
+    if (fw > w) fw = w;
+    if (fw <= 0) return;
+    RECT fill = { 0, 0, fw, h };
+    HBRUSH ink = CreateSolidBrush(RGB(240, 242, 246));
+    FillRect(dc, &fill, ink);
+    DeleteObject(ink);
+}
+
+LRESULT CALLBACK barproc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (m == WM_PAINT) {
+        PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps);
+        RECT cr; GetClientRect(h, &cr);
+        const int bw = cr.right > 0 ? cr.right : 1, bh = cr.bottom > 0 ? cr.bottom : 1;
+        HDC mem = CreateCompatibleDC(dc);
+        HBITMAP bm = CreateCompatibleBitmap(dc, bw, bh);
+        HGDIOBJ o = SelectObject(mem, bm);
+        paint_bar(mem, cr.right, cr.bottom);
+        BitBlt(dc, 0, 0, bw, bh, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, o); DeleteObject(bm); DeleteDC(mem);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    if (m == WM_NCHITTEST) return HTTRANSPARENT;
+    if (m == WM_ERASEBKGND) return 1;
+    return DefWindowProcW(h, m, w, l);
+}
+
+void place_bar(UINT show_flag)
+{
+    if (show_flag == SWP_HIDEWINDOW) {
+        SetWindowPos(s_bar.wnd, NULL, 0, 0, 0, 0,
+                     SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_HIDEWINDOW);
+        return;
+    }
+    RECT rc; GetClientRect(s_game, &rc);
+    const int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
+    if (cw < 80 || ch < 80) return;
+    int w = (int)(cw * 0.22);
+    if (w < 220) w = 220;
+    if (w > 480) w = 480;
+    if (w > cw - 32) w = cw - 32;
+    POINT p = { (cw - w) / 2, (int)(ch * kRaceBarTop) };
+    ClientToScreen(s_game, &p);
+    const bool resized = w != s_bar.w || kRaceBarH != s_bar.h;
+    const bool moved = p.x != s_bar.last_pos.x || p.y != s_bar.last_pos.y;
+    if (!show_flag && !resized && !moved) return;
+    s_bar.w = w; s_bar.h = kRaceBarH; s_bar.last_pos = p;
+    SetWindowPos(s_bar.wnd, NULL, p.x, p.y, w, kRaceBarH,
+                 (resized ? 0 : SWP_NOSIZE) | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | show_flag);
+}
+
+void create_bar(HINSTANCE inst)
+{
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = barproc; wc.hInstance = inst;
+    wc.lpszClassName = L"gt5p_raceload"; wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    RegisterClassW(&wc);
+    s_bar.wnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                                L"gt5p_raceload", L"GT5P race load", WS_POPUP,
+                                0, 0, 320, kRaceBarH, s_game, NULL, inst, NULL);
+    if (!s_bar.wnd) return;
+    SetLayeredWindowAttributes(s_bar.wnd, 0, 255, LWA_ALPHA);
+    s_bar.w = 320; s_bar.h = kRaceBarH;
+    s_bar.last_pos = { -100000, -100000 };
+}
+
+void update_bar(ULONGLONG now)
+{
+    if (!s_bar_enabled || !s_bar.wnd) return;
+    const LONG waiting = g_rsx_race_load_waiting;
+    if (waiting > 0) { if (!s_bar.wait_since) s_bar.wait_since = now; }
+    else s_bar.wait_since = 0;
+    const LONG total = g_rsx_race_load_total;
+    const bool want = waiting > 0 && total > 0 && s_bar.wait_since && now - s_bar.wait_since >= kRaceBarDelayMs;
+    if (want != s_bar.shown) {
+        s_bar.shown = want;
+        place_bar(want ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+        if (want) s_bar.shown_at = now;
+        else fprintf(stderr, "[race-load-bar] shown %.1f s: %ld / %ld pipelines\n",
+                     (now - s_bar.shown_at) / 1000.0, (long)g_rsx_race_load_done, (long)total);
+    }
+    if (s_bar.shown) { place_bar(0); InvalidateRect(s_bar.wnd, NULL, FALSE); }
+}
+
 DWORD WINAPI badge_thread(LPVOID)
 {
     while (!s_game) { Sleep(500); EnumWindows(find_game, 0); }
     HINSTANCE inst = GetModuleHandleW(NULL);
     create(s_main, inst);
     create(s_pre, inst);
+    if (s_bar_enabled) create_bar(inst);
 
     s_main.last_total = s_main.burst_base = g_rsx_shader_demand_total;
     s_pre.last_total = s_pre.burst_base = g_rsx_shader_preload_total;
@@ -226,6 +351,7 @@ DWORD WINAPI badge_thread(LPVOID)
         const bool want_pre = track(s_pre, now, g_rsx_shader_preload_busy, g_rsx_shader_preload_total, !want_main);
         update(s_main, want_main, now);
         update(s_pre, want_pre, now);
+        update_bar(now);
         Sleep(30);
     }
 }
@@ -238,7 +364,8 @@ extern "C" void gt5p_preload_indicator_enable(int on) { s_preload_enabled = on ?
 
 /* Start the badges' thread (they stay hidden until there is work), unless
  * there is no window. GT5P_SHADER_INDICATOR=0 starts "Compiling shaders"
- * disabled; GT5P_PRELOAD_INDICATOR=1 starts "Loading shaders" enabled. */
+ * disabled; GT5P_PRELOAD_INDICATOR=1 starts "Loading shaders" enabled.
+ * GT5P_RACE_LOAD_BAR=0 leaves the race-load bar off. */
 extern "C" void gt5p_start_shader_indicator(void)
 {
     if (getenv("PS3_HEADLESS")) return;
@@ -246,6 +373,8 @@ extern "C" void gt5p_start_shader_indicator(void)
     s_enabled = !(e && e[0] == '0');
     const char* p = getenv("GT5P_PRELOAD_INDICATOR");
     s_preload_enabled = p && p[0] == '1';
+    const char* b = getenv("GT5P_RACE_LOAD_BAR");
+    s_bar_enabled = !(b && b[0] == '0');
     HANDLE h = CreateThread(NULL, 128 * 1024, badge_thread, NULL, 0, NULL);
     if (h) CloseHandle(h);
 }

@@ -2078,6 +2078,8 @@ bullet, the later one is right.
   drives it with posted keys against a scratch settings file. The
   "Compiling shaders" badge (`src/gt5p_shaderbusy.cpp`, 52.1) reads
   `g_rsx_shader_busy` from the backend; `GT5P_SHADER_INDICATOR=0` hides it.
+  The same thread draws a thin bar under the GT logo while the race loading
+  gate waits (`GT5P_RACE_LOAD_BAR=0` hides it).
   Windows over the game must not call synchronous `SetWindowPos` each tick:
   the game window's thread is the present thread, often busy.
 - **Car paint, glass (Phase 51).** `LG2` takes `|x|` (`RSX_LG2_ABS=0`): a

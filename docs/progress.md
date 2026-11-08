@@ -9,6 +9,14 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 230 - Thin bar under the GT logo while the race set loads (2026-11-08)
+
+**Aim.** Loading into a race leaves the GT logo on screen until the race pipelines are ready. The guest is blocked inside that gate, so the picture does not move. Show how far the set has got.
+
+**What changed.** The backend counts pipelines finished (ready or rejected) against the race-set count, and whether the gate is waiting. A layered window on the shader-badge thread draws a 6 px bar centered under the logo, about 62% of the way down the window, and about a fifth of the width (220 to 480 px). It appears once the gate has run for 200 ms and hides when the gate releases. `GT5P_RACE_LOAD_BAR=0` leaves it off.
+
+**Seen in game.** A private `gt5p.exe` (this patch linked against the reference build, not the installed launcher executable) was started on the player's prepared cache: 1080p, 21:9, 8x, and no race pack yet. The bar showed for 19.6 s and filled to 4,973 / 4,973. The gate finished in 19.8 s, all ready, none rejected, inside the 30 s budget. The player confirmed the bar. That run then wrote `race-pack-v1.bin` into the prepared cache: 4,973 pipelines, 2,399 shaders, 254,758,530 bytes. A later race with this build reads that file. The installed launcher executable was not replaced.
+
 ## Phase 229 - Background warmup reads the race pack (2026-11-08)
 
 **Aim.** The menu-time warmup still prepared the learned race set one file at a time, and a cache with no `race-pack-v1.bin` still paid that walk on the first race. The loading gate then wrote the pack after play had started.

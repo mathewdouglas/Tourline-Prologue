@@ -15526,7 +15526,7 @@ index bc05a308..a8038274 100644
  static u32 dr_cube_mask(const D3D12DrawRecord* dr)
  {
      /* ON by default (RSX_CUBE_TEX=0 to disable). This was off while the cube path
-@@ -2318,76 +3233,3190 @@ static u32 dr_cube_mask
+@@ -2318,76 +3233,3225 @@ static u32 dr_cube_mask
       * image) all six faces decode as clean environment art. */
      static int en = -1;
      if (en < 0) { const char* e = getenv("RSX_CUBE_TEX"); en = e ? atoi(e) : 1; }
@@ -17214,6 +17214,9 @@ index bc05a308..a8038274 100644
 +static u64 s_pso_serial;
 +static volatile LONG64 s_pso_source_bytes;
 +static volatile LONG s_pso_race_active, s_pso_race_request, s_race_waiters;
++/* The loading-screen bar (gt5p_shaderbusy.cpp). waiting is the gate;
++ * done/total are pipelines finished and pipelines in this race set. */
++volatile LONG g_rsx_race_load_done, g_rsx_race_load_total, g_rsx_race_load_waiting;
 +static volatile LONG s_menu_active = 1, s_startup_request, s_startup_active, s_menu_recorded;
 +static u64 s_menu_seen[PSO_RACE_SEEN];
 +static u64 s_used_seen[PSO_RACE_SEEN];   /* recipes marked used this run */
@@ -17543,8 +17546,15 @@ index bc05a308..a8038274 100644
 +        int first = InterlockedExchange(&s_pso_race_active, 1) == 0;
 +        int started = pso_worker_start_locked();
 +        if (started) {
++            if(first) {
++                InterlockedExchange(&g_rsx_race_load_done,0);
++                InterlockedExchange(&g_rsx_race_load_total,0);
++            }
 +            InterlockedIncrement(&s_race_waiters);
-+            if(first) {ResetEvent(s_race_ready);InterlockedExchange(&s_pso_race_request,1);WakeConditionVariable(&s_pso_queue_cv);}
++            InterlockedIncrement(&g_rsx_race_load_waiting);
++            if(first) {
++                ResetEvent(s_race_ready);InterlockedExchange(&s_pso_race_request,1);WakeConditionVariable(&s_pso_queue_cv);
++            }
 +        }
 +        ReleaseSRWLockExclusive(&s_pso_queue_lock);
 +        if (first) spack_race_begin();
@@ -17557,6 +17567,7 @@ index bc05a308..a8038274 100644
 +            if(first || result!=WAIT_OBJECT_0)
 +                fprintf(stderr,"[race-prewarm] loading gate %s (budget %d ms)\n",result==WAIT_OBJECT_0?"ready":"timed out",ms);
 +            InterlockedDecrement(&s_race_waiters);
++            InterlockedDecrement(&g_rsx_race_load_waiting);
 +        }
 +    } else if (!strcmp(name, "TopMenuTemplate.gpb") || !strcmp(name, "CourseSelectRoot.gpb") ||
 +               !strcmp(name, "PitSceneRoot.gpb") || !strcmp(name, "DrivingOptionRoot.gpb")) {
@@ -18020,6 +18031,7 @@ index bc05a308..a8038274 100644
 +        }
 +        if (ok) { InterlockedIncrement(&s_prewarm_loaded); InterlockedIncrement(&s_race_loaded); }
 +        else { InterlockedIncrement(&s_prewarm_rejected); InterlockedIncrement(&s_race_rejected); }
++        InterlockedIncrement(&g_rsx_race_load_done);
 +    }
 +    if (InterlockedDecrement(&s_prewarm_active) == 0 && s_prewarm_gen == gen) {
 +        if (s_race_ready) SetEvent(s_race_ready);
@@ -18066,14 +18078,29 @@ index bc05a308..a8038274 100644
 +    s_prewarm_began = GetTickCount64();
 +    const LONG gen = s_prewarm_gen;
 +    s_prewarm_active = n;
++    InterlockedExchange(&g_rsx_race_load_done, 0);
++    InterlockedExchange(&g_rsx_race_load_total, (LONG)count);
 +    for (int i = 0; i < n; i++) {
 +        HANDLE t = CreateThread(NULL, 0, pso_prewarm_helper, (LPVOID)(LONG_PTR)gen, 0, NULL);
 +        if (t) s_prewarm_thr[s_prewarm_thr_n++] = t;
 +        else InterlockedDecrement(&s_prewarm_active);
 +    }
-+    if (!s_prewarm_thr_n) return 0;
++    if (!s_prewarm_thr_n) {
++        InterlockedExchange(&g_rsx_race_load_total, 0);
++        return 0;
++    }
 +    fprintf(stderr, "[race-prewarm] %u helper threads for %u recipes (%s)\n", s_prewarm_thr_n, count, s_pack_hit ? "pack" : "files");
 +    return 1;
++}
++static u32 race_index_count(const char* index)
++{
++    FILE* f = fopen(index, "r");
++    if (!f) return 0;
++    char line[64]; unsigned long long h; u32 n = 0;
++    while (n < PSO_RACE_SEEN && fgets(line, sizeof line, f))
++        if (sscanf(line, "%llx", &h) == 1 && h) n++;
++    fclose(f);
++    return n;
 +}
 +static DWORD WINAPI pso_worker_main(LPVOID unused) {
 +    (void)unused;
@@ -18137,9 +18164,15 @@ index bc05a308..a8038274 100644
 +                /* helpers own this load */
 +            } else if (s_pack_hit) {
 +                s_pack_walk=1; s_pack_cursor=0;
++                InterlockedExchange(&g_rsx_race_load_done, 0);
++                InterlockedExchange(&g_rsx_race_load_total, (LONG)s_pack_n);
 +            } else {
 +                preload=index[0]?fopen(index,"r"):NULL;
 +                if (!preload) SetEvent(s_race_ready);
++                else {
++                    InterlockedExchange(&g_rsx_race_load_done, 0);
++                    InterlockedExchange(&g_rsx_race_load_total, (LONG)race_index_count(index));
++                }
 +            }
 +        }
 +        if(learn && index[0] && learn_race==PSO_LEARN_USED) pso_recipe_touch(dir,learn);
@@ -18164,6 +18197,7 @@ index bc05a308..a8038274 100644
 +                if(!packed) ok=pso_race_recipe(it->hash);
 +                if(ok) {loaded++;InterlockedIncrement(&s_race_loaded);}
 +                else {rejected++;InterlockedIncrement(&s_race_rejected);}
++                InterlockedIncrement(&g_rsx_race_load_done);
 +            } else {
 +                s_pack_walk=0;
 +                SetEvent(s_race_ready);
@@ -18176,6 +18210,7 @@ index bc05a308..a8038274 100644
 +                if(sscanf(line,"%llx",&h)==1 && h) {
 +                    if(pso_race_recipe((u64)h)) {loaded++;InterlockedIncrement(&s_race_loaded);}
 +                    else {rejected++;InterlockedIncrement(&s_race_rejected);}
++                    InterlockedIncrement(&g_rsx_race_load_done);
 +                }
 +            } else {
 +                fclose(preload);preload=NULL;
