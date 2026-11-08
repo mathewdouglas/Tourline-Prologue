@@ -89,7 +89,8 @@ has the evidence, newest phase first (Phase 227 is the latest; Phases 99 and ear
   Untested inside RecompLauncher itself; not merged or released.
 - **Race hitches (Phase 221, branch feature/hitch-texture-lru, main patch, defaults on):** texture slot
   recency (`RSX_TEX_LRU=0` rollback), texture pool + 64 MB staging ring (`RSX_TEX_POOL=0`), race prewarm on 4
-  threads (`RSX_RACE_PREWARM_THREADS=1`; 66-69 s -> 15-16 s, now inside the loading gate) and a persistent
+  threads (`RSX_RACE_PREWARM_THREADS=1`; 66-69 s -> 15-16 s, now inside the loading gate), one race-pack read
+  (Phase 228, `warmup-v1/race-pack-v1.bin` when it matches the race index; background race warmup uses it too, one pipeline a turn, and the loading gate reuses that read; `RSX_RACE_PREWARM_PACK=0` restores per-file opens) and a persistent
   fast pipeline lookup (`warmup-v1/fp-lookup-v1.bin`, epoch-tagged; `RSX_PSO_FAST_LOOKUP=0`). High Speed Ring
   prepared cache: race-start frame 370-407 -> 113 ms, +7 s camera change 299-317 -> 106 ms, 60 s FrameTest
   max 28.9 ms. The texture-slot LRU overlay is removed; interp/trace/coverage overlays rebased. Remaining:

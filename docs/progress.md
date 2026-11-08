@@ -9,6 +9,32 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 229 - Background warmup reads the race pack (2026-11-08)
+
+**Aim.** The menu-time warmup still prepared the learned race set one file at a time, and a cache with no `race-pack-v1.bin` still paid that walk on the first race. The loading gate then wrote the pack after play had started.
+
+**What changed (main patch, pack on).** The background warmup's race phase uses `warmup-v1/race-pack-v1.bin` when its checksum matches `race-v1.txt`. It still prepares one pipeline per turn, and the worker still waits one millisecond between turns. The bytes stay resident, so the loading-gate prewarm does not read the file again. The menu index stays one file per pipeline. `RSX_RACE_PREWARM_PACK=0` keeps both paths on the per-file opens. The patched backend was typechecked with the reference `clang-cl` command. `gt5p.exe` was not linked, and no game was launched, so this path was not timed in a race.
+
+**Player cache.** `race-pack-v1.bin` was written beside the live `race-v1.txt`: 1,754 pipelines, 1,631 shaders, 1,754 blobs, 158,410,322 bytes. The recipes and bytecode were not deleted. A later race with this build reads that file instead of opening the set again. The in-game loading screen was not measured.
+
+## Phase 228 - One file for the race prewarm; queued creates overlap (2026-11-08)
+
+**Aim.** The race prewarm opened a recipe, two bytecode files and a driver blob for every pipeline. Offline preparation already reads that data as one bundle. Do the same for the race set, and measure whether several `CreateGraphicsPipelineState` calls at once, or an `ID3D12PipelineLibrary`, make an existing pipeline cheaper to bring back.
+
+**What changed (main patch, pack on).** `warmup-v1/race-pack-v1.bin` stores the race index in order: each recipe, each DXBC once, and the raw driver blob without its 24-byte header. Objects in the payload are 16-byte aligned. `scripts/race_preload_pack.py` writes it at the end of preparation, after the membership lists are final. The renderer uses it when its index checksum matches `race-v1.txt`. A missing or stale pack keeps the per-file opens, and the last helper writes the pack for the next race. `RSX_RACE_PREWARM_PACK=0` skips the read and the write. Both paths still use `RSX_RACE_PREWARM_THREADS` (default 4). `=1` still reads the pack, one recipe per worker turn. The patched backend compiled with the reference `clang-cl` command. That produced an object file only: `gt5p.exe` was not linked, and no game was launched.
+
+**File reads.** Live race index, 1,754 pipelines. The pack was written under TEMP. The player's shader cache was only read.
+- First touch of the recipes, the driver blobs and the vertex bytecode: 19.2 s, 228 MB, 7,016 opens. That pass used the wrong shader-hash offset, so the pixel bytecode was not included.
+- Full set afterwards (pixel bytecode included, the rest already cached): 7.8 s, 243 MB.
+- That same full set again: 0.67 s.
+- One read of the pack just written: 0.063 s. The file is 158 MB, with 1,631 shaders and 1,754 blobs.
+
+**Pipeline creates.** 64 pixel shaders, each with its own bytecode (an 80-step `sin` loop), RTX 4060, driver 32.0.16.1088. One discarded create ran first.
+- Driver had not compiled these shaders: 362 ms on one thread (5.66 ms each), 196 ms on two (1.9x), 120 ms on four (3.0x).
+- Same process, after that compile: creating them again with no blob was 20.3 ms; with the cached blob, 17.6 / 5.7 / 4.7 ms on 1 / 2 / 4 threads.
+- A new process, driver cache already warm: a blob load was 20.1 ms (0.31 ms each) and a no-blob create of the same shaders was 22.0 ms (0.34 ms). Four threads of blob loads in the warm process were 5.0 ms.
+- `ID3D12PipelineLibrary` load of those 64, one thread, new process: 11.7 ms (0.18 ms each). Four blob threads were faster (5.0 ms). The library is not in the engine.
+
 ## Phase 227 - DXC for guest shaders (opt-in): compile time 2.6x lower (2026-11-06)
 
 **Aim.** On an empty cache a High Speed Ring race compiles about 1,075 shaders on demand. Make the compiles

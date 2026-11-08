@@ -15526,7 +15526,7 @@ index bc05a308..a8038274 100644
  static u32 dr_cube_mask(const D3D12DrawRecord* dr)
  {
      /* ON by default (RSX_CUBE_TEX=0 to disable). This was off while the cube path
-@@ -2318,76 +3233,2808 @@ static u32 dr_cube_mask(const D3D12DrawRecord* dr)
+@@ -2318,76 +3233,3190 @@ static u32 dr_cube_mask
       * image) all six faces decode as clean environment art. */
      static int en = -1;
      if (en < 0) { const char* e = getenv("RSX_CUBE_TEX"); en = e ? atoi(e) : 1; }
@@ -17064,6 +17064,7 @@ index bc05a308..a8038274 100644
 + * cache, and retaining those too filled the resident set during long play,
 + * leaving no room for the learned race set (and doubling what stays live). */
 +static volatile LONG64 s_prep_us_blob;   /* driver-blob file reads (all callers), see [race-prewarm] split */
++static volatile LONG64 s_prep_us_pack;   /* one bundled race-pack read */
 +static HRESULT create_guest_pso_cached_ex(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd,
 +                                          ID3D12PipelineState** out, int retain)
 +{
@@ -17141,6 +17142,30 @@ index bc05a308..a8038274 100644
 +    if (SUCCEEDED(hr) && *out) { pso_warm_record(pd, hash); if (retain) pso_warm_put(hash, *out); }
 +    if(s_offline.profile)s_offline.record_us+=pso_offline_clock()-offline_clock;
 +    return hr;
++}
++/* Try a driver blob the caller already holds. A miss or a stale blob falls
++ * through to the per-file cache, which can replace that file. */
++static HRESULT create_guest_pso_with_blob(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd,
++    const void* blob, size_t blob_bytes, ID3D12PipelineState** out, int retain)
++{
++    if (!pd || !out) return E_INVALIDARG;
++    *out = NULL;
++    u64 hash = guest_pso_hash(pd);
++    if (pso_warm_get(hash, out)) return S_OK;
++    HRESULT hr = E_FAIL;
++    if (blob && blob_bytes && blob_bytes <= 32u * 1024u * 1024u) {
++        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = *pd;
++        desc.CachedPSO.pCachedBlob = blob;
++        desc.CachedPSO.CachedBlobSizeInBytes = blob_bytes;
++        hr = create_guest_pso_driver(&desc, out);
++        if (FAILED(hr) && *out) { (*out)->lpVtbl->Release(*out); *out = NULL; }
++    }
++    if (SUCCEEDED(hr) && *out) {
++        pso_warm_record(pd, hash);
++        if (retain) pso_warm_put(hash, *out);
++        return hr;
++    }
++    return create_guest_pso_cached_ex(pd, out, retain);
 +}
 +/* Recipe preparation: the result stays resident. */
 +static HRESULT create_guest_pso_cached(const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pd,
@@ -17590,12 +17615,20 @@ index bc05a308..a8038274 100644
 + * race set. It used to continue with every recipe on disk in directory
 + * (hash) order until the resident cap was full, which left no room for the
 + * race set and kept unrelated pipelines live. RSX_SHADER_WARMUP_SCAN=1 adds
-+ * that directory scan back as a final phase. No window APIs on this worker. */
++ * that directory scan back as a final phase. When race-pack-v1.bin matches
++ * the race index, phase 2 creates from that one read, one pipeline a turn.
++ * The bytes stay bound so the loading gate does not read them again.
++ * No window APIs on this worker. */
 +typedef struct {
 +    FILE* menu; HANDLE find; WIN32_FIND_DATAA entry;
 +    u32 menu_read, visited, menu_ready, race_ready; int phase; ULONGLONG began;
 +} PsoStartup;
++static int s_pack_startup_on;
++static u32 s_pack_startup_i;
++static int pso_startup_bind_race_pack(const char* dir, const char* index);
++static int pso_startup_pack_one(u32* ready);
 +static void pso_startup_close(PsoStartup* s) {
++    s_pack_startup_on=0;
 +    if(s->menu)fclose(s->menu);
 +    if(s->find && s->find!=INVALID_HANDLE_VALUE)FindClose(s->find);
 +    memset(s,0,sizeof *s);
@@ -17612,8 +17645,12 @@ index bc05a308..a8038274 100644
 +    char path[640],line[64];unsigned long long hash;
 +    if(s->phase==1 || s->phase==2) {
 +        /* Phase 1 reads the menu index, phase 2 the race index (both newest
-+         * first after pso_recipe_maintain). */
-+        if(s->menu && s->menu_read++<PSO_WARM_MAX && fgets(line,sizeof line,s->menu)) {
++         * first after pso_recipe_maintain). A matching race pack replaces the
++         * phase 2 file opens. The worker still pauses a millisecond a turn. */
++        if(s->phase==2 && s_pack_startup_on) {
++            if(!pso_startup_pack_one(&s->race_ready)) return;
++            s_pack_startup_on=0;
++        } else if(s->menu && s->menu_read++<PSO_WARM_MAX && fgets(line,sizeof line,s->menu)) {
 +            if(sscanf(line,"%llx",&hash)==1 && hash) {
 +                if(pso_race_recipe((u64)hash)) {s_pso_warm_loaded++;if(s->phase==1)s->menu_ready++;else s->race_ready++;}
 +                else s_pso_warm_rejected++;
@@ -17624,8 +17661,10 @@ index bc05a308..a8038274 100644
 +        if(s->phase==1) {
 +            fprintf(stderr,"[shader-warmup] menu priority finished: ready=%u\n",s->menu_ready);
 +            if(pso_race_on()) {
-+                snprintf(path,sizeof path,"%s/race-v1.txt",dir);s->menu=fopen(path,"r");
++                snprintf(path,sizeof path,"%s/race-v1.txt",dir);
 +                s->menu_read=0;s->phase=2;
++                if(pso_startup_bind_race_pack(dir,path)) return;
++                s->menu=fopen(path,"r");
 +                if(s->menu) return;
 +            }
 +        }
@@ -17648,12 +17687,303 @@ index bc05a308..a8038274 100644
 +        s_pso_warm_loaded,s_pso_warm_rejected,s->menu_ready,s->race_ready,(unsigned long long)(GetTickCount64()-s->began));
 +    pso_startup_close(s);
 +}
++/* A prepared pipeline's recipe, bytecode and driver blob in one file
++ * (warmup-v1/race-pack-v1.bin). scripts/race_preload_pack.py writes the same
++ * layout. RSX_RACE_PREWARM_PACK=0 keeps one open per file. Payload objects are
++ * 16-byte aligned. Offsets are from the first payload byte. */
++#define PSO_PACK_MAGIC 0x314B434150355447ull
++#define PSO_PACK_MAX (512u * 1024u * 1024u)
++#define PSO_PACK_NO_CODE 0xffffffffu
++typedef struct {
++    u64 hash;
++    const unsigned char* recipe;
++    const void *vs, *ps, *blob;
++    u32 recipe_len, vs_len, ps_len, blob_len;
++} PsoPackItem;
++static unsigned char* s_pack_bytes;
++static PsoPackItem* s_pack_items;
++static u32 s_pack_n;
++static int s_pack_hit, s_pack_walk;
++static u32 s_pack_cursor;
++static char s_pack_dir[512], s_pack_index[640];
++static int pso_pack_enabled(void) {
++    const char* e = getenv("RSX_RACE_PREWARM_PACK");
++    return !(e && e[0] == '0');
++}
++static void pso_pack_free(void) {
++    free(s_pack_bytes); free(s_pack_items);
++    s_pack_bytes = NULL; s_pack_items = NULL; s_pack_n = 0; s_pack_hit = 0; s_pack_walk = 0;
++    s_pack_startup_on = 0;
++}
++static u32 pso_read_hashes(const char* index, u64* out, u32 cap) {
++    FILE* f = fopen(index, "r"); if (!f) return 0;
++    char line[64]; unsigned long long h; u32 n = 0;
++    while (n < cap && fgets(line, sizeof line, f)) if (sscanf(line, "%llx", &h) == 1 && h) out[n++] = (u64)h;
++    fclose(f); return n;
++}
++/* 1 created, 0 not attempted (caller opens the files), -1 attempted and failed. */
++static int pso_prepare_packed(const PsoPackItem* it) {
++    ID3D12PipelineState* pso = NULL;
++    PsoWarmRecipe rec;
++    if (!it || !it->recipe || it->recipe_len != sizeof rec || !it->vs || !it->ps || !it->blob || !it->blob_len) return 0;
++    memcpy(&rec, it->recipe, sizeof rec);
++    if (pso_warm_get(it->hash, &pso)) { pso->lpVtbl->Release(pso); return 1; }
++    if (!pso_warm_recipe_valid(&rec) || rec.hash != it->hash) return 0;
++    if (it->vs_len != rec.vs_bytes || it->ps_len != rec.ps_bytes) return 0;
++    if (pso_hash_bytes(1469598103934665603ull, it->vs, it->vs_len) != rec.vs_hash) return 0;
++    if (pso_hash_bytes(1469598103934665603ull, it->ps, it->ps_len) != rec.ps_hash) return 0;
++    AcquireSRWLockShared(&s_pso_warm_lock);
++    int room = s_pso_warm_n < pso_resident_max();
++    ReleaseSRWLockShared(&s_pso_warm_lock);
++    if (!room) return 0;
++    D3D12_INPUT_ELEMENT_DESC inputs[PSO_WARM_INPUTS];
++    for (u32 i = 0; i < rec.desc.InputLayout.NumElements; ++i) {
++        inputs[i] = rec.input[i].desc; inputs[i].SemanticName = rec.input[i].name;
++    }
++    rec.desc.pRootSignature = s_d3d.vp_root_sig;
++    rec.desc.VS.pShaderBytecode = it->vs; rec.desc.VS.BytecodeLength = it->vs_len;
++    rec.desc.PS.pShaderBytecode = it->ps; rec.desc.PS.BytecodeLength = it->ps_len;
++    rec.desc.InputLayout.pInputElementDescs = inputs;
++    if (!guest_pso_recipe_hash_ok(&rec.desc, rec.hash)) return 0;
++    LARGE_INTEGER q0, q1, qf; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&q0);
++    t_shader_preload = 1;
++    HRESULT made = create_guest_pso_with_blob(&rec.desc, it->blob, it->blob_len, &pso, 1);
++    t_shader_preload = 0;
++    QueryPerformanceCounter(&q1);
++    InterlockedAdd64(&s_prep_us_create, (LONG64)((q1.QuadPart - q0.QuadPart) * 1000000ll / qf.QuadPart));
++    InterlockedIncrement64(&s_prep_n);
++    int ok = SUCCEEDED(made) && pso;
++    if (pso) pso->lpVtbl->Release(pso);
++    return ok ? 1 : -1;
++}
++static int pso_pack_bind(const char* dir, const char* index) {
++    s_pack_hit = 0;
++    if (!pso_pack_enabled() || !dir || !dir[0] || !index || !index[0]) return 0;
++    snprintf(s_pack_dir, sizeof s_pack_dir, "%s", dir);
++    snprintf(s_pack_index, sizeof s_pack_index, "%s", index);
++    char path[700]; snprintf(path, sizeof path, "%s/race-pack-v1.bin", dir);
++    LARGE_INTEGER t0, t1, freq; QueryPerformanceFrequency(&freq); QueryPerformanceCounter(&t0);
++    HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
++    if (file == INVALID_HANDLE_VALUE) return 0;
++    LARGE_INTEGER sz;
++    if (!GetFileSizeEx(file, &sz) || sz.QuadPart < 40 || sz.QuadPart > PSO_PACK_MAX) { CloseHandle(file); return 0; }
++    unsigned char* bytes = (unsigned char*)malloc((size_t)sz.QuadPart);
++    DWORD got = 0; BOOL ok = bytes && ReadFile(file, bytes, (DWORD)sz.QuadPart, &got, NULL);
++    CloseHandle(file);
++    QueryPerformanceCounter(&t1);
++    long long read_us = (long long)((t1.QuadPart - t0.QuadPart) * 1000000ll / freq.QuadPart);
++    InterlockedAdd64(&s_prep_us_pack, (LONG64)read_us);
++    if (!ok || got != (DWORD)sz.QuadPart) { free(bytes); return 0; }
++    u64 magic = 0, index_fnv = 0, payload_fnv = 0; u32 version = 0, count = 0, codes = 0, flags = 0;
++    memcpy(&magic, bytes, 8); memcpy(&version, bytes + 8, 4); memcpy(&count, bytes + 12, 4);
++    memcpy(&codes, bytes + 16, 4); memcpy(&flags, bytes + 20, 4);
++    memcpy(&index_fnv, bytes + 24, 8); memcpy(&payload_fnv, bytes + 32, 8); (void)flags;
++    size_t tables = 40u + (size_t)count * 32u + (size_t)codes * 16u;
++    if (magic != PSO_PACK_MAGIC || version != 1 || !count || count > PSO_RACE_SEEN || codes > PSO_RACE_SEEN || tables > (size_t)sz.QuadPart) {
++        free(bytes); return 0;
++    }
++    const unsigned char* payload = bytes + tables;
++    size_t payload_n = (size_t)sz.QuadPart - tables;
++    if (pso_hash_bytes(1469598103934665603ull, payload, payload_n) != payload_fnv) { free(bytes); return 0; }
++    u64* listed = (u64*)malloc(sizeof(u64) * ((size_t)count + 1u));
++    u32 n = listed ? pso_read_hashes(index, listed, count + 1u) : 0;
++    int same = listed && n == count && pso_hash_bytes(1469598103934665603ull, listed, (size_t)count * 8) == index_fnv;
++    if (!same) { free(listed); free(bytes); return 0; }
++    PsoPackItem* items = (PsoPackItem*)calloc(count, sizeof(PsoPackItem));
++    if (!items) { free(listed); free(bytes); return 0; }
++    for (u32 i = 0; i < count; i++) {
++        const unsigned char* rec = bytes + 40 + (size_t)i * 32u;
++        u64 hash = 0; u32 recipe_off = 0, recipe_len = 0, vs_id = 0, ps_id = 0, blob_off = 0, blob_len = 0;
++        memcpy(&hash, rec, 8); memcpy(&recipe_off, rec + 8, 4); memcpy(&recipe_len, rec + 12, 4);
++        memcpy(&vs_id, rec + 16, 4); memcpy(&ps_id, rec + 20, 4);
++        memcpy(&blob_off, rec + 24, 4); memcpy(&blob_len, rec + 28, 4);
++        if (hash != listed[i]) { free(listed); free(items); free(bytes); return 0; }
++        PsoPackItem* item = &items[i];
++        item->hash = hash;
++        if (recipe_len == sizeof(PsoWarmRecipe) && (size_t)recipe_off + recipe_len <= payload_n) {
++            item->recipe = payload + recipe_off;
++            item->recipe_len = recipe_len;
++        }
++        if (vs_id != PSO_PACK_NO_CODE && vs_id < codes) {
++            const unsigned char* c = bytes + 40 + (size_t)count * 32u + (size_t)vs_id * 16u;
++            u32 off = 0, len = 0; memcpy(&off, c + 8, 4); memcpy(&len, c + 12, 4);
++            if ((size_t)off + len <= payload_n) { item->vs = payload + off; item->vs_len = len; }
++        }
++        if (ps_id != PSO_PACK_NO_CODE && ps_id < codes) {
++            const unsigned char* c = bytes + 40 + (size_t)count * 32u + (size_t)ps_id * 16u;
++            u32 off = 0, len = 0; memcpy(&off, c + 8, 4); memcpy(&len, c + 12, 4);
++            if ((size_t)off + len <= payload_n) { item->ps = payload + off; item->ps_len = len; }
++        }
++        if (blob_len && (size_t)blob_off + blob_len <= payload_n) { item->blob = payload + blob_off; item->blob_len = blob_len; }
++    }
++    free(listed);
++    s_pack_bytes = bytes; s_pack_items = items; s_pack_n = count; s_pack_hit = 1;
++    fprintf(stderr, "[race-prewarm] pack hit: recipes=%u bytes=%u read_ms=%lld\n",
++            count, (unsigned)sz.QuadPart, read_us / 1000);
++    return 1;
++}
++static int pso_pack_matches(const char* dir, const char* index) {
++    return s_pack_hit && s_pack_items && dir && index &&
++        strcmp(s_pack_dir, dir) == 0 && strcmp(s_pack_index, index) == 0;
++}
++/* Background warmup, race phase. One pipeline per call. Returns 1 when no items remain. */
++static int pso_startup_bind_race_pack(const char* dir, const char* index) {
++    if (!pso_pack_matches(dir, index)) {
++        if (s_pack_hit || !pso_pack_bind(dir, index)) return 0;
++    }
++    s_pack_startup_on = 1;
++    s_pack_startup_i = 0;
++    fprintf(stderr, "[shader-warmup] race pack: recipes=%u\n", s_pack_n);
++    return 1;
++}
++static int pso_startup_pack_one(u32* ready) {
++    if (!s_pack_startup_on || !s_pack_hit || !s_pack_items || s_pack_startup_i >= s_pack_n) return 1;
++    PsoPackItem* it = &s_pack_items[s_pack_startup_i++];
++    int packed = pso_prepare_packed(it);
++    int ok = packed > 0 || (packed == 0 && pso_race_recipe(it->hash));
++    if (ok) { s_pso_warm_loaded++; if (ready) (*ready)++; }
++    else s_pso_warm_rejected++;
++    return 0;
++}
++static int pso_pack_append(unsigned char** buf, size_t* len, size_t* cap, const void* data, size_t n) {
++    if (n > PSO_PACK_MAX || *len > PSO_PACK_MAX - n) return 0;
++    if (*len + n > *cap) {
++        size_t ncap = *cap ? *cap : (size_t)1024 * 1024;
++        while (ncap < *len + n) {
++            if (ncap > PSO_PACK_MAX / 2) { ncap = PSO_PACK_MAX; break; }
++            ncap *= 2;
++        }
++        if (ncap < *len + n) return 0;
++        unsigned char* grown = (unsigned char*)realloc(*buf, ncap);
++        if (!grown) return 0;
++        *buf = grown; *cap = ncap;
++    }
++    if (n && data) memcpy(*buf + *len, data, n);
++    *len += n;
++    return 1;
++}
++static int pso_pack_align(unsigned char** buf, size_t* len, size_t* cap) {
++    unsigned char zeros[16]; size_t pad = (16u - (*len & 15u)) & 15u;
++    memset(zeros, 0, sizeof zeros);
++    return pso_pack_append(buf, len, cap, zeros, pad);
++}
++static int pso_pack_store(const char* dir, const char* index) {
++    if (!pso_pack_enabled() || !dir || !dir[0] || !index || !index[0]) return 0;
++    u64* listed = (u64*)malloc(sizeof(u64) * PSO_RACE_SEEN);
++    if (!listed) return 0;
++    u32 count = pso_read_hashes(index, listed, PSO_RACE_SEEN);
++    if (!count) { free(listed); return 0; }
++    char cache[512];
++    snprintf(cache, sizeof cache, "%s", dir);
++    {
++        char* slash = strrchr(cache, '/'); char* bslash = strrchr(cache, '\\');
++        if (!slash || (bslash && bslash > slash)) slash = bslash;
++        if (slash && slash != cache) *slash = 0; else snprintf(cache, sizeof cache, "shadercache");
++    }
++    typedef struct { u64 hash; u32 off, len, id; } PsoPackCode;
++    typedef struct { u64 hash; u32 recipe_off, recipe_len, vs_id, ps_id, blob_off, blob_len; } PsoPackRec;
++    PsoPackCode* codes = (PsoPackCode*)calloc((size_t)count * 2u, sizeof(PsoPackCode));
++    PsoPackRec* recs = (PsoPackRec*)calloc(count, sizeof(PsoPackRec));
++    unsigned char* payload = NULL; size_t plen = 0, pcap = 0; u32 ncodes = 0; u32 blobs = 0; int failed = !codes || !recs;
++    fprintf(stderr, "[race-prewarm] writing race-pack-v1.bin from %u index lines\n", count);
++    for (u32 i = 0; i < count && !failed; i++) {
++        char path[640]; PsoWarmRecipe recipe; FILE* rf; int have = 0;
++        snprintf(path, sizeof path, "%s/pso_%016llx.recipe", dir, (unsigned long long)listed[i]);
++        rf = fopen(path, "rb");
++        if (rf) { have = fread(&recipe, 1, sizeof recipe, rf) == sizeof recipe && fgetc(rf) == EOF; fclose(rf); }
++        recs[i].hash = listed[i];
++        recs[i].vs_id = recs[i].ps_id = PSO_PACK_NO_CODE;
++        if (have && pso_warm_recipe_valid(&recipe) && recipe.hash == listed[i]) {
++            void* vs = pso_warm_read_code(dir, recipe.vs_hash, recipe.vs_bytes);
++            void* ps = pso_warm_read_code(dir, recipe.ps_hash, recipe.ps_bytes);
++            if (vs) {
++                u32 id = PSO_PACK_NO_CODE;
++                for (u32 c = 0; c < ncodes; c++) if (codes[c].hash == recipe.vs_hash && codes[c].len == recipe.vs_bytes) { id = codes[c].id; break; }
++                if (id == PSO_PACK_NO_CODE && ncodes < count * 2u && pso_pack_align(&payload, &plen, &pcap)) {
++                    codes[ncodes].hash = recipe.vs_hash; codes[ncodes].off = (u32)plen; codes[ncodes].len = recipe.vs_bytes; codes[ncodes].id = ncodes;
++                    if (pso_pack_append(&payload, &plen, &pcap, vs, recipe.vs_bytes)) id = ncodes++;
++                }
++                recs[i].vs_id = id; free(vs);
++            }
++            if (ps) {
++                u32 id = PSO_PACK_NO_CODE;
++                for (u32 c = 0; c < ncodes; c++) if (codes[c].hash == recipe.ps_hash && codes[c].len == recipe.ps_bytes) { id = codes[c].id; break; }
++                if (id == PSO_PACK_NO_CODE && ncodes < count * 2u && pso_pack_align(&payload, &plen, &pcap)) {
++                    codes[ncodes].hash = recipe.ps_hash; codes[ncodes].off = (u32)plen; codes[ncodes].len = recipe.ps_bytes; codes[ncodes].id = ncodes;
++                    if (pso_pack_append(&payload, &plen, &pcap, ps, recipe.ps_bytes)) id = ncodes++;
++                }
++                recs[i].ps_id = id; free(ps);
++            }
++            if (!pso_pack_align(&payload, &plen, &pcap) || !pso_pack_append(&payload, &plen, &pcap, &recipe, sizeof recipe)) failed = 1;
++            else { recs[i].recipe_off = (u32)(plen - sizeof recipe); recs[i].recipe_len = (u32)sizeof recipe; }
++        }
++        if (!failed) {
++            snprintf(path, sizeof path, "%s/pso_%016llx.bin", cache, (unsigned long long)listed[i]);
++            FILE* bf = fopen(path, "rb");
++            if (bf) {
++                long size; u64 header[3];
++                if (!fseek(bf, 0, SEEK_END) && (size = ftell(bf)) > 24 && size <= 32 * 1024 * 1024 && !fseek(bf, 0, SEEK_SET) &&
++                    fread(header, 1, sizeof header, bf) == sizeof header && header[0] == 0x31534F5035505447ull &&
++                    header[1] == (u64)size - sizeof header) {
++                    void* blob = malloc((size_t)header[1] ? (size_t)header[1] : 1);
++                    size_t n = (size_t)header[1];
++                    if (blob && fread(blob, 1, n, bf) == n && pso_hash_bytes(1469598103934665603ull, blob, n) == header[2] &&
++                        pso_pack_align(&payload, &plen, &pcap) && pso_pack_append(&payload, &plen, &pcap, blob, n)) {
++                        recs[i].blob_off = (u32)(plen - n); recs[i].blob_len = (u32)n; blobs++;
++                    }
++                    free(blob);
++                }
++                fclose(bf);
++            }
++        }
++    }
++    size_t tables = 40u + (size_t)count * 32u + (size_t)ncodes * 16u;
++    size_t total = tables + plen;
++    unsigned char* file = NULL;
++    if (!failed && total <= PSO_PACK_MAX && plen <= 0xffffffffu) file = (unsigned char*)malloc(total);
++    if (!file) failed = 1;
++    if (!failed) {
++        u64 magic = PSO_PACK_MAGIC, index_fnv, payload_fnv; u32 version = 1, flags = 0;
++        memset(file, 0, total);
++        index_fnv = pso_hash_bytes(1469598103934665603ull, listed, (size_t)count * 8);
++        payload_fnv = pso_hash_bytes(1469598103934665603ull, payload ? payload : (const void*)"", plen);
++        memcpy(file, &magic, 8); memcpy(file + 8, &version, 4); memcpy(file + 12, &count, 4);
++        memcpy(file + 16, &ncodes, 4); memcpy(file + 20, &flags, 4);
++        memcpy(file + 24, &index_fnv, 8); memcpy(file + 32, &payload_fnv, 8);
++        for (u32 i = 0; i < count; i++) {
++            unsigned char* rec = file + 40 + (size_t)i * 32u;
++            memcpy(rec, &recs[i].hash, 8); memcpy(rec + 8, &recs[i].recipe_off, 4); memcpy(rec + 12, &recs[i].recipe_len, 4);
++            memcpy(rec + 16, &recs[i].vs_id, 4); memcpy(rec + 20, &recs[i].ps_id, 4);
++            memcpy(rec + 24, &recs[i].blob_off, 4); memcpy(rec + 28, &recs[i].blob_len, 4);
++        }
++        for (u32 c = 0; c < ncodes; c++) {
++            unsigned char* row = file + 40 + (size_t)count * 32u + (size_t)c * 16u;
++            memcpy(row, &codes[c].hash, 8); memcpy(row + 8, &codes[c].off, 4); memcpy(row + 12, &codes[c].len, 4);
++        }
++        if (plen) memcpy(file + tables, payload, plen);
++        char out[700]; snprintf(out, sizeof out, "%s/race-pack-v1.bin", dir);
++        if (!pso_warm_write(out, file, total)) failed = 1;
++        else fprintf(stderr, "[race-prewarm] pack stored: recipes=%u codes=%u bytes=%u blobs=%u\n",
++                     count, ncodes, (unsigned)total, blobs);
++    }
++    if (failed) fprintf(stderr, "[race-prewarm] pack store skipped\n");
++    free(file); free(payload); free(codes); free(recs); free(listed);
++    return !failed;
++}
++static DWORD WINAPI pso_pack_store_thread(LPVOID unused) {
++    (void)unused;
++    pso_pack_store(s_pack_dir, s_pack_index);
++    return 0;
++}
 +/* Parallel race prewarm (Phase 221, default 4 threads). The race set is mostly small-file reads (recipe, bytecode,
 + * driver blob: ~15 ms a pipeline on one thread, ~68 s for ~4,000), so the 30 s loading gate timed out and
 + * the race started while it was still filling. RSX_RACE_PREWARM_THREADS=<n> (2..8, default 4) reads the index once and
 + * prepares it on n below-normal helper threads; the pso-worker keeps serving demand jobs meanwhile. The last
 + * helper sets s_race_ready and prints the usual "finished" line. RSX_RACE_PREWARM_THREADS=1 restores the
-+ * one-recipe-per-turn worker path. A new race load or shutdown stops the helpers between recipes. */
++ * one-recipe-per-turn worker path. A new race load or shutdown stops the helpers between recipes.
++ * When warmup-v1/race-pack-v1.bin matches the race index, helpers create from that one read instead.
++ * Background warmup uses the same read for the race index and leaves it bound.
++ * RSX_RACE_PREWARM_PACK=0 keeps the per-file opens. The file-mode path still uses RSX_RACE_PREWARM_THREADS. */
 +#define PSO_PREWARM_THREADS_MAX 8
 +static HANDLE s_prewarm_thr[PSO_PREWARM_THREADS_MAX];
 +static u32 s_prewarm_thr_n;
@@ -17667,6 +17997,11 @@ index bc05a308..a8038274 100644
 +    if (n < 0) { const char* e = getenv("RSX_RACE_PREWARM_THREADS"); n = e ? atoi(e) : 4; if (n < 1) n = 1; if (n > PSO_PREWARM_THREADS_MAX) n = PSO_PREWARM_THREADS_MAX; }
 +    return n;
 +}
++/* Create-only path after the pack read. File reads stay on pso_prewarm_threads. */
++static int pso_prewarm_pack_threads(void)
++{
++    return pso_prewarm_threads();
++}
 +static DWORD WINAPI pso_prewarm_helper(LPVOID arg)
 +{
 +    const LONG gen = (LONG)(LONG_PTR)arg;
@@ -17675,15 +18010,24 @@ index bc05a308..a8038274 100644
 +        if (s_pso_stopping || s_prewarm_gen != gen) break;
 +        LONG i = InterlockedIncrement(&s_prewarm_next) - 1;
 +        if (i < 0 || (u32)i >= s_prewarm_list_n) break;
-+        if (pso_race_recipe(s_prewarm_list[i])) { InterlockedIncrement(&s_prewarm_loaded); InterlockedIncrement(&s_race_loaded); }
++        int ok = 0;
++        if (s_pack_hit && s_pack_items && (u32)i < s_pack_n) {
++            int packed = pso_prepare_packed(&s_pack_items[i]);
++            if (packed > 0) ok = 1;
++            else if (packed == 0) ok = pso_race_recipe(s_pack_items[i].hash);
++        } else if (s_prewarm_list) {
++            ok = pso_race_recipe(s_prewarm_list[i]);
++        }
++        if (ok) { InterlockedIncrement(&s_prewarm_loaded); InterlockedIncrement(&s_race_loaded); }
 +        else { InterlockedIncrement(&s_prewarm_rejected); InterlockedIncrement(&s_race_rejected); }
 +    }
 +    if (InterlockedDecrement(&s_prewarm_active) == 0 && s_prewarm_gen == gen) {
 +        if (s_race_ready) SetEvent(s_race_ready);
 +        fprintf(stderr,"[race-prewarm] finished: ready=%ld rejected=%ld elapsed_ms=%llu threads=%u\n",
 +                (long)s_prewarm_loaded,(long)s_prewarm_rejected,(unsigned long long)(GetTickCount64()-s_prewarm_began),s_prewarm_thr_n);
-+        fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms)\n",
-+                (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000);
++        fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms, pack read: %lld ms)\n",
++                (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000,(long long)s_prep_us_pack/1000);
++        if (!s_pack_hit) pso_pack_store(s_pack_dir, s_pack_index);
 +    }
 +    return 0;
 +}
@@ -17694,19 +18038,30 @@ index bc05a308..a8038274 100644
 +    for (u32 i = 0; i < s_prewarm_thr_n; i++) { WaitForSingleObject(s_prewarm_thr[i], INFINITE); CloseHandle(s_prewarm_thr[i]); }
 +    s_prewarm_thr_n = 0;
 +}
-+/* Start helpers for the race index; 0 when the single-thread path should run instead. */
-+static int pso_prewarm_start(const char* index)
++/* Start helpers for the race index; 0 when the single-thread path should run instead.
++ * A pack that hits stays bound for that path. */
++static int pso_prewarm_start(const char* dir, const char* index)
 +{
-+    int n = pso_prewarm_threads();
-+    if (n < 2) return 0;
 +    pso_prewarm_join();
-+    FILE* f = fopen(index, "r");
-+    if (!f) return 0;
-+    if (!s_prewarm_list) s_prewarm_list = (u64*)malloc(sizeof(u64) * PSO_RACE_SEEN);
-+    if (!s_prewarm_list) { fclose(f); return 0; }
-+    char line[64]; unsigned long long h; u32 count = 0;
-+    while (count < PSO_RACE_SEEN && fgets(line, sizeof line, f)) if (sscanf(line, "%llx", &h) == 1 && h) s_prewarm_list[count++] = (u64)h;
-+    fclose(f);
++    /* The menu warmup may already have read this pack. Keep it. */
++    if (!pso_pack_matches(dir, index)) {
++        pso_pack_free();
++        pso_pack_bind(dir, index);
++    }
++    int n = s_pack_hit ? pso_prewarm_pack_threads() : pso_prewarm_threads();
++    if (n < 2) return 0;
++    u32 count = 0;
++    if (s_pack_hit) count = s_pack_n;
++    else {
++        FILE* f = fopen(index, "r");
++        if (!f) return 0;
++        if (!s_prewarm_list) s_prewarm_list = (u64*)malloc(sizeof(u64) * PSO_RACE_SEEN);
++        if (!s_prewarm_list) { fclose(f); return 0; }
++        char line[64]; unsigned long long h;
++        while (count < PSO_RACE_SEEN && fgets(line, sizeof line, f)) if (sscanf(line, "%llx", &h) == 1 && h) s_prewarm_list[count++] = (u64)h;
++        fclose(f);
++        if (!count) return 0;
++    }
 +    s_prewarm_list_n = count; s_prewarm_next = 0; s_prewarm_loaded = s_prewarm_rejected = 0;
 +    s_prewarm_began = GetTickCount64();
 +    const LONG gen = s_prewarm_gen;
@@ -17717,10 +18072,9 @@ index bc05a308..a8038274 100644
 +        else InterlockedDecrement(&s_prewarm_active);
 +    }
 +    if (!s_prewarm_thr_n) return 0;
-+    fprintf(stderr, "[race-prewarm] %u helper threads for %u recipes\n", s_prewarm_thr_n, count);
++    fprintf(stderr, "[race-prewarm] %u helper threads for %u recipes (%s)\n", s_prewarm_thr_n, count, s_pack_hit ? "pack" : "files");
 +    return 1;
 +}
-+
 +static DWORD WINAPI pso_worker_main(LPVOID unused) {
 +    (void)unused;
 +    fprintf(stderr,"[pso-worker] hosttid=%lu\n",(unsigned long)GetCurrentThreadId());
@@ -17762,7 +18116,7 @@ index bc05a308..a8038274 100644
 +        u32 learn_slot=s_race_head&(PSO_RACE_RING-1);
 +        u64 learn=s_race_head!=s_race_tail?s_race_ring[learn_slot]:0;
 +        int learn_race=learn?s_race_scope[learn_slot]:0;if(learn)s_race_head++;
-+        if(!job && !learn && !preload && !begin_race && !begin_startup && !startup.phase) {
++        if(!job && !learn && !preload && !s_pack_walk && !begin_race && !begin_startup && !startup.phase) {
 +            SleepConditionVariableSRW(&s_pso_queue_cv,&s_pso_queue_lock,INFINITE,0);
 +            ReleaseSRWLockExclusive(&s_pso_queue_lock); continue;
 +        }
@@ -17774,12 +18128,19 @@ index bc05a308..a8038274 100644
 +                        startup.menu_ready,startup.race_ready);
 +                pso_startup_close(&startup);
 +            }
-+            if(preload)fclose(preload);
++            if(preload){fclose(preload);preload=NULL;}
++            s_pack_walk=0;
 +            if(index[0])pso_warm_keep_only(index);
-+            preload=index[0]?fopen(index,"r"):NULL; loaded=rejected=visited=0; began=GetTickCount64();
-+            fprintf(stderr,"[race-prewarm] loading known race pipeline set: %s\n",preload?index:"none learned yet");
-+            if (preload && pso_prewarm_start(index)) { fclose(preload); preload=NULL; }
-+            else if (!preload) SetEvent(s_race_ready);
++            loaded=rejected=visited=0; began=GetTickCount64();
++            fprintf(stderr,"[race-prewarm] loading known race pipeline set: %s\n",index[0]?index:"none learned yet");
++            if (index[0] && pso_prewarm_start(dir, index)) {
++                /* helpers own this load */
++            } else if (s_pack_hit) {
++                s_pack_walk=1; s_pack_cursor=0;
++            } else {
++                preload=index[0]?fopen(index,"r"):NULL;
++                if (!preload) SetEvent(s_race_ready);
++            }
 +        }
 +        if(learn && index[0] && learn_race==PSO_LEARN_USED) pso_recipe_touch(dir,learn);
 +        else if(learn && index[0]) {
@@ -17795,6 +18156,21 @@ index bc05a308..a8038274 100644
 +            InterlockedIncrement(SUCCEEDED(hr)?&s_pso_done:&s_pso_failed);
 +            InterlockedDecrement(&g_rsx_shaders_pending);
 +            ReleaseSRWLockExclusive(&s_pso_queue_lock);
++        } else if(s_pack_walk) {
++            if(s_pack_cursor < s_pack_n && s_pack_items) {
++                PsoPackItem* it=&s_pack_items[s_pack_cursor++];
++                int packed=pso_prepare_packed(it);
++                int ok=packed>0;
++                if(!packed) ok=pso_race_recipe(it->hash);
++                if(ok) {loaded++;InterlockedIncrement(&s_race_loaded);}
++                else {rejected++;InterlockedIncrement(&s_race_rejected);}
++            } else {
++                s_pack_walk=0;
++                SetEvent(s_race_ready);
++                fprintf(stderr,"[race-prewarm] finished: ready=%u rejected=%u elapsed_ms=%llu threads=1\n",loaded,rejected,(unsigned long long)(GetTickCount64()-began));
++                fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms, pack read: %lld ms)\n",
++                        (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000,(long long)s_prep_us_pack/1000);
++            }
 +        } else if(preload) {
 +            if(visited++<PSO_RACE_SEEN && fgets(line,sizeof line,preload)) {
 +                if(sscanf(line,"%llx",&h)==1 && h) {
@@ -17805,14 +18181,20 @@ index bc05a308..a8038274 100644
 +                fclose(preload);preload=NULL;
 +                SetEvent(s_race_ready);
 +                fprintf(stderr,"[race-prewarm] finished: ready=%u rejected=%u elapsed_ms=%llu\n",loaded,rejected,(unsigned long long)(GetTickCount64()-began));
-+                fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms)\n",
-+                        (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000);
++                fprintf(stderr,"[race-prewarm] recipe preparation split (cumulative, all phases): created=%lld recipe_ms=%lld code_ms=%lld create_ms=%lld (of which blob reads, all callers: %lld ms, pack read: %lld ms)\n",
++                        (long long)s_prep_n,(long long)s_prep_us_recipe/1000,(long long)s_prep_us_code/1000,(long long)s_prep_us_create/1000,(long long)s_prep_us_blob/1000,(long long)s_prep_us_pack/1000);
++                if(!s_pack_hit && s_prewarm_thr_n < PSO_PREWARM_THREADS_MAX) {
++                    HANDLE t=CreateThread(NULL,0,pso_pack_store_thread,NULL,0,NULL);
++                    if(t) s_prewarm_thr[s_prewarm_thr_n++]=t;
++                    else pso_pack_store(s_pack_dir, s_pack_index);
++                }
 +            }
 +        } else if(startup.phase) {pso_startup_step(&startup,dir);Sleep(1);}
 +    }
 +    pso_startup_close(&startup);
 +    if(preload)fclose(preload);
 +    pso_prewarm_join();   /* RSX_RACE_PREWARM_THREADS helpers stop between recipes */
++    pso_pack_free();
 +    /* Persist membership already accepted by the renderer even when shutdown
 +     * cancels queued driver jobs. Only validated recipes can be replayed later. */
 +    while(s_race_head!=s_race_tail) {

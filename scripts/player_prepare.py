@@ -429,6 +429,17 @@ def main():
             report['msaa_map']['membership']=msaa_pipeline_map.stage_membership(out/'shadercache/warmup-v1',msaa_mapping)
         except Exception as exc:  # noqa: BLE001 - optional; the game learns membership during play
             report['msaa_map']['membership']=dict(status='failed',reason=str(exc))
+    # One sequential read for the race prewarm. Written after membership lists are final.
+    # RSX_RACE_PREWARM_PACK=0 keeps the per-file opens. A failure leaves the recipes in place.
+    try:
+        import race_preload_pack
+        warm=out/'shadercache'/'warmup-v1'
+        if (warm/'race-v1.txt').is_file():
+            report['race_pack']=race_preload_pack.build(warm)
+        else:
+            report['race_pack']=dict(status='skipped',reason='no race index')
+    except Exception as exc:  # noqa: BLE001 - optional; the next race can write this pack from the files
+        report['race_pack']=dict(status='failed',reason=str(exc))
     template.save_report(out/'report.json',report)
     # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
     # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.
