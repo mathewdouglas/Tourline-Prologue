@@ -70,7 +70,7 @@ def main():
                 (data/'prepared-cache.txt').write_text(pointer, encoding='utf-8')
                 (data/pointer).mkdir(parents=True)
             env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0', GT5P_PROBE_DELAY_MS='400',
-                       GT5P_PROBE_SELECTED='0')
+                       GT5P_PROBE_SELECTED='0',GT5P_PREPARE_DXC_OFFER='0',GT5P_PREPARE_CLEANUP='0')
             for name in ('GT5P_PREPARE_OFFER', 'GT5P_PREPARE_BACKGROUND', 'GT5P_PREPARE_VOLUME', 'GT5P_PROBE_BACKGROUND_MS',
                          'GT5P_PREPARE_BACKGROUND_PAUSE', 'GT5P_RACE_EVENT', 'GT5P_PROBE_RACE'):
                 env.pop(name, None)

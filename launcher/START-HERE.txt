@@ -21,6 +21,10 @@ game normally after a tool finishes. Use a matching launcher/engine/helper packa
 Do not move/delete the selected dump while using the port.
 
 Background shader preparation (default):
+When upgrading to DXC, a one-time startup notice offers Prepare now or Skip and
+play. Old FXC caches are kept. After successful preparation, an optional cleanup
+prompt shows how many GB older prepared caches use; No keeps them for rollback.
+Background completion shows cleanup next launch, never during gameplay.
 Until shaders are prepared for this version, the launcher prepares them in the
 background while you play, at low priority. Race shaders come first; once they
 are ready, the next race loading screen loads them, and finished ones are used

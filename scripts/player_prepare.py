@@ -257,6 +257,8 @@ def main():
                     help='Only prepare shader-interpreter pipelines into the selected completed preparation')
     ap.add_argument('--check-selected',action='store_true',
                     help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
+    ap.add_argument('--offer-cache-cleanup',action='store_true',
+                    help='Offer removal of older completed generations after successful preparation, with no game running')
     ap.add_argument('--background',action='store_true',
                     help='Phase 225: run beside the game at idle priority; race stage merged into --live-cache first')
     ap.add_argument('--live-cache',type=Path,help='With --background: the shader cache the running game uses')
@@ -303,6 +305,11 @@ def main():
                 if a.background and process_image(int(row[1]))==install/'runtime/gt5p.exe':continue
                 raise ValueError('Another GT5P process is running; nothing was stopped')
     template.idle=idle_for_player
+    if a.offer_cache_cleanup:
+        if a.background:raise ValueError('Cache cleanup cannot run beside the game')
+        import preparation_cleanup
+        preparation_cleanup.offer(storage,idle_for_player)
+        return
     engine=install/'runtime/gt5p.exe';decoder=install/'preparation/decoder.dll'
     bundle=install/'assets/pipeline-templates/gt5p-disc-v2'
     document=template.read(bundle,legacy=os.environ.get('GT5P_PREPARE_INPUT_TEMPLATE')=='0')
@@ -467,6 +474,13 @@ def main():
     identity.write_text(release_identity(install)+'\n',encoding='ascii')
     pending.write_text((out/'shadercache').relative_to(storage).as_posix(),encoding='utf-8');pending.replace(pointer)
     status.write_text('Complete. Normal demand compilation handles uncovered pipelines.',encoding='utf-8')
+    # The launcher offers this after the foreground helper exits, or next launch
+    # after background completion. Cleanup never interrupts a running game.
+    try:
+        import preparation_cleanup
+        preparation_cleanup.schedule(storage)
+    except (OSError,ValueError) as exc:
+        print('Cache cleanup offer not scheduled: '+str(exc),flush=True)
     if race_folder is not None and race_folder.is_dir() and not race_folder.is_symlink():
         # Its files are in the live cache and in the selected preparation now.
         import shutil

@@ -98,6 +98,7 @@ def main():
     kept=json.loads(manifest.read_text())['fragments']
     assert 0<len(kept)<a.count
     assert pointer.read_text()==previous and snapshot(source)==before
+    assert not (storage/'prepare-cleanup-pending.txt').exists(), 'Cancelled preparation scheduled cleanup'
     cancel.unlink()  # Only this test's cancellation request; preserve every cache.
 
     def run(name,overrides=None,success=True):
@@ -113,6 +114,7 @@ def main():
     assert extra['fragment_jobs_reused']==len(kept)
     selected_pointer=pointer.read_text()
     assert selected_pointer==(generation/'shadercache').relative_to(storage).as_posix()
+    assert (storage/'prepare-cleanup-pending.txt').read_text()==selected_pointer
     assert snapshot(source)==before
     run('cached',{'GT5P_PREPARE_FRAGMENT_CHUNK':'4096'})
     cached=json.loads((generation/'report.json').read_text())['additional_translation']
@@ -151,6 +153,7 @@ def main():
         invalid_worker_and_verification_preserved_selection=True,
         native_handoff_rollback_reused_all=True,
         code_bundle_rollback_reused_all=True,invalid_code_bundle_and_shader_profile_rejected=True,
+        cleanup_scheduled_only_after_success=True,
         seconds=time.perf_counter()-started,
         limitation='Frozen offline subset on one GPU; no live rendering or stutter measurement.'),indent=2)+'\n')
     print('Frozen fragment checkpoint, resume, rollback and selection/source preservation passed:',out)

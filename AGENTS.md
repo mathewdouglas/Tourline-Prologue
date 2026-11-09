@@ -36,13 +36,20 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 232)
+## Start here: state of play (2026-11-10, Phase 233)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 232 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 233 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **DXC migration and cache cleanup (Phase 233, 0.2.5):** configured players get a one-time
+  DXC preparation offer even with background preparation on. Successful full preparation
+  offers optional removal of older completed generations, showing GB freed and defaulting
+  to Keep. Background completion defers the offer until the next launch. Selected cache,
+  unfinished work, ordinary cache and saves stay intact. Rollbacks:
+  `GT5P_PREPARE_DXC_OFFER=0`, `GT5P_PREPARE_CLEANUP=0`. See docs/dxc-preparation.md.
 
 - **0.2.5 consolidation (Phase 232):** the interpreter/hitch/DXC work, race-pack prewarm/loading bar,
   and already-included RecompLauncher integration are combined on `0.2.5`. DXC is the user-requested

@@ -9,6 +9,13 @@
 #include "../../src/gt5p_restart.h"
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc>1 && !wcscmp(argv[1],L"--offer-cache-cleanup")) {
+        if (GetFileAttributesW(L"probe.txt")!=INVALID_FILE_ATTRIBUTES) return 12;
+        FILE* record=nullptr;
+        if (!_wfopen_s(&record,L"cleanup.txt",L"w") && record) { fprintf(record,"before_game=1\n");fclose(record); }
+        DeleteFileW(L"prepare-cleanup-pending.txt");
+        return 0;
+    }
     if (argc>1 && !wcscmp(argv[1],L"--check-selected")) {
         // The launcher's read-only "is the current preparation selected" question.
         // Leaves its own record and never probe.txt, which marks a game start.

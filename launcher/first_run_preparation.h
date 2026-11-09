@@ -7,7 +7,7 @@ namespace first_run_preparation {
 
 // Which launch asks: right after setup completes, or the first launch of an
 // updated version whose earlier preparation is no longer used.
-enum class Kind { AfterSetup, Update };
+enum class Kind { AfterSetup, Update, DxcUpdate };
 
 // The broad time window, from the measured full preparation (docs/release-v0.2.4.md).
 // The helper runs four compiler workers on 8 or more logical processors and two
@@ -25,7 +25,12 @@ inline bool offer(HICON icon, Kind kind, const std::wstring& window) {
     td.dwFlags = static_cast<TASKDIALOG_FLAGS>(TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION);
     td.pszWindowTitle = L"Tourline Prologue";
     std::wstring content;
-    if (kind == Kind::Update) {
+    if (kind == Kind::DxcUpdate) {
+        td.pszMainInstruction = L"Prepare shaders for the updated shader compiler?";
+        content = L"This version uses DXC to build shaders. Shaders prepared with the previous FXC compiler cannot be used by DXC. "
+                  L"Your older caches are kept for rollback. After preparation succeeds, you can choose to remove them to free space.\n\n"
+                  L"Preparing now can reduce compilation stutter. You can skip and play; shaders will compile as needed.\n\n";
+    } else if (kind == Kind::Update) {
         td.pszMainInstruction = L"Prepare shaders for this version?";
         content = L"This update changed how shaders are built, so shaders prepared by an earlier version are no longer used. "
                   L"The game works without preparing, but compiling shaders while you play can cause stutter.\n\n";

@@ -85,3 +85,36 @@ the pack's internal checksum and exact membership, and follows the live priority
 order. Changes in membership still fall back to the individual files.
 `RSX_RACE_PREWARM_PACK=0` restores that per-file path. This is independent of the
 compiler selection and does not remove either compiler's shader caches.
+
+## Upgrade notice and optional cleanup
+
+Configured players get one DXC migration offer before the game starts, even with
+background preparation enabled. It explains that FXC shaders cannot serve DXC,
+offers **Prepare now** or **Skip and play**, and keeps the old cache. A current
+preparation suppresses the offer; answering or closing it records
+`prepare-offer-dxc-v1.done` in player storage. Fresh setup uses its existing flow.
+`GT5P_PREPARE_DXC_OFFER=0` disables this migration offer; `GT5P_PREPARE_OFFER=0`
+continues to disable all preparation offers/background preparation. Explicit FXC
+and interpreter users keep the existing preparation flow.
+
+After full preparation succeeds and selects its new cache, the launcher offers to
+remove older **completed preparation generations**, displaying their approximate
+total size in GB. **No** is the default. It warns that deletion removes their
+learned shaders and that FXC/older-renderer rollback will require preparation again.
+The selected generation, unfinished work, ordinary `shadercache`, saves and
+settings are kept. This includes older DXC settings generations, not just FXC.
+No cleanup is scheduled on failure, cancellation or interpreter-only preparation.
+
+Foreground preparation offers cleanup after its progress window closes.
+Background preparation schedules it for the next normal launch, before gameplay;
+it never opens a cleanup dialog during play. The answer is recorded once per
+selected generation (`prepare-cleanup-<generation>.done`). A pending offer lives
+in `prepare-cleanup-pending.txt`; it must match the completed current selection.
+`GT5P_PREPARE_CLEANUP=0` disables scheduling and showing cleanup offers.
+
+Cleanup requires the launcher's storage lease and no running game. It checks
+bounded storage-relative generation names, complete checkpoints, regular files,
+hard links and junctions, and acquires each old generation's preparation lock
+before deleting. Locked/incomplete/unknown generations are not offered; unsafe
+trees abort cleanup. It rechecks selection and targets after the user answers.
+Cleanup failure leaves the selected preparation usable and reports a notice.

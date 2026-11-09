@@ -47,6 +47,9 @@ Evidence for finished work goes in [progress.md](progress.md).
   Phase 231: DXC can also prepare the player cache and is packaged with pinned DLLs/notices. Phase 232 combines this work with the race-pack/loading bar and makes DXC the user-requested default
   (`RSX_SHADER_COMPILER=fxc` rollback). Synthetic GPU comparisons exceed the numeric threshold; fixed-frame
   and other-GPU rendering checks remain open. See [dxc-preparation.md](dxc-preparation.md).
+  Phase 233 adds a one-time DXC migration offer and optional old-generation cleanup
+  after successful preparation, with the recoverable size displayed and Keep as
+  the default. Background completion defers cleanup to the next launch.
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;

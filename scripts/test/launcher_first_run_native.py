@@ -71,7 +71,13 @@ def main():
                   ('update-helper-mismatch',None,{}),
                   ('update-offer-disabled',None,{'GT5P_PREPARE_OFFER':'0'}),
                   ('update-already-answered',None,{}), ('update-no-prepared-flag',None,{}),
-                  ('update-legacy-volume',None,{'GT5P_PREPARE_VOLUME':'0'})]
+                  ('update-legacy-volume',None,{'GT5P_PREPARE_VOLUME':'0'}),
+                  ('update-dxc-prepare',100,{'GT5P_PREPARE_DXC_OFFER':'1'}),
+                  ('update-dxc-skip',101,{'GT5P_PREPARE_DXC_OFFER':'1'}),
+                  ('update-dxc-close',0,{'GT5P_PREPARE_DXC_OFFER':'1'}),
+                  ('update-dxc-current',None,{'GT5P_PREPARE_DXC_OFFER':'1','GT5P_PROBE_SELECTED':'1'}),
+                  ('update-dxc-background-skip',101,{'GT5P_PREPARE_DXC_OFFER':'1','GT5P_PREPARE_BACKGROUND':'1'}),
+                  ('update-cleanup-deferred',None,{'GT5P_PREPARE_CLEANUP':'1','GT5P_PROBE_SELECTED':'1'})]
         specs = [dict(label=l, choice=c, update=False, extra={}) for l, c in fresh]
         specs += [dict(label=l, choice=c, update=True, extra=e) for l, c, e in update]
         for spec in specs:
@@ -82,6 +88,7 @@ def main():
             if is_update:
                 (data/'setup.ini').write_text('[game]\ndirectory='+str(disc)+'\n', encoding='utf-16')
             if label=='update-already-answered': (data/marker_name).write_text('answered\n')
+            if label=='update-cleanup-deferred': (data/'prepare-cleanup-pending.txt').write_text('synthetic pending selection')
             env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0',
                        GT5P_PROBE_DELAY_MS='100',
                        GT5P_PROBE_PREPARE_DELAY_MS='30000' if 'cancel-' in label else '100')
@@ -89,13 +96,15 @@ def main():
                 env.pop(name,None)
             env['GT5P_PROBE_SELECTED']='0'   # not prepared, unless the scenario says otherwise
             env['GT5P_PREPARE_BACKGROUND']='0'   # the offer flow; Phase 225 background: launcher_background_native.py
+            env['GT5P_PREPARE_DXC_OFFER']='0'  # legacy matrix; explicit DXC scenarios below enable migration
+            env['GT5P_PREPARE_CLEANUP']='0'
             env.update(spec['extra'])
             if label=='offer-disabled': env['GT5P_PREPARE_OFFER']='0'
             if label=='cancel-legacy': env['GT5P_PREPARE_UI']='0'
             check_expected = is_update and label not in ('update-offer-disabled','update-already-answered',
                 'update-no-prepared-flag','update-legacy-volume','update-helper-mismatch')
             marker_expected = (choice is not None and label != 'cancel-setup') or label in (
-                'update-already-prepared','update-already-answered')
+                'update-already-prepared','update-already-answered','update-dxc-current','update-cleanup-deferred')
             release=install/'release.ini'
             release_text=release.read_text()
             if label in ('helper-unavailable','update-helper-mismatch'):
@@ -172,13 +181,18 @@ def main():
                         record = data/'check.txt'
                         return record.read_text(encoding='utf-8-sig').count('argc=') if record.exists() else 0
                     checks = helper_checks()
-                    assert checks==(1 if check_expected else 0),(label,'helper checks',checks)
+                    assert checks==(2 if label=='update-dxc-background-skip' else 1 if check_expected else 0),(label,'helper checks',checks)
                     assert (data/marker_name).exists()==marker_expected,(label,'marker',seen)
+                    if label.startswith('update-dxc-'):
+                        assert (data/'prepare-offer-dxc-v1.done').exists()
+                    if label=='update-cleanup-deferred':
+                        assert (data/'cleanup.txt').read_text()=='before_game=1\n'
+                        assert not (data/'prepare-cleanup-pending.txt').exists()
                     # Once answered, ordinary launches do not offer or ask the helper again; with
                     # nothing recorded the next launch behaves like this one did.
                     done = subprocess.run(args,env=dict(env,GT5P_PROBE_DELAY_MS='0',**({'GT5P_PROBE_SELECTED':'0'} if marker_expected else {})),timeout=10)
                     assert done.returncode==0
-                    if marker_expected: assert helper_checks()==checks,(label,'second launch asked the helper again')
+                    if marker_expected: assert helper_checks()==checks+(label=='update-dxc-background-skip'),(label,'second launch asked the helper again')
                 print(label+': passed')
             finally:
                 if owner.poll() is None: owner.terminate(); owner.wait(timeout=10)

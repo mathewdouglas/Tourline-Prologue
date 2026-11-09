@@ -9,6 +9,63 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 233 - DXC migration offer and optional old-cache cleanup (2026-11-10)
+
+**Request.** After successful preparation, offer to remove old caches and show the
+recoverable GB. Add a one-time startup explanation of the DXC compiler change and
+offer preparation. Work stays on `0.2.5`; no release or tag.
+
+**Behavior.** Configured installs now get one DXC migration dialog before gameplay,
+including with default background preparation. Prepare now, Skip and play and close
+all count as an answer. A current preparation records the migration as handled
+without a dialog. FXC/interpreter overrides keep their earlier flow, and fresh setup
+does not get a second migration dialog. Skipping leaves background preparation
+available under its existing controls. The copy explains the compiler change, cache
+incompatibility and retained FXC rollback, rather than claiming the old files are
+corrupt or forcing preparation.
+
+Full preparation schedules cleanup only after successful validation and publication
+of its selected generation. Foreground completion offers it after the progress
+window closes; background completion defers it until next launch, before gameplay.
+The native Yes/No prompt shows the approximate total GB of older completed preparation
+generations, defaults to No, and explains the learned-cache/FXC rollback consequence.
+It does not appear with no eligible old cache. Answers are remembered per selected
+generation. Ordinary `shadercache`, saves, settings, the selected generation and
+unfinished preparation work are excluded. Older DXC settings generations are also
+eligible; this is explicitly described as removal of older prepared caches.
+
+`scripts/preparation_cleanup.py` validates bounded storage-relative generation names,
+complete checkpoints, selection and pending-completion identity, refuses redirects
+and hard links, skips locked/incomplete work, revalidates targets after the dialog and
+locks every deletion target. The launcher holds its storage lease and the helper
+requires no game running. Cleanup errors report a notice while retaining the selected
+preparation and allowing play. Rollbacks: `GT5P_PREPARE_CLEANUP=0` disables scheduling
+and cleanup offers; `GT5P_PREPARE_DXC_OFFER=0` disables the migration offer. Existing
+`GT5P_PREPARE_OFFER=0` and `RSX_SHADER_COMPILER=fxc` keep their meanings. Marker names
+and scope are documented in [dxc-preparation.md](dxc-preparation.md).
+
+**Validation.** All builds/tests use `run_locked.py`. Native launcher builds pass.
+Synthetic cleanup tests cover exact offered bytes, Yes/No, repeat suppression,
+disabled mode, incomplete selection, selection/target changes, running-game guard,
+hard links, junctions and active generation locks; protected files remain byte-identical.
+Native dialogs pass both choices from source and the frozen helper. The 26-case
+first-run/update launcher matrix passes, including DXC prepare/skip/close/current,
+skip with background preparation enabled, no repeated migration dialog, and deferred
+cleanup before the game child starts. The separate 11-case background launcher suite
+and packaging integrity checks pass. Frozen helper build includes the new module and
+passes the existing hash/volume tests (8/9 cases). No runtime renderer change or
+gameplay performance claim is made in this phase.
+
+The real frozen 32-record packed-game check passes in 130.19 seconds: cancellation
+retains 8 translated fragments, resume reuses all 8, native verification reports
+`[32,32,32,0]`, and source files/old selection remain unchanged. No cleanup pending
+marker exists after cancellation; successful resume records the new selected cache
+for cleanup. Cached/chunk/handoff/code-bundle rollbacks and invalid-input rejection
+still pass. Evidence: ignored `scratch/q234/validation.json` and
+`scratch/cleanup-ui` builds; tests `preparation_cleanup.py`,
+`launcher_first_run_native.py`, `launcher_background_native.py`,
+`player_fragment_checkpoint_native.py` and `player_package.py`.
+
 ## Phase 232 - Consolidated 0.2.5 branch, DXC default (2026-11-10)
 
 **Request.** Combine the interpreter/hitch/DXC work with the race-pack prewarm/loading bar and

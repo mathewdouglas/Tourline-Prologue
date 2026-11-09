@@ -408,6 +408,21 @@ static fs::path storage_picker() {
     if (choice == 100) return data;
     return pick(true, L"Choose an empty folder for Project Tourline Prologue saves, settings and cache");
 }
+static void offer_cache_cleanup(const fs::path& disc) {
+    if (env(L"GT5P_PREPARE_CLEANUP")==L"0" || !fs::is_regular_file(data/L"prepare-cleanup-pending.txt")) return;
+    auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
+    if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256")) return;
+    // No progress dialog: this helper only scans and offers cleanup. Failure must
+    // never turn a successful preparation into a failed launch.
+    try {
+        DWORD result=run(helper,L"--offer-cache-cleanup --install "+quote(install)+L" --storage "+quote(data)+
+            L" --game "+quote(disc)+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare-cleanup");
+        if (result) MessageBoxW(nullptr,L"Older cache cleanup could not finish. Your selected preparation is kept. "
+            L"Normal play is still available; details are in the prepare-cleanup log in your storage folder.",
+            L"Tourline Prologue",MB_OK|MB_ICONINFORMATION);
+    }
+    catch (...) {}
+}
 static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game, bool notices=true) {
     auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
     if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
@@ -423,6 +438,7 @@ static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets,
     auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
     DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
     if (result && result!=2) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
+    if (!result) offer_cache_cleanup(disc);
     if (notices && !result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
     return result;
 }
@@ -688,14 +704,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             prepare_cache(disc,prepare_assets,false);
             CoUninitialize();return 0;
         }
-        // Phase 225: with background preparation (the default) there is no offer; preparation starts beside
+        // One DXC migration offer, including when background preparation is enabled.
+        // A current preparation suppresses it. Interpreter/FXC users keep their existing flow.
+        bool dxc_offered=false;
+        auto interpreter_on=[](const std::wstring& v) { return !v.empty() && (v[0]==L'1' || v[0]==L'f' || v[0]==L'F'); };
+        const auto compiler=env(L"RSX_SHADER_COMPILER");
+        const auto dxc_marker=data/L"prepare-offer-dxc-v1.done";
+        if (completed_setup) std::ofstream(dxc_marker) << "new-install\n";
+        if (!completed_setup && !no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" &&
+            env(L"GT5P_PREPARE_OFFER")!=L"0" && env(L"GT5P_PREPARE_DXC_OFFER")!=L"0" &&
+            (compiler.empty() || compiler==L"dxc") &&
+            !interpreter_on(env(L"RSX_SHADER_INTERP")) && !interpreter_on(env(L"RSX_SHADER_INTERP_VP")) &&
+            !fs::exists(dxc_marker)) {
+            int state=selected_preparation(disc);
+            if (state==0 || state==3) {
+                if (state==3) {
+                    offer_preparation(disc,first_run_preparation::Kind::DxcUpdate,release_value(L"port_version"));
+                    dxc_offered=true;
+                }
+                else {
+                    const auto version=release_value(L"port_version");
+                    if (plain_version(version)) mark_offer(version);
+                }
+                std::ofstream(dxc_marker) << "answered\n";
+            }
+        }
+        offer_cache_cleanup(disc); // a completed background preparation from the previous launch
+        // Phase 225: aside from the DXC migration notice above, background preparation starts beside
         // the game below. At most one offer per launch otherwise. GT5P_PREPARE_OFFER=0 disables both.
         bool background=false;
         if (background_enabled() && !no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" && env(L"GT5P_PREPARE_OFFER")!=L"0")
             background=!preparation_current(disc);
-        else if (env(L"GT5P_PREPARE_OFFER")!=L"0") {
+        else if (!dxc_offered && env(L"GT5P_PREPARE_OFFER")!=L"0") {
             const std::wstring version=release_value(L"port_version");
-            if (completed_setup) offer_preparation(disc,first_run_preparation::Kind::AfterSetup,version);
+            if (completed_setup) {
+                offer_preparation(disc,first_run_preparation::Kind::AfterSetup,version);
+                std::ofstream(dxc_marker) << "answered\n";
+            }
             else if (!no_prepared && env(L"GT5P_PREPARE_VOLUME")!=L"0" && plain_version(version) &&
                      !fs::exists(offer_marker(version))) {
                 // First launch of this version: offer unless a completed preparation of the
