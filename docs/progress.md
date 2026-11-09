@@ -9,6 +9,102 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 231 - DXC preparation and pinned distribution; rendering acceptance remains open (2026-11-10)
+
+**Scope.** Resume the interrupted DXC close-out from Phase 227. The independently completed race pack and
+loading bar are on `feature/prewarm-bundle` through 2947fe7 (Phases 228-230); they are not merged here.
+A read-only merge check reports one conflict, in the shared main runtime patch. Combining the branches
+requires regenerating the backend section from the combined source, then checking the overlays again.
+
+**Implemented.** `scripts/shader_compiler.py` selects FXC by default or DXC with
+`RSX_SHADER_COMPILER=dxc`. The player helper, vertex subprocesses and offline engine use the same selection.
+The frozen helper includes the compiler module. Player preparation loads the compiler beside its engine;
+developer tools can use `GT5P_PREPARE_DXC_LIBRARY`. Compiler selection and the DLL digest distinguish DXC
+preparation generations, retaining previous caches and selection until success. The interpreter forces FXC
+for guest stages, because generic FXC interpreter stages cannot share a pipeline with DXIL guest stages.
+
+DXC uses SM 6.0, HLSL 2018, and `-Gis`. The strictness flag preserves the output NaN cleanup that DXC otherwise
+removed. Source keys now include `0x2000` for DXC strictness in both implementations, avoiding reuse of
+Phase 227's non-strict DXC artifacts. The FXC source-key calculation is unchanged. No starter records change.
+The backend section was regenerated from a clean pinned 4e8f3ca8 archive; the complete main patch and each
+current interpreter/trace/coverage/source-dump overlay apply to a clean export. Literal CRLF context in the
+main patch's unrelated headers is preserved.
+
+`scripts/get_dxc.py` fetches Microsoft's pinned v1.8.2502 release with a checked archive SHA-256, compiler,
+signer and three license digests. CI fetches it; CMake copies both DLLs beside the engine. Packaging checks
+the built DLLs against that distribution and ships its LLVM/NCSA, MIT and Microsoft notices and version/source
+manifest. There is no requirement for a separately installed DXC on the player's machine. Gameplay falls back
+to FXC if the compiler cannot load; an explicitly requested DXC preparation fails early instead.
+
+**Checks completed on resumption.** All through the machine-wide test lock:
+
+- Full FXC rollback preparation completes: 12,669/12,669 reconstructed native keys, fresh native requests,
+  persisted blobs and lookups pass (`native_counts = [12669,12669,12669,0]`). MSAA mapping and fast lookup
+  report complete. Catalogue enumeration prepares 24,434/24,522; its 88 exclusions match the earlier FXC
+  baseline count, and all 16 retained failure examples have the same identities. They are not new regressions.
+- `get_dxc`, `shader_compiler`, `native_pipeline_key` (13 cases), `prepare_material_shaders`,
+  `shader_vertex_batch`, `shader_translation`, and `player_package` pass under each compiler selection.
+  Checks cover signed deterministic DXIL, distinct strictness keys, compiler propagation, protocol bounds,
+  archive/signature-DLL/notice integrity, package exclusion rules, and mismatched packaged DXC rejection.
+- Fresh final frozen DXC preparation completes in **482.57 s wall**, including all **12,669** native
+  requests/keys/persisted lookups (`native_counts = [12669,12669,12669,0]`) and **24,522/24,522** enumerated
+  shaders, zero failures. MSAA mapping and fast lookup report complete. A prior selected cache marker is
+  preserved and selection moves only after success. The core report time is 406.60 s; the FXC rollback's
+  report is 783.86 s. Different process/cache/driver histories make these validation timings, not a controlled
+  compiler speed comparison. Evidence: ignored `scratch/dxc-closeout/frozen-full.json`, `dxc-summary.json`
+  and `fxc-summary.json`.
+- Final private engine links and the frozen helper builds. Its hash-library (8 cases) and volume-reader
+  (9 cases) checks pass. All outputs remain private; shared runtime/build/game/cache inputs are read-only.
+
+- Frozen 32-record checkpoint suites pass with each compiler, using four workers and both default and
+  ultrawide-native translations. Each retains eight interrupted fragments, reuses all eight on resume,
+  and passes `[32,32,32,0]` native validation. Existing selection/source caches remain intact through cancel
+  and invalid-input rejection; cached, chunk-size, native-handoff and code-bundle rollbacks pass. The suites
+  take 116.72 s (DXC) and 118.38 s (FXC); most of this repeated test is archive/reuse/rejection work, not a
+  compile benchmark. Records: `scratch/dxc-closeout/frozen-*-checkpoint.json`.
+
+- A prepared High Speed Ring route with the final engine and fresh DXC cache completes (1080p, 16:9,
+  2x MSAA, interpreter off, no background helper). Logs confirm DXC and 12,674 fast-lookup rows loaded,
+  ending with 1,677 fast hits; no shader compilation or pipeline-creation failures are reported. Inspected
+  game-window captures show the road, cars, mirror and HUD rendering. The 62 s FrameTest reports 59.9 FPS,
+  p99 18.0 ms and max 31.0 ms. The wider grid-to-end trace, excluding capture overlap, has five intervals
+  over 50 ms, none over 100 ms (worst 95 ms). This single route is a smoke test, not fixed-frame parity,
+  whole-game coverage, or a new performance comparison. Logs/screenshots remain in
+  `scratch/hitch/routes/hsr-prepared-dxc231`; its summary is `scratch/dxc-closeout/game-summary.json`.
+
+The resumed validation commands were the locked source `scripts/player_prepare.py` with
+`RSX_SHADER_COMPILER=fxc`, a freshly built `GT5P-Prepare.exe` with `RSX_SHADER_COMPILER=dxc`,
+`scripts/test/player_fragment_checkpoint_native.py --count 32 --chunk 8` under each compiler,
+and `scripts/test/hitch_capture.py hsr prepared --suffix dxc231 --env RSX_SHADER_COMPILER=dxc`.
+The small orchestration scripts and metadata summaries remain under ignored `scratch/dxc-closeout`.
+
+**Recovered rendering evidence, not a pass.** The November 6 GPU harness uses identical synthetic inputs
+for 264 GPU-fetch vertex and 1,073 pixel shaders. All compile, and pixel coverage agrees. It flags 40 vertex
+and 53 pixel shaders: 9,736 of 74,579,968 pixel values exceed its 1/1024 relative threshold, maximum relative
+error 1.32; vertex results include one-sided NaNs/infinities on extreme random inputs. Eighteen CPU-fetch
+vertex shaders are not exercised. The FXC skip-optimization control also differs (17 pixel shaders, 1,282
+values beyond threshold), which does not prove the additional DXC differences harmless. Both comparisons
+exit 1. Earlier commentary calling these differences acceptable was stronger than the evidence.
+
+The interrupted work had already completed a source-helper DXC preparation (12,669 native pipelines plus
+24,522/24,522 enumerated shaders; 575 s wall), and a prepared HSR route reported 59.9 FPS with three intervals
+above 50 ms. Those runs predate the strictness source-key correction; their bytecode used `-Gis`, but their
+keys are obsolete. A 110-source strictness timing sample retained the compile advantage (FXC 8.4 s, DXC
+3.2 s, zero compile failures). These are historical local samples, not a new controlled preparation-time claim.
+
+**Cleanup limit.** New private build/cache trees were checked to stay under this worktree's scratch directory;
+no junctions/reparse points were found. Automatic command approval rejected both the bounded cleanup script
+and a single literal-directory deletion as `blocked by policy`. No deletion was performed. The private
+artifacts remain under `scratch/dxc-closeout`, `scratch/d31`, `scratch/q31`, `scratch/q32`,
+`scratch/fx/storage-fxc` and `scratch/hitch/caches/hsr-prepared-dxc231`; the exact manifest is
+`scratch/dxc-closeout/cleanup-blocked.json`. No game remains running. No protected shared inputs were changed.
+
+**Decision and remaining acceptance.** FXC stays the default, following the standing rule that unproven
+experiments remain developer options. `RSX_SHADER_COMPILER=dxc` enables the complete development path;
+unset or `=fxc` restores FXC. Fixed in-game frame comparison, CPU-fetch coverage, and other GPU vendors/drivers
+remain open before default promotion. The interpreter remains default-off. No merge to main, tag or release.
+See [dxc-preparation.md](dxc-preparation.md) for setup and the comparison harness.
+
 ## Phase 227 - DXC for guest shaders (opt-in): compile time 2.6x lower (2026-11-06)
 
 **Aim.** On an empty cache a High Speed Ring race compiles about 1,075 shaders on demand. Make the compiles

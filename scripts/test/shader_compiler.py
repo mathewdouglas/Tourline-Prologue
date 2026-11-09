@@ -40,6 +40,7 @@ def parts(code):
 def selection():
     assert sc.mode({}) == 'fxc' and sc.mode({'RSX_SHADER_COMPILER': 'dxc'}) == 'dxc'
     assert sc.mode({'RSX_SHADER_COMPILER': 'fxc'}) == 'fxc'
+    assert sc.mode({'RSX_SHADER_COMPILER': 'dxc', 'RSX_SHADER_INTERP': '1'}) == 'fxc'
     assert sc.mode({'RSX_SHADER_INTERP': '1'}) == 'fxc' and sc.mode({'RSX_SHADER_INTERP': '0'}) == 'fxc'
     for bad in ('', 'DXC', 'llvm'):
         try:

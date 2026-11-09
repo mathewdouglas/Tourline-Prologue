@@ -87,6 +87,7 @@ for key in default_env:
     assert folded != 'PS3_HEADLESS'
 assert default_env['RSX_SHADER_COMPILER'] == __import__('shader_compiler').mode(base) and default_env['GT5P_PREPARE_DXC_LIBRARY'].endswith('dxcompiler.dll')
 assert shader_translation.environment('default', dict(base, RSX_SHADER_COMPILER='fxc'))['RSX_SHADER_COMPILER'] == 'fxc'
+assert shader_translation.environment('default', dict(base, RSX_SHADER_COMPILER='dxc', RSX_SHADER_INTERP='1'))['RSX_SHADER_COMPILER'] == 'fxc'
 assert 'GT5P_PREPARE_HASH_LIBRARY' not in default_env
 assert 'shadercache' not in ''.join(default_env.values()).lower()
 ultrawide = shader_translation.environment('ultrawide-native', base)
