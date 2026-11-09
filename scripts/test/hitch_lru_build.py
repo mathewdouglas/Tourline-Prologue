@@ -16,6 +16,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/test'))
+sys.path.insert(0, str(ROOT / 'scripts'))
 from fp_sample_share_build import patched_source  # noqa: E402
 from interp_private_build import compile_backend, link_engine  # noqa: E402
 
@@ -44,7 +45,15 @@ def main():
     for name in (a.overlay or ['ps3recomp-frame-hitch-trace.patch']):
         apply(fresh / 'runtime-source', ROOT / 'patches' / name)
     obj = compile_backend(backend, fresh / 'backend-objects')
-    print(link_engine(fresh, obj, []), flush=True)
+    engine = link_engine(fresh, obj, [])
+    # Phase 231: guest shaders compile with DXC from beside the engine (scripts/get_dxc.py); FXC without it.
+    import get_dxc
+    if get_dxc.installed(ROOT / 'third_party/dxc'):
+        for name in ('dxcompiler.dll', 'dxil.dll'):
+            shutil.copyfile(ROOT / 'third_party/dxc' / name, engine.parent / name)
+    else:
+        print('third_party/dxc missing (scripts/get_dxc.py): this engine will use FXC', flush=True)
+    print(engine, flush=True)
 
 
 if __name__ == '__main__':

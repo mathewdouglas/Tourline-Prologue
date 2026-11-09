@@ -14,7 +14,10 @@ assert struct.unpack_from('<Q', r, 80)[0] == len(ps)
 state = bytearray(r[48:704]);state[16:24] = bytes(8);state[32:40] = bytes(8)
 assert not any(state), 'Native state was supplied rather than reconstructed'
 assert struct.unpack_from('<Q', r, 2752)[0] == m.fnv64(r[:-8])
-assert m.source_key(b'synthetic') == (m.fnv64(b'syntheticvs_5_0') * 1099511628211) & 0xffffffffffffffff
+import os
+import shader_compiler
+assert m.source_key(b'synthetic') == ((m.fnv64(b'synthetic' + shader_compiler.targets()[0]) ^ (0x2000 if shader_compiler.mode() == 'dxc' else 0)) * 1099511628211) & 0xffffffffffffffff
+assert m.source_key(b'synthetic', b'vs_5_0') == (m.fnv64(b'syntheticvs_5_0') * 1099511628211) & 0xffffffffffffffff
 with tempfile.TemporaryDirectory() as folder:
     path = Path(folder) / 'test.dxbc'
     m.save_code(path, vs);m.save_code(path, vs)

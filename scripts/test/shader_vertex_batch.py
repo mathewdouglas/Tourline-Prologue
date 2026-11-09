@@ -507,7 +507,7 @@ assert compile_signature.parameters['derive'].default is False
 assert compile_signature.parameters['workers'].default is None
 
 def derived_ids(source, code):
-    return f'{source_key(source, batch.VERTEX_TARGET):016x}', f'{fnv64(code):016x}'
+    return f'{source_key(source, __import__('shader_compiler').targets()[0]):016x}', f'{fnv64(code):016x}'
 
 def derive_reply(echoed, payload, worker):
     assert len(echoed) == 2 and worker.kinds[-1] == 'derive'

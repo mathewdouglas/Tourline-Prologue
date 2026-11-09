@@ -109,6 +109,8 @@ def main():
             copy_file(source, ROOT/'third_party/ffmpeg/include'/source.relative_to(headers))
     for name in ('avcodec-61.dll', 'avutil-59.dll', 'swresample-5.dll'):
         copy_file(seed/'third_party/ffmpeg/bin'/name, ROOT/'third_party/ffmpeg/bin'/name)
+    # Phase 231: the pinned DXC release (downloaded, digest-checked) for the engine and the package.
+    run(sys.executable, 'scripts/get_dxc.py')
     (ROOT/'input/target').write_text('BCUS98158\n', encoding='ascii')
     os.environ['GT5P_TARGET'] = 'BCUS98158'
     # Content-address the patched runtime so a new pin/overlay never edits the

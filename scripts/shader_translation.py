@@ -60,4 +60,8 @@ def environment(mode, base=None):
         if _dropped(key):
             continue
         env[key] = value
+    # Phase 231: the vertex workers compile with this process's compiler (and its DLL), never a default of their own.
+    import shader_compiler
+    env['RSX_SHADER_COMPILER'] = shader_compiler.mode(source)
+    env['GT5P_PREPARE_DXC_LIBRARY'] = str(shader_compiler.library(source).resolve())
     return apply(env, mode)

@@ -36,13 +36,21 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-06, Phase 227)
+## Start here: state of play (2026-11-10, Phase 231)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 227 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 231 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **DXC preparation and distribution (Phase 231, development):** `RSX_SHADER_COMPILER=dxc` now selects the
+  same compiler in the helper, its vertex workers and the offline engine. The pinned v1.8.2502 DLLs and
+  notices are included by packaging. Strict floating-point compilation preserves the NaN scrub and has a
+  separate source key from the older experimental DXC output. FXC remains the default: synthetic GPU
+  comparisons exceed the numeric threshold; fixed game frames and other GPUs remain unverified.
+  See docs/dxc-preparation.md and progress Phase 231. The independently completed race pack/loading bar
+  remain on `feature/prewarm-bundle` (2947fe7); this branch does not merge them.
 
 - **DXC for guest shaders (Phase 227, opt-in, main patch):** `RSX_SHADER_COMPILER=dxc` compiles guest shaders
   with DXC to SM 6.0 (`dxcompiler.dll` + `dxil.dll` beside gt5p.exe, from the Windows SDK; target vs_6_0/ps_6_0 in

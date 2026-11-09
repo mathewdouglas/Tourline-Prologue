@@ -99,7 +99,9 @@ def port_version():
     return version
 
 
-RUNTIME = ('SDL2.dll', 'avcodec-61.dll', 'avutil-59.dll', 'swresample-5.dll')
+RUNTIME = ('SDL2.dll', 'avcodec-61.dll', 'avutil-59.dll', 'swresample-5.dll', 'dxcompiler.dll', 'dxil.dll')
+# Phase 231: the pinned DXC release's licenses (scripts/get_dxc.py verifies the DLLs and the zip they came from).
+DXC_NOTICES = ('LICENSE-LLVM.txt', 'LICENSE-MIT.txt', 'LICENSE-MS.txt', 'VERSION.txt')
 VC_REQUIRED = ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
 VC_OPTIONAL = ('msvcp140_1.dll', 'msvcp140_2.dll', 'msvcp140_atomic_wait.dll',
                'msvcp140_codecvt_ids.dll', 'concrt140.dll')
@@ -193,6 +195,14 @@ def main():
         if p.stat().st_size > 256_000 or b'\0' in p.read_bytes():
             raise ValueError(f'Expected a small text notice: {p}')
         files['licenses/' + name] = p
+    import get_dxc
+    if not get_dxc.installed(ROOT / 'third_party/dxc'):
+        raise ValueError('Run scripts/get_dxc.py: the pinned DXC files are missing or differ')
+    for name in ('dxcompiler.dll', 'dxil.dll'):
+        if sha(files['runtime/' + name]) != sha(ROOT / 'third_party/dxc' / name):
+            raise ValueError(f'The built {name} is not the pinned DXC file')
+    for name in DXC_NOTICES:
+        files['licenses/DXC-' + name] = regular(ROOT / 'third_party/dxc' / name)
     source_info = files['licenses/FFmpeg-SOURCE.md'].read_text(encoding='utf-8')
     if 'https://' not in source_info:
         raise ValueError('FFmpeg-SOURCE.md must identify the matching source/build information')

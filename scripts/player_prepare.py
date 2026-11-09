@@ -123,6 +123,12 @@ def release_identity(install):
         with path.open('rb') as stream:digest.update(name.encode()+b'\0'+hashlib.file_digest(stream,'sha256').digest())
     add('engine',install/'runtime/gt5p.exe');add('decoder',install/'preparation/decoder.dll')
     add('plan',ROOT/'config/pipeline-warmup/gt5p-disc-v2.json')
+    import shader_compiler
+    if shader_compiler.mode()=='dxc':
+        # Phase 231: the compiler is part of every shader key. FXC (RSX_SHADER_COMPILER=fxc) keeps the old identity.
+        digest.update(b'shader-compiler\0dxc')
+        dxc=install/'runtime/dxcompiler.dll'
+        if dxc.is_file():add('dxcompiler',dxc)
     for name in ('pipeline-templates/gt5p-disc-v2','shader-enumeration/gt5p-disc-v1'):
         folder=install/'assets'/name
         for path in sorted(p for p in folder.rglob('*') if p.is_file()):
@@ -314,6 +320,15 @@ def main():
         if not (game/'PARAM.SFO').exists() and (game/'PS3_GAME').is_dir():game=game/'PS3_GAME'
         volume=game/'USRDIR/GT.VOL';volume_map=bundle/'volume-map.json'
         metadata_items.append(read_volume(volume_map))
+    # Phase 231: guest shaders compile with DXC (the dxcompiler.dll beside the engine) when
+    # RSX_SHADER_COMPILER=dxc. Offline engine runs get the same setting (offline_env); a DXC generation has its
+    # own token, so FXC and DXC caches are never resumed into each other.
+    import shader_compiler
+    if shader_compiler.mode()=='dxc':
+        dxc=install/'runtime/dxcompiler.dll'
+        os.environ['GT5P_PREPARE_DXC_LIBRARY']=str(dxc)
+        shader_compiler.Dxc()  # refuse early and clearly when it is missing
+        metadata_items.append(dict(shader_compiler='dxc',dxcompiler_sha256=hashlib.sha256(dxc.read_bytes()).hexdigest()))
     metadata=json.dumps(metadata_items,sort_keys=True,separators=(',',':'))
     plan=shader_pack_plan(translation)
     packs=plan is not None

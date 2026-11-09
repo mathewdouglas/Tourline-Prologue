@@ -30,8 +30,12 @@ def check_dynamic_game(game_root):
         raise ValueError('Dynamic resource rules require the verified disc ELF')
 
 
-def source_key(hlsl, target=b'vs_5_0'):
-    return (fnv64(hlsl + target) * 1099511628211) & 0xffffffffffffffff  # flags=0
+def source_key(hlsl, target=None):
+    if target is None:
+        import shader_compiler
+        target = shader_compiler.targets()[0]  # Phase 231: the vertex target of the configured compiler
+    from native_pipeline_key import source_key as renderer_source_key
+    return renderer_source_key(hlsl, target)
 
 
 def request_envelope(vs, ps):

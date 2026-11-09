@@ -41,6 +41,12 @@ def main():
         put(root / 'EMAIN.ELF', elf)
         for name in package.RUNTIME:
             put(build / name, pe)
+        import get_dxc
+        dxc = package.ROOT / 'third_party/dxc'
+        for name in ('dxcompiler.dll', 'dxil.dll'):
+            put(dxc / name, pe)
+        for name in package.DXC_NOTICES:
+            put(dxc / name, b'Synthetic DXC notice\n')
         for name in package.VC_REQUIRED:
             put(root / 'crt' / name, pe)
         for name in package.NOTICES:
@@ -72,7 +78,7 @@ def main():
                 '--notices-dir', str(root/'notices'), '--preparer-dir',str(helper),'--output', str(out)]
 
         def call():
-            with patch.object(sys, 'argv', argv),patch.object(package,'template_files',return_value={}):
+            with patch.object(sys, 'argv', argv),patch.object(package,'template_files',return_value={}), patch.object(get_dxc, 'installed', return_value=True):
                 package.main()
 
         def refused(label):
@@ -113,10 +119,15 @@ def main():
         put(helper/'files.json',json.dumps(changed).encode())
         refused('preparer manifest traversal')
         put(helper/'files.json',json.dumps(manifest).encode())
+        put(build/'dxcompiler.dll', pe + b'changed')
+        refused('DXC build differs from pinned distribution')
+        put(build/'dxcompiler.dll', pe)
         put(helper/'shadercache/private.dxbc',b'private cache sentinel')
         call()
         with zipfile.ZipFile(out) as z:
             names = set(z.namelist())
+            assert all('licenses/DXC-' + n in names for n in package.DXC_NOTICES)
+            assert 'runtime/dxcompiler.dll' in names and 'runtime/dxil.dll' in names
             assert 'release.ini' in names and 'runtime/gt5p.exe' in names
             assert 'tourline-prologue.exe' in names and 'GT5P.exe' not in names
             assert 'Change storage.cmd' in names

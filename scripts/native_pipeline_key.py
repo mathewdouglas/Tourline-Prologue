@@ -77,12 +77,13 @@ def rs_bytes_hash(data, seed=FNV_OFFSET):
 
 
 def source_key(source, target):
-    """shader_source_key with compile flags 0 (one extra FNV multiply)."""
+    """Renderer source key: FXC flags 0; DXC includes IEEE strictness (-Gis)."""
     if type(source) is not bytes or type(target) is not bytes or not target or b'\x00' in target:
         raise ValueError('Invalid shader source key input')
     if b'\x00' in source:
         raise ValueError('Invalid shader source key input')
-    return (fnv64(source + target) * FNV_PRIME) & FNV_MASK
+    flags = 0x2000 if target in (b'vs_6_0', b'ps_6_0') else 0
+    return ((fnv64(source + target) ^ flags) * FNV_PRIME) & FNV_MASK
 
 
 def _as_u32(value, message):
@@ -195,8 +196,10 @@ def derive_record(record, vs_source, vs, ps_source, ps, root_hash):
     root_hash = _root_hash(root_hash)
     vs_source = _source(vs_source, MAX_VS_SOURCE, 'vertex')
     ps_source = _source(ps_source, MAX_PS_SOURCE, 'fragment')
-    return derive_record_from_ids(record, f'{source_key(vs_source, VS_TARGET):016x}', vs,
-                                  f'{source_key(ps_source, PS_TARGET):016x}', ps, root_hash)
+    import shader_compiler
+    vs_target, ps_target = shader_compiler.targets()  # Phase 231: vs_6_0/ps_6_0 with DXC
+    return derive_record_from_ids(record, f'{source_key(vs_source, vs_target):016x}', vs,
+                                  f'{source_key(ps_source, ps_target):016x}', ps, root_hash)
 
 
 def derive_record_from_ids(record, vs_source_id, vs, ps_source_id, ps, root_hash):

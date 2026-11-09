@@ -299,6 +299,15 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/third_party/SDL2.dll" "$<TARGET_FILE_DIR:gt5p>/SDL2.dll")
     endif()
+    # DXC compiles guest shaders (Phase 231; the engine falls back to FXC without it).
+    # scripts/get_dxc.py fetches the pinned release into third_party/dxc/.
+    foreach(dll dxcompiler.dll dxil.dll)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/dxc/${dll}")
+            add_custom_command(TARGET gt5p POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_SOURCE_DIR}/third_party/dxc/${dll}" "$<TARGET_FILE_DIR:gt5p>/${dll}")
+        endif()
+    endforeach()
     file(GLOB GT5P_FFMPEG_DLLS "${GT5P_FFMPEG_DIR}/bin/*.dll")
     foreach(dll ${GT5P_FFMPEG_DLLS})
         get_filename_component(dll_name "${dll}" NAME)

@@ -63,6 +63,9 @@ def main():
     command=[str(install/'preparation/GT5P-Prepare.exe'),'--install',str(install),
              '--storage',str(storage),'--game',str(a.game.resolve())]
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
+    # Select the same compiler explicitly after sanitizing renderer variables.
+    import shader_compiler
+    env['RSX_SHADER_COMPILER'] = shader_compiler.mode()
     env.update(PS3_VERBOSE='0',GT5P_PREPARE_ENUMERATE='0',GT5P_PREPARE_TRANSLATION='ultrawide-native',
                GT5P_PREPARE_FRAGMENT_CHUNK=str(a.chunk),
                PATH=str(Path(os.environ['SystemRoot'])/'System32'))
@@ -132,7 +135,7 @@ def main():
     # Parent report/checkpoint can report rejection; all derived work stays intact.
     assert snapshot(state.parent)==preserved
     for name, overrides in (
-            ('invalid-workers',{'GT5P_PREPARE_COMPILER_WORKERS':'5'}),
+            ('invalid-workers',{'GT5P_PREPARE_COMPILER_WORKERS':str(__import__('preparation_workers').MAX_COMPILER_WORKERS+1)}),
             ('invalid-handoff',{'GT5P_PREPARE_HANDOFF':'2'}),
             ('invalid-code-bundle',{'GT5P_PREPARE_CODE_BUNDLE':'2'}),
             ('invalid-shader-profile',{'GT5P_PREPARE_SHADER_PROFILE':'2'}),

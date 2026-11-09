@@ -60,7 +60,8 @@ def spec_key(words, inputs, vs, ps, root):
 
 
 def spec_source(source, target):
-    return f'{(spec_fnv(source + target) * PRIME) & MASK:016x}'
+    flags = 0x2000 if target in (b'vs_6_0', b'ps_6_0') else 0
+    return f'{((spec_fnv(source + target) ^ flags) * PRIME) & MASK:016x}'
 
 
 def record(words=None, inputs=None):
@@ -137,8 +138,14 @@ class KeyTests(unittest.TestCase):
         self.assertEqual(derived['native']['inputs'], original['native']['inputs'])
         self.assertEqual(derived['vp'], original['vp'])
         self.assertIsNot(derived['vp'], original['vp'])
-        self.assertEqual(derived['vp_source'], spec_source(b'float4 main(){return 0;}', b'vs_5_0'))
-        self.assertEqual(derived['fp_source'], spec_source(b'float4 main():SV_TARGET{return 0;}', b'ps_5_0'))
+        import shader_compiler  # Phase 231: the configured compiler's targets (vs_6_0/ps_6_0 in DXC mode)
+        vs_target, ps_target = shader_compiler.targets()
+        self.assertEqual(derived['vp_source'], spec_source(b'float4 main(){return 0;}', vs_target))
+        self.assertEqual(derived['fp_source'], spec_source(b'float4 main():SV_TARGET{return 0;}', ps_target))
+        with patch.dict('os.environ', {'RSX_SHADER_COMPILER': 'fxc'}):
+            fxc = npk.derive_record(original, b'float4 main(){return 0;}', VS, b'float4 main():SV_TARGET{return 0;}', longer, ROOT)
+        self.assertEqual(fxc['vp_source'], spec_source(b'float4 main(){return 0;}', b'vs_5_0'))
+        self.assertEqual(fxc['fp_source'], spec_source(b'float4 main():SV_TARGET{return 0;}', b'ps_5_0'))
         self.assertEqual(derived['vs'], f'{spec_fnv(VS):016x}')
         self.assertEqual(derived['ps'], f'{spec_fnv(longer):016x}')
         self.assertEqual(derived['key'], npk.native_key(derived, VS, longer, ROOT))

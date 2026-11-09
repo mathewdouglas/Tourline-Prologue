@@ -123,6 +123,10 @@ class NativeCompiler:
                                             ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint,
                                             ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
         self.compiler.D3DCompile.restype = ctypes.c_long
+        # Phase 231: DXC when RSX_SHADER_COMPILER=dxc, as in the engine (scripts/shader_compiler.py).
+        import shader_compiler
+        self.vertex_target = shader_compiler.targets()[0]
+        self.dxc = shader_compiler.Dxc() if shader_compiler.mode() == 'dxc' else None
 
     @staticmethod
     def take_blob(blob):
@@ -147,14 +151,18 @@ class NativeCompiler:
         if self.profile:
             self.timings['translation_ns'] += time.perf_counter_ns() - tick
             tick = time.perf_counter_ns()
-        code, error = ctypes.c_void_p(), ctypes.c_void_p()
-        text = ctypes.create_string_buffer(source)
-        result = self.compiler.D3DCompile(text, len(source), b'guest_async', None, None,
-                                          b'main', b'vs_5_0', 0, 0, ctypes.byref(code), ctypes.byref(error))
+        if self.dxc is not None:
+            dxbc, text = self.dxc.compile(source, self.vertex_target)
+            result, message = (0 if dxbc else -1), text.encode('utf-8', 'replace')
+        else:
+            code, error = ctypes.c_void_p(), ctypes.c_void_p()
+            text = ctypes.create_string_buffer(source)
+            result = self.compiler.D3DCompile(text, len(source), b'guest_async', None, None,
+                                              b'main', b'vs_5_0', 0, 0, ctypes.byref(code), ctypes.byref(error))
+            dxbc, message = self.take_blob(code), self.take_blob(error)
         if self.profile:
             self.timings['compiler_ns'] += time.perf_counter_ns() - tick
             self.timings['calls'] += 1
-        dxbc, message = self.take_blob(code), self.take_blob(error)
         if result < 0 or not dxbc:
             raise ValueError('asset VS compilation failed: ' + message.decode(errors='replace')[:400])
         return source, dxbc
@@ -182,6 +190,8 @@ def offline_env(game_root, cache):
     env = {k: v for k, v in os.environ.items()
            if not k.upper().startswith(('FP_', 'VP_', 'RSX_', 'GT5P_', 'PAD_', 'PPU_', 'SPU_', 'D3D12_', 'CULL_'))
            and k.upper() != 'PS3_HEADLESS'}
+    import shader_compiler
+    env['RSX_SHADER_COMPILER'] = shader_compiler.mode()  # the same compiler as this process (Phase 231)
     env.update(GT5P_ROOT=str(game_root), GT5P_NO_SETTINGS='1', PS3_VERBOSE='0',
                FS_HIDE='grim/file/contents', GT5P_SHADER_PRECOMPILE_ONLY='1',
                RSX_SHADER_CACHE=str(cache), RSX_SHADER_WARMUP='1', RSX_PSO_ASYNC='0',

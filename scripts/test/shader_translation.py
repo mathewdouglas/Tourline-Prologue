@@ -20,7 +20,7 @@ program = bytes(range(16))
 hlsl = b'float4 main(){return 0;}\n'
 dxbc = b'DXBCderived-vertex'
 digest = hashlib.sha256(program).hexdigest()
-source_id = f'{source_key(hlsl, batch.VERTEX_TARGET):016x}'
+source_id = f'{source_key(hlsl, __import__('shader_compiler').targets()[0]):016x}'
 code_id = f'{fnv64(dxbc):016x}'
 
 
@@ -82,8 +82,11 @@ assert default_env['RSX_ULTRAWIDE'] == '0'
 assert 'RSX_RENDER_HEIGHT' not in default_env and 'rsx_render_height' not in default_env
 for key in default_env:
     folded = key.upper()
-    assert folded == 'RSX_ULTRAWIDE' or not folded.startswith(shader_translation.PREFIXES)
+    # Phase 231: the compiler and its DLL are passed on explicitly (the workers must compile as the parent does).
+    assert folded in ('RSX_ULTRAWIDE', 'RSX_SHADER_COMPILER', 'GT5P_PREPARE_DXC_LIBRARY') or not folded.startswith(shader_translation.PREFIXES)
     assert folded != 'PS3_HEADLESS'
+assert default_env['RSX_SHADER_COMPILER'] == __import__('shader_compiler').mode(base) and default_env['GT5P_PREPARE_DXC_LIBRARY'].endswith('dxcompiler.dll')
+assert shader_translation.environment('default', dict(base, RSX_SHADER_COMPILER='fxc'))['RSX_SHADER_COMPILER'] == 'fxc'
 assert 'GT5P_PREPARE_HASH_LIBRARY' not in default_env
 assert 'shadercache' not in ''.join(default_env.values()).lower()
 ultrawide = shader_translation.environment('ultrawide-native', base)

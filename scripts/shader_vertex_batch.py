@@ -123,7 +123,8 @@ def _translated_ids(source, code):
     if (not isinstance(source, (bytes, bytearray)) or not source or len(source) > MAX_SOURCE or
             not isinstance(code, (bytes, bytearray)) or not code.startswith(b'DXBC') or len(code) > MAX_BYTECODE):
         raise ValueError('Vertex source or bytecode exceeds its bound')
-    source_id = f'{source_key(bytes(source), VERTEX_TARGET):016x}'
+    import shader_compiler
+    source_id = f'{source_key(bytes(source), shader_compiler.targets()[0]):016x}'
     code_id = f'{fnv64(bytes(code)):016x}'
     if int(source_id, 16) == 0 or int(code_id, 16) == 0:
         raise ValueError('Vertex source or bytecode identifier is empty')

@@ -44,6 +44,9 @@ Evidence for finished work goes in [progress.md](progress.md).
   first: excess 10.5-11.1 s -> 3.5-4.5 s; straight to the race: unchanged (10.3 s), later races benefit.
   Phase 226: the race stage's finished shaders and blobs are copied in while it runs, and the helper pauses at
   the race start (grid preview Start press) instead of the loading screen: straight to the race 11.2 -> 3.2-3.9 s.
+  Phase 231: DXC can also prepare the player cache and is packaged with pinned DLLs/notices. It remains
+  opt-in (`RSX_SHADER_COMPILER=dxc`): synthetic GPU comparisons exceed the numeric threshold; fixed-frame
+  and other-GPU rendering acceptance remain open. See [dxc-preparation.md](dxc-preparation.md).
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;
