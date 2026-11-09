@@ -197,8 +197,10 @@ const std::vector<Item>& items()
         KEY_ITEM(8, L"L3"), KEY_ITEM(9, L"R3"), KEY_ITEM(10, L"Start"), KEY_ITEM(11, L"Select"),
         KEY_ITEM(12, L"Up"),    KEY_ITEM(13, L"Down"),  KEY_ITEM(14, L"Left"),  KEY_ITEM(15, L"Right"),
         { L"GAME", L"Skip opening movie",
-          L"Press through the opening movie as soon as it starts. It only plays when the TV "
-          L"content is installed.",
+          L"Skips the boot movie with the game's own Opening Movie option (Misc), instead of "
+          L"pressing Cross. Changing that option in the game updates this setting. The Demo "
+          L"page's opening checkbox only skips the attract-mode movie. The movie itself follows "
+          L"this the next time the game starts.",
           "PAD_SKIP_MOVIE", kOnOff,
           [](const Gt5pSettings& s) { return s.skip_movie ? 1 : 0; },
           [](Gt5pSettings& s, int v) { s.skip_movie = v != 0; }, nullptr },

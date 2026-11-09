@@ -2,12 +2,14 @@
 #include "gt5p_settings.h"
 #include "gt5p_keymap.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,6 +35,8 @@ Gt5pSettings g_settings;
 Gt5pSettings g_file;     /* as the file has them: what the settings page saves */
 std::string  g_path;     /* UTF-8 */
 bool         g_enabled = false;
+std::atomic<int> g_live_skip{0};   /* gt5p_skip_movie_now; the hooks never take g_skip_mu */
+std::mutex g_skip_mu;              /* store and the in-game option both write skip_movie */
 
 /* The variables a setting maps to; those set before the file is applied
  * override it, and the settings page says so. */
@@ -317,8 +321,10 @@ void apply_env(const Gt5pSettings& s)
     if (!s.keyboard)        set_default_env("PAD_NO_KEYBOARD", "1");
     set_default_env("PAD_KEYMAP", gt5p_keymap_format(s.keys).c_str());
     set_default_env("GT5P_GLYPHS", kPromptNames[s.button_prompts >= 0 && s.button_prompts < 5 ? s.button_prompts : 0]);
-    /* The screen whose first read starts the presses (cellPad.c). */
-    if (s.skip_movie)       set_default_env("PAD_SKIP_MOVIE", "MovieRoot");
+    /* Cross press once MovieRoot is read (cellPad.c). The native link does not
+     * set this: the movie is not started, so there is nothing to press through.
+     * A variable already set still wins, and reflect_env keeps that. */
+    if (s.skip_movie && !gt5p_native_opening()) set_default_env("PAD_SKIP_MOVIE", "MovieRoot");
     if (!s.smooth_colour)   set_default_env("RSX_HIGH_PRECISION", "0");
     snprintf(buf, sizeof buf, "%d", s.anisotropy);
     set_default_env("RSX_ANISO", buf);
@@ -352,7 +358,12 @@ void reflect_env(Gt5pSettings& s)
     s.keyboard        = getenv("PAD_NO_KEYBOARD") == nullptr;
     if (const char* e = getenv("GT5P_GLYPHS")) { const int c = prompt_code(e); if (c >= 0) s.button_prompts = c; }
     if (const char* e = getenv("PAD_KEYMAP")) gt5p_keymap_parse(e, s.keys);
-    { const char* e = getenv("PAD_SKIP_MOVIE"); s.skip_movie = e && *e && strcmp(e, "0") != 0; }
+    /* Native mode leaves PAD_SKIP_MOVIE unset on purpose. Reflecting that
+     * absence would clear a skip the file asked for. An outside value still wins. */
+    if (!gt5p_native_opening() || gt5p_settings_overridden("PAD_SKIP_MOVIE")) {
+        const char* e = getenv("PAD_SKIP_MOVIE");
+        s.skip_movie = e && *e && strcmp(e, "0") != 0;
+    }
     { const char* e = getenv("RSX_HIGH_PRECISION"); s.smooth_colour = !(e && e[0] == '0'); }
     if (const char* e = getenv("RSX_ANISO")) { const int a = atoi(e); s.anisotropy = a >= 16 ? 16 : a >= 8 ? 8 : a >= 4 ? 4 : 1; }
     if (const char* e = getenv("PS3_VERBOSE")) s.verbose_log = (e[0] && e[0] != '0') ? 1 : 0;
@@ -376,11 +387,44 @@ bool gt5p_settings_overridden(const char* env_name)
     return false;
 }
 
+bool gt5p_native_opening()
+{
+    const char* e = getenv("GT5P_NATIVE_OPENING");
+    return !(e && e[0] == '0' && !e[1]);
+}
+
+bool gt5p_skip_movie_now()
+{
+    return g_live_skip.load(std::memory_order_relaxed) != 0;
+}
+
+void gt5p_skip_movie_from_game(bool skip)
+{
+    if (gt5p_settings_overridden("PAD_SKIP_MOVIE")) return;
+    std::lock_guard<std::mutex> lock(g_skip_mu);
+    g_live_skip.store(skip ? 1 : 0, std::memory_order_relaxed);
+    if (g_settings.skip_movie == skip && g_file.skip_movie == skip) return;
+    g_settings.skip_movie = skip;
+    g_file.skip_movie = skip;
+    if (!g_enabled || g_path.empty()) return;
+    if (!gt5p_settings_save(g_file, g_path))
+        fprintf(stderr, "[opening] could not save skip_movie\n");
+    else
+        printf("[opening] in-game Opening Movie set skip_movie = %s\n", skip ? "true" : "false");
+}
+
 bool gt5p_settings_store(const Gt5pSettings& s)
 {
+    std::lock_guard<std::mutex> lock(g_skip_mu);
     if (!g_enabled || g_path.empty()) return false;
     if (!gt5p_settings_save(s, g_path)) return false;
     g_file = s;
+    /* F1 updates the file only. The movie hooks read g_live_skip, and the boot
+     * decision has usually already happened; the page says so. */
+    if (!gt5p_settings_overridden("PAD_SKIP_MOVIE")) {
+        g_settings.skip_movie = s.skip_movie;
+        g_live_skip.store(s.skip_movie ? 1 : 0, std::memory_order_relaxed);
+    }
     return true;
 }
 
@@ -471,8 +515,11 @@ bool gt5p_settings_save(const Gt5pSettings& s, const std::string& path)
          << keyboard_lines(s) <<
          "\n"
          "[game]\n"
-         "# Skip the opening movie (it plays only when the TV content is installed):\n"
-         "# Cross is pressed for you once it starts. [PAD_SKIP_MOVIE]\n"
+         "# Skip the boot opening movie when the TV content is installed. On uses the\n"
+         "# game's Opening Movie option (Misc): the movie is not started, and changing\n"
+         "# that option updates this setting. The Demo page checkbox only skips the\n"
+         "# attract-mode movie. GT5P_NATIVE_OPENING=0 presses Cross instead.\n"
+         "# [PAD_SKIP_MOVIE]\n"
          "skip_movie = " << (s.skip_movie ? "true" : "false") << "\n"
          "# Smooth colour: render at 16 bits per channel and drop the game's dither\n"
          "# noise, so dark areas are clean without banding. [RSX_HIGH_PRECISION]\n"
@@ -551,6 +598,10 @@ void gt5p_settings_load()
     if (getenv("GT5P_NO_SETTINGS")) {
         /* Test runs still choose the display mode: no runtime variable can. */
         apply_resolution_env(g_settings);
+        /* The file is ignored, but an explicit PAD_SKIP_MOVIE still skips. */
+        const char* e = getenv("PAD_SKIP_MOVIE");
+        g_settings.skip_movie = e && *e && strcmp(e, "0") != 0;
+        g_live_skip.store(g_settings.skip_movie ? 1 : 0, std::memory_order_relaxed);
         printf("[settings] GT5P_NO_SETTINGS: built-in defaults, file ignored (resolution=%dp)\n",
                g_settings.resolution);
         return;
@@ -588,6 +639,7 @@ void gt5p_settings_load()
 
     apply_env(g_settings);
     reflect_env(g_settings);
+    g_live_skip.store(g_settings.skip_movie ? 1 : 0, std::memory_order_relaxed);
     printf("[settings] %s: resolution=%dp msaa=%d vsync=%d shader_cache=%d sdl_controllers=%d keyboard=%d\n",
            g_path.c_str(), g_settings.resolution, g_settings.msaa,
            g_settings.vsync ? 1 : 0, g_settings.shader_cache ? 1 : 0,

@@ -146,6 +146,7 @@
       "id": "skip_movie",
       "label": "Skip Opening Movie",
       "group": "Game",
+      "help": "Skips the boot movie using the game's own Opening Movie option (Misc). The Demo page checkbox skips a different movie.",
       "choices": [
         { "label": "Off", "set": { "game/skip_movie": "false" } },
         { "label": "On", "set": { "game/skip_movie": "true" } }

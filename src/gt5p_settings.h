@@ -45,7 +45,7 @@ struct Gt5pSettings {
                      0x0D /* Enter */, 0x09 /* Tab */, 0x26, 0x28, 0x25, 0x27 /* arrows */ };
 
     /* [game] */
-    bool skip_movie = false;    /* press through the opening movie (PAD_SKIP_MOVIE) */
+    bool skip_movie = false;    /* skip the boot opening movie via the game's own option */
     bool smooth_colour = true;  /* 16-bit targets, no dither noise (RSX_HIGH_PRECISION) */
     int anisotropy = 16;        /* 1 (trilinear), 4, 8 or 16: forced anisotropic filtering (RSX_ANISO) */
 
@@ -94,3 +94,19 @@ bool gt5p_settings_enabled();
 
 /* Save `s` as the file's values (and remember them as such). */
 bool gt5p_settings_store(const Gt5pSettings& s);
+
+/* Boot opening movie. On (default) the attribute hooks write the game's own
+ * Opening Movie flag, opening_after_autoload, and an in-game change of that
+ * flag updates skip_movie. GT5P_NATIVE_OPENING=0 leaves the old behaviour:
+ * PAD_SKIP_MOVIE presses Cross once the movie screen appears. */
+bool gt5p_native_opening();
+
+/* What the hooks enforce right now, including an F1 change made this session. */
+bool gt5p_skip_movie_now();
+
+/* The game's Opening Movie option changed after boot had already read it.
+ * No effect when PAD_SKIP_MOVIE was set outside the file. */
+void gt5p_skip_movie_from_game(bool skip);
+
+/* After ppu_recomp_register. Does nothing when gt5p_native_opening() is false. */
+void gt5p_opening_install();

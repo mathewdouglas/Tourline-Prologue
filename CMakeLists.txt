@@ -165,6 +165,7 @@ add_executable(gt5p
     src/gt5p_uifix.cpp
     src/gt5p_spu_native.c
     src/gt5p_settings.cpp
+    src/gt5p_opening.cpp
     src/gt5p_profview.cpp
     src/gt5p_debug_export.cpp
     src/gt5p_settings_ui.cpp

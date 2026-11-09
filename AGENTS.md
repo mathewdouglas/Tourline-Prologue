@@ -36,13 +36,15 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 233)
+## Start here: state of play (2026-11-10, Phase 234)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 233 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 234 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **Skip opening movie uses the game's option (Phase 234):** "Skip opening movie" writes the boot flag `opening_after_autoload` (Misc → Other → Opening Movie; 0 skips, 1 plays). The Demo page checkbox is a different movie. `GT5P_NATIVE_OPENING=0` presses Cross as before. A save skipped only in-game plays until this setting is turned on. F1 applies to the movie next launch.
 
 - **DXC migration and cache cleanup (Phase 233, 0.2.5):** configured players get a one-time
   DXC preparation offer even with background preparation on. Successful full preparation

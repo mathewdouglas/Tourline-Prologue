@@ -9,6 +9,24 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 234 - Skip opening movie uses the game's own option (2026-11-10)
+
+**Request.** "Skip opening movie" injected a Cross press (`PAD_SKIP_MOVIE=MovieRoot`) after the movie screen appeared. Link that setting to the game's own option instead.
+
+**Which flag.** The boot movie is `opening_after_autoload` on the user profile (1 plays, 0 skips). The in-game control is Misc → Other → Opening Movie. The Demo page checkbox (`visible_demo_opening`) skips only the attract-mode movie.
+
+**Behavior.** On by default. Wrappers on this title's `mAttributeEval`, `mAttributePush` and `mAssignPop` execute functions run after `ppu_recomp_register`. The eval result is an hByte; its value is the byte at object+0x14, and every eval of this name is overwritten from the setting. Writes are `ATTRIBUTE_PUSH` then `ASSIGN_POP`. Assigns before the first eval are forced to the setting. Later assigns of 0 or 1 update `skip_movie` and the settings file, unless `PAD_SKIP_MOVIE` was already set outside the file. The setting is the source of truth both ways, so a save that was skipped only from the in-game option plays the movie until "Skip opening movie" is turned on. F1 applies to the movie on the next launch. `GT5P_NATIVE_OPENING=0` installs nothing and presses Cross as before. No main-patch edit. A re-lift moves the three execute addresses.
+
+**Measured** on a private engine, TV contents visible, no `FS_HIDE`, 1080p 16:9, 2x MSAA, through the test lock.
+
+Skip on: the boot eval was an hByte 1 rewritten to 0. No `MovieRoot`. `TopRoot` at 14968 ms and `TopMenuTemplate` at 15062 ms. The same contents with the hook not yet writing hBytes still reached `MovieRoot` at 11734 ms.
+
+Skip off: the eval stayed 1. `MovieRoot` at 11625 ms.
+
+`GT5P_NATIVE_OPENING=0` with skip on printed the Cross-press line and installed no hooks. `MovieRoot` at 11859 ms; that run was stopped on the movie screen, so the Cross press was not watched through to the menu.
+
+The profile init assign rewrote an hInt from 1 to 0 when skip was on, and the later eval still read 1 before the result patch. The branch follows the patched eval. A profile load that does not go through this attribute push can restore 1; the eval patch covers that read. An in-game Opening Movie change updating the settings file is implemented and was not clicked in these boots.
+
 ## Phase 233 - DXC migration offer and optional old-cache cleanup (2026-11-10)
 
 **Request.** After successful preparation, offer to remove old caches and show the
