@@ -3,7 +3,8 @@
 DXC is the default for gameplay and preparation in 0.2.5. Set
 `RSX_SHADER_COMPILER=fxc` to restore FXC, or `=dxc` to select DXC explicitly.
 Use the same choice for the launcher and helper. The interpreter remains
-default-off; `RSX_SHADER_INTERP=1` keeps guest shaders on FXC because its
+default-off; enabling either `RSX_SHADER_INTERP` or `RSX_SHADER_INTERP_VP`
+with `1` or `force` keeps guest shaders on FXC because its
 generic FXC stages cannot share a pipeline with DXIL stages.
 
 The user accepted the in-game visual checks and requested this default in
@@ -74,3 +75,13 @@ as follow-up rendering coverage.
 See progress Phase 231 for preparation, frozen-worker and packaging validation.
 The earlier Phase 227 compile timings are retained as historical measurements;
 they predate the strictness flag and are not a new full-preparation speed claim.
+
+
+## Combined race prewarm
+
+The 0.2.5 helper also writes the race-pipeline bundle after its membership lists
+are final. The reader accepts startup reordering of the same members, verifies
+the pack's internal checksum and exact membership, and follows the live priority
+order. Changes in membership still fall back to the individual files.
+`RSX_RACE_PREWARM_PACK=0` restores that per-file path. This is independent of the
+compiler selection and does not remove either compiler's shader caches.

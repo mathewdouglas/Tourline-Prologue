@@ -2,7 +2,7 @@
 
 RSX_SHADER_COMPILER: unset or `dxc` = DXC to shader model 6.0 (vs_6_0/ps_6_0, `-HV 2018`); `fxc` = FXC to 5.0
 (d3dcompiler_47 from the Windows system directory, as before). The target string is part of every shader source
-key, so FXC and DXC caches never mix. RSX_SHADER_INTERP=1 keeps FXC in the engine (the interpreter's own shaders
+key, so FXC and DXC caches never mix. Enabling either interpreter stage (1/force) keeps FXC in the engine (the interpreter's own shaders
 are FXC), and here too.
 
 DXC is the dxcompiler.dll beside the game engine: GT5P_PREPARE_DXC_LIBRARY names it (the player helper sets it to
@@ -26,7 +26,9 @@ def mode(environ=None):
     value = environ.get('RSX_SHADER_COMPILER', 'dxc')
     if value not in MODES:
         raise ValueError('RSX_SHADER_COMPILER must be unset, fxc or dxc')
-    if environ.get('RSX_SHADER_INTERP') == '1':
+    # Mirror fp_interp_cfg/vp_interp_cfg, including force and vertex-only modes.
+    if any(environ.get(name, '')[:1] in ('1', 'f', 'F')
+           for name in ('RSX_SHADER_INTERP', 'RSX_SHADER_INTERP_VP')):
         return 'fxc'
     return value
 

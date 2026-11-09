@@ -1301,7 +1301,8 @@ above. Exact epilogue equivalence and the wordmark correction remain open.
 
 ## DXC interaction (Phase 231)
 
-`RSX_SHADER_INTERP=1` forces FXC for guest stages in both the engine and the
+Enabling either interpreter stage (`RSX_SHADER_INTERP` or
+`RSX_SHADER_INTERP_VP`, `1` or `force`) forces FXC for guest stages in the engine and the
 preparation helper, even with `RSX_SHADER_COMPILER=dxc`. The interpreter's
 generic shaders are FXC bytecode; a D3D12 pipeline cannot mix them with DXIL
 stages. The compiler choice is resolved before sanitized worker environments

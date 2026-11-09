@@ -40,6 +40,39 @@ round-trips and the first-run preset matches. A private integrated engine recomp
 changed runtime adapters and current shader-badge/loading-bar source, then links against read-only reference
 objects. The frozen helper builds and passes its native hash/volume-reader checks (8/9 cases).
 
+**Integration follow-up.** Checking the now-default compiler against both interpreter parsers exposed
+forced and vertex-only modes that the earlier `RSX_SHADER_INTERP=1` check missed. The engine and helper now
+mirror both parsers' enabled prefixes (`1`, `f`, `F`), keeping all such paths on FXC. Off/invalid interpreter
+values retain default DXC. Selection cases for both stages, default/FXC compilation, and all four overlay
+applications pass; the final engine and frozen helper were rebuilt with this fix.
+
+**Real FXC-cache preservation.** A default-DXC frozen preparation (no `RSX_SHADER_COMPILER` override)
+creates a new generation alongside a real private FXC cache. All 12,669 native requests, keys, persisted
+blobs and lookups pass (`[12669,12669,12669,0]`), and its final race pack contains 2,113 recipes, 1,084
+shader bytecodes and 2,113 driver blobs (53,066,538 bytes). Wall time is 310.61 s. Catalogue enumeration
+was disabled for this integration run; Phase 231 already covers the full 24,522 DXC catalogue. The entire
+old FXC cache is hashed before and after: all **51,113 files**, their relative names and bytes are unchanged.
+Selection moves to the new generation. Evidence: ignored `scratch/m232/validation.json`.
+
+**Branch/worktree cleanup.** `0.2.5` is pushed to origin. The five superseded local and remote branches
+(`feature/hitch-texture-lru`, `feature/interp-pipeline-prep`, `feature/prewarm-bundle`,
+`feature/shader-coverage-scaling`, `t3/hitch-attribution`) are deleted only after their tips are verified as
+ancestors of the combined branch. The three obsolete feature worktrees are removed. Their two `.venv`
+junctions were unlinked first, leaving the shared Python environment intact. The original `main` checkout
+and published release branch are retained; `0.2.5` is the sole development branch/worktree. No player cache
+or save data is deleted. The active worktree's existing directory name is unchanged.
+
+**First prepared-pack correction.** The first combined race completed normally and the loading bar
+reported 2,113/2,113 ready, but the test correctly rejected it as a pack-path acceptance run: the loader had
+fallen back to files. Startup maintenance reordered `race-v1.txt`, invalidating the reader's strict ordered
+checksum even though membership was unchanged. The reader now verifies the pack's own ordered checksum,
+requires exact nonzero/unique membership, and rearranges bound items to the live priority order. A missing,
+extra or duplicated member still rejects the pack; the payload checksum and all per-recipe/code/driver
+validation remain. `RSX_RACE_PREWARM_PACK=0` remains the rollback. A native test compiles the actual runtime
+helper and covers order preservation/permutation, payload association, changed/duplicated membership,
+corrupt checksum, zero keys, null inputs and bounds. All cases pass. The complete patch and overlays apply;
+the corrected backend and frozen helper build. The old bytecode/native output is unchanged by this reader fix.
+
 ## Phase 231 - DXC preparation and pinned distribution; rendering acceptance remains open (2026-11-10)
 
 **Scope.** Resume the interrupted DXC close-out from Phase 227. The independently completed race pack and

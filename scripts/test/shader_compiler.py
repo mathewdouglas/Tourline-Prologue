@@ -42,6 +42,11 @@ def selection():
     assert sc.mode({'RSX_SHADER_COMPILER': 'fxc'}) == 'fxc'
     assert sc.mode({'RSX_SHADER_COMPILER': 'dxc', 'RSX_SHADER_INTERP': '1'}) == 'fxc'
     assert sc.mode({'RSX_SHADER_INTERP': '1'}) == 'fxc' and sc.mode({'RSX_SHADER_INTERP': '0'}) == 'dxc'
+    for stage in ('RSX_SHADER_INTERP', 'RSX_SHADER_INTERP_VP'):
+        for enabled in ('1', 'force', 'Force'):
+            assert sc.mode({'RSX_SHADER_COMPILER': 'dxc', stage: enabled}) == 'fxc'
+        for disabled in ('', '0', '2'):
+            assert sc.mode({stage: disabled}) == 'dxc'
     for bad in ('', 'DXC', 'llvm'):
         try:
             sc.mode({'RSX_SHADER_COMPILER': bad})
