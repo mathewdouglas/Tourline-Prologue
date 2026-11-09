@@ -73,6 +73,22 @@ helper and covers order preservation/permutation, payload association, changed/d
 corrupt checksum, zero keys, null inputs and bounds. All cases pass. The complete patch and overlays apply;
 the corrected backend and frozen helper build. The old bytecode/native output is unchanged by this reader fix.
 
+**Final combined acceptance.** With no compiler override, the corrected engine selects DXC, loads all
+12,674 prepared fast-lookup rows and takes the pack path on the first prepared race. It reads the 53,066,538-byte
+pack in 54 ms and completes all 2,113 pipelines with zero rejections in 313 ms on four threads. The loading bar
+reports 0.2 s and 2,113/2,113. The inspected game-window capture shows the road, cars, mirror and HUD.
+The 62 s FrameTest is 59.9 FPS, p99 18.2 ms, max 30.2 ms. The wider grid-to-end trace still has 14 intervals
+over 50 ms and seven over 100 ms (worst 311 ms); this is a smoke test, not a claim that every hitch is solved.
+A relink changes the fast-lookup epoch, so this private fixture's verified rows were republished under the
+final executable's tag before copying it for play. The original FXC cache was not touched.
+
+The final frozen default-DXC 32-record checkpoint suite also passes: eight interrupted fragments are retained
+and reused, native counts are `[32,32,32,0]`, old selection/source bytes survive cancellation and rejection,
+and the cached/chunk/handoff/code-bundle rollbacks pass (114.97 s). This uses the final engine/helper,
+including both interpreter-mode compatibility and pack-order fixes. Evidence: `scratch/m232/game-summary.json`,
+`checkpoint-validation.json`, and logs/screenshots in `scratch/hitch/routes/hsr-prepared-025-packfix`.
+No game remains running. The combined development history is on `0.2.5`; no tag or release was made.
+
 ## Phase 231 - DXC preparation and pinned distribution; rendering acceptance remains open (2026-11-10)
 
 **Scope.** Resume the interrupted DXC close-out from Phase 227. The independently completed race pack and
