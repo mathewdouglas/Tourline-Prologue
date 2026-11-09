@@ -1,6 +1,6 @@
 """Phase 231 shader compiler selection for preparation (scripts/shader_compiler.py). Needs third_party/dxc.
 
-1. RSX_SHADER_COMPILER: dxc -> dxc, unset/fxc -> fxc, anything else refused; RSX_SHADER_INTERP=1 -> fxc (the
+1. RSX_SHADER_COMPILER: unset/dxc -> dxc, fxc -> fxc, anything else refused; RSX_SHADER_INTERP=1 -> fxc (the
    engine does the same). Targets vs_6_0/ps_6_0 against vs_5_0/ps_5_0, and source keys differ by target.
 2. DXC (the pinned third_party/dxc/dxcompiler.dll): a vertex and a pixel shader compile to a signed DXIL container
    (DXBC magic, DXIL and HASH parts, no unsigned zero hash); the same text gives the same bytes twice and from a
@@ -38,10 +38,10 @@ def parts(code):
 
 
 def selection():
-    assert sc.mode({}) == 'fxc' and sc.mode({'RSX_SHADER_COMPILER': 'dxc'}) == 'dxc'
+    assert sc.mode({}) == 'dxc' and sc.mode({'RSX_SHADER_COMPILER': 'dxc'}) == 'dxc'
     assert sc.mode({'RSX_SHADER_COMPILER': 'fxc'}) == 'fxc'
     assert sc.mode({'RSX_SHADER_COMPILER': 'dxc', 'RSX_SHADER_INTERP': '1'}) == 'fxc'
-    assert sc.mode({'RSX_SHADER_INTERP': '1'}) == 'fxc' and sc.mode({'RSX_SHADER_INTERP': '0'}) == 'fxc'
+    assert sc.mode({'RSX_SHADER_INTERP': '1'}) == 'fxc' and sc.mode({'RSX_SHADER_INTERP': '0'}) == 'dxc'
     for bad in ('', 'DXC', 'llvm'):
         try:
             sc.mode({'RSX_SHADER_COMPILER': bad})

@@ -9,6 +9,37 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 232 - Consolidated 0.2.5 branch, DXC default (2026-11-10)
+
+**Request.** Combine the interpreter/hitch/DXC work with the race-pack prewarm/loading bar and
+RecompLauncher integration, make DXC the default after the user's visual acceptance, and remove superseded
+development branches/worktrees. `main` remains the published release baseline; no tag or release is created.
+
+**Integration.** `0.2.5` combines `feature/hitch-texture-lru` through ba66f87 and
+`feature/prewarm-bundle` through 2947fe7. RecompLauncher d4a0272 was already included through d394f68.
+The other development tips (interpreter preparation, shader coverage scaling and hitch attribution) are
+ancestors of the combined history. All worktrees were clean before consolidation, with no uncommitted or
+untracked non-ignored work. The main runtime patch and progress log had merge conflicts. The backend source
+was merged in three-way form against c767f2d, then its patch section regenerated from a clean pinned
+4e8f3ca8 export. The historical Phase 228-231 evidence is retained below in order.
+
+**Default.** Unset `RSX_SHADER_COMPILER` now means DXC in the engine and helper; `=fxc` restores FXC.
+`RSX_SHADER_INTERP=1` still selects FXC for compatible paired interpreter stages. DLL loading fallback and
+strict `-Gis` source keys are unchanged. The user explicitly accepted promotion based on the game visuals;
+Phase 231's synthetic numeric differences and the lack of fixed-frame/other-vendor parity remain limits of
+the evidence, not new claims of exact equivalence.
+
+**Cache preservation.** DXC preparation uses a separate generation/identity and never deletes prior FXC
+caches. Source bytes are verified and reused by copying when compatible. Selection changes only on success;
+cancellation/failure retains the old selection. Branch/worktree cleanup is separate from player cache storage.
+
+**Validation.** The merged full main patch and all four current overlays apply to a clean pinned export.
+Both compiler selections pass shader-compiler, native-key (13 cases), translation-environment, race-pack
+(2 cases), preparation-reuse (26 cases), packaging and RecompLauncher-manifest checks. Every manifest setting
+round-trips and the first-run preset matches. A private integrated engine recompiles the backend, decompilers,
+changed runtime adapters and current shader-badge/loading-bar source, then links against read-only reference
+objects. The frozen helper builds and passes its native hash/volume-reader checks (8/9 cases).
+
 ## Phase 231 - DXC preparation and pinned distribution; rendering acceptance remains open (2026-11-10)
 
 **Scope.** Resume the interrupted DXC close-out from Phase 227. The independently completed race pack and
@@ -104,6 +135,40 @@ experiments remain developer options. `RSX_SHADER_COMPILER=dxc` enables the comp
 unset or `=fxc` restores FXC. Fixed in-game frame comparison, CPU-fetch coverage, and other GPU vendors/drivers
 remain open before default promotion. The interpreter remains default-off. No merge to main, tag or release.
 See [dxc-preparation.md](dxc-preparation.md) for setup and the comparison harness.
+
+## Phase 230 - Thin bar under the GT logo while the race set loads (2026-11-08)
+
+**Aim.** Loading into a race leaves the GT logo on screen until the race pipelines are ready. The guest is blocked inside that gate, so the picture does not move. Show how far the set has got.
+
+**What changed.** The backend counts pipelines finished (ready or rejected) against the race-set count, and whether the gate is waiting. A layered window on the shader-badge thread draws a 6 px bar centered under the logo, about 62% of the way down the window, and about a fifth of the width (220 to 480 px). It appears once the gate has run for 200 ms and hides when the gate releases. `GT5P_RACE_LOAD_BAR=0` leaves it off.
+
+**Seen in game.** A private `gt5p.exe` (this patch linked against the reference build, not the installed launcher executable) was started on the player's prepared cache: 1080p, 21:9, 8x, and no race pack yet. The bar showed for 19.6 s and filled to 4,973 / 4,973. The gate finished in 19.8 s, all ready, none rejected, inside the 30 s budget. The player confirmed the bar. That run then wrote `race-pack-v1.bin` into the prepared cache: 4,973 pipelines, 2,399 shaders, 254,758,530 bytes. A later race with this build reads that file. The installed launcher executable was not replaced.
+
+## Phase 229 - Background warmup reads the race pack (2026-11-08)
+
+**Aim.** The menu-time warmup still prepared the learned race set one file at a time, and a cache with no `race-pack-v1.bin` still paid that walk on the first race. The loading gate then wrote the pack after play had started.
+
+**What changed (main patch, pack on).** The background warmup's race phase uses `warmup-v1/race-pack-v1.bin` when its checksum matches `race-v1.txt`. It still prepares one pipeline per turn, and the worker still waits one millisecond between turns. The bytes stay resident, so the loading-gate prewarm does not read the file again. The menu index stays one file per pipeline. `RSX_RACE_PREWARM_PACK=0` keeps both paths on the per-file opens. The patched backend was typechecked with the reference `clang-cl` command. `gt5p.exe` was not linked, and no game was launched, so this path was not timed in a race.
+
+**Player cache.** `race-pack-v1.bin` was written beside the live `race-v1.txt`: 1,754 pipelines, 1,631 shaders, 1,754 blobs, 158,410,322 bytes. The recipes and bytecode were not deleted. A later race with this build reads that file instead of opening the set again. The in-game loading screen was not measured.
+
+## Phase 228 - One file for the race prewarm; queued creates overlap (2026-11-08)
+
+**Aim.** The race prewarm opened a recipe, two bytecode files and a driver blob for every pipeline. Offline preparation already reads that data as one bundle. Do the same for the race set, and measure whether several `CreateGraphicsPipelineState` calls at once, or an `ID3D12PipelineLibrary`, make an existing pipeline cheaper to bring back.
+
+**What changed (main patch, pack on).** `warmup-v1/race-pack-v1.bin` stores the race index in order: each recipe, each DXBC once, and the raw driver blob without its 24-byte header. Objects in the payload are 16-byte aligned. `scripts/race_preload_pack.py` writes it at the end of preparation, after the membership lists are final. The renderer uses it when its index checksum matches `race-v1.txt`. A missing or stale pack keeps the per-file opens, and the last helper writes the pack for the next race. `RSX_RACE_PREWARM_PACK=0` skips the read and the write. Both paths still use `RSX_RACE_PREWARM_THREADS` (default 4). `=1` still reads the pack, one recipe per worker turn. The patched backend compiled with the reference `clang-cl` command. That produced an object file only: `gt5p.exe` was not linked, and no game was launched.
+
+**File reads.** Live race index, 1,754 pipelines. The pack was written under TEMP. The player's shader cache was only read.
+- First touch of the recipes, the driver blobs and the vertex bytecode: 19.2 s, 228 MB, 7,016 opens. That pass used the wrong shader-hash offset, so the pixel bytecode was not included.
+- Full set afterwards (pixel bytecode included, the rest already cached): 7.8 s, 243 MB.
+- That same full set again: 0.67 s.
+- One read of the pack just written: 0.063 s. The file is 158 MB, with 1,631 shaders and 1,754 blobs.
+
+**Pipeline creates.** 64 pixel shaders, each with its own bytecode (an 80-step `sin` loop), RTX 4060, driver 32.0.16.1088. One discarded create ran first.
+- Driver had not compiled these shaders: 362 ms on one thread (5.66 ms each), 196 ms on two (1.9x), 120 ms on four (3.0x).
+- Same process, after that compile: creating them again with no blob was 20.3 ms; with the cached blob, 17.6 / 5.7 / 4.7 ms on 1 / 2 / 4 threads.
+- A new process, driver cache already warm: a blob load was 20.1 ms (0.31 ms each) and a no-blob create of the same shaders was 22.0 ms (0.34 ms). Four threads of blob loads in the warm process were 5.0 ms.
+- `ID3D12PipelineLibrary` load of those 64, one thread, new process: 11.7 ms (0.18 ms each). Four blob threads were faster (5.0 ms). The library is not in the engine.
 
 ## Phase 227 - DXC for guest shaders (opt-in): compile time 2.6x lower (2026-11-06)
 

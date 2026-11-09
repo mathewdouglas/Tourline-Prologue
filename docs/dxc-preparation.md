@@ -1,14 +1,24 @@
 # DXC preparation and packaging
 
-`RSX_SHADER_COMPILER=dxc` selects DXC for both gameplay and preparation. Leave it
-unset, or set `RSX_SHADER_COMPILER=fxc`, for the existing FXC path. Set the same
-choice in the environment that starts the launcher and helper. The interpreter
-remains default-off; `RSX_SHADER_INTERP=1` keeps guest shaders on FXC because its
+DXC is the default for gameplay and preparation in 0.2.5. Set
+`RSX_SHADER_COMPILER=fxc` to restore FXC, or `=dxc` to select DXC explicitly.
+Use the same choice for the launcher and helper. The interpreter remains
+default-off; `RSX_SHADER_INTERP=1` keeps guest shaders on FXC because its
 generic FXC stages cannot share a pipeline with DXIL stages.
 
-DXC is still opt-in. The developer GPU harness found numeric differences beyond
-its threshold, and fixed in-game frame parity and other GPU vendors remain open.
-Compilation success and a visually plausible race do not establish parity.
+The user accepted the in-game visual checks and requested this default in
+Phase 232. The synthetic GPU harness's numeric differences, fixed game-frame
+comparison and other GPU vendors remain documented limits of the evidence.
+
+## Existing FXC caches
+
+Preparing DXC shaders does **not** clear FXC caches. Compiler choice, the engine
+and compiler DLL identity distinguish preparation generations. Reusable files
+are verified and copied into the new generation; their source stays intact.
+The selected-cache pointer changes only after preparation succeeds. Cancel or
+failure keeps the prior selection. An older FXC cache cannot satisfy DXC shader
+keys, but remains available for rollback or later reuse. No cache deletion was
+added as part of branch/worktree cleanup; player storage is separate.
 
 ## Compiler and cache identity
 
@@ -59,7 +69,7 @@ values exceed the threshold and 17 pixel shaders are flagged. This control does
 not prove the additional DXC differences harmless. Both harness runs return 1
 because their threshold was exceeded; neither is a parity pass. Fixed game
 frames, CPU-fetch inputs and AMD/Intel/other drivers need separate acceptance
-before changing the compiler default.
+as follow-up rendering coverage.
 
 See progress Phase 231 for preparation, frozen-worker and packaging validation.
 The earlier Phase 227 compile timings are retained as historical measurements;

@@ -1,6 +1,6 @@
 """Which HLSL compiler guest shaders use, for preparation (Phase 231). Mirrors the engine's shader_dxc_on().
 
-RSX_SHADER_COMPILER: `dxc` = DXC to shader model 6.0 (vs_6_0/ps_6_0, `-HV 2018`); unset or `fxc` = FXC to 5.0
+RSX_SHADER_COMPILER: unset or `dxc` = DXC to shader model 6.0 (vs_6_0/ps_6_0, `-HV 2018`); `fxc` = FXC to 5.0
 (d3dcompiler_47 from the Windows system directory, as before). The target string is part of every shader source
 key, so FXC and DXC caches never mix. RSX_SHADER_INTERP=1 keeps FXC in the engine (the interpreter's own shaders
 are FXC), and here too.
@@ -23,7 +23,7 @@ _IID_OP_RESULT = (0xcedb484a, 0xd4e9, 0x445a, (0xb9, 0x91, 0xca, 0x21, 0xca, 0x1
 
 def mode(environ=None):
     environ = os.environ if environ is None else environ
-    value = environ.get('RSX_SHADER_COMPILER', 'fxc')
+    value = environ.get('RSX_SHADER_COMPILER', 'dxc')
     if value not in MODES:
         raise ValueError('RSX_SHADER_COMPILER must be unset, fxc or dxc')
     if environ.get('RSX_SHADER_INTERP') == '1':

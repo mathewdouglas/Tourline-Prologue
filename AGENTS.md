@@ -36,21 +36,27 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 231)
+## Start here: state of play (2026-11-10, Phase 232)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 231 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 232 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **0.2.5 consolidation (Phase 232):** the interpreter/hitch/DXC work, race-pack prewarm/loading bar,
+  and already-included RecompLauncher integration are combined on `0.2.5`. DXC is the user-requested
+  default (`RSX_SHADER_COMPILER=fxc` rollback; interpreter on keeps FXC). DXC preparation creates a new
+  generation and preserves old FXC caches. The backend patch is regenerated from merged source, with
+  all overlays checked. See docs/dxc-preparation.md and progress Phase 232 for validation and limits.
 
 - **DXC preparation and distribution (Phase 231, development):** `RSX_SHADER_COMPILER=dxc` now selects the
   same compiler in the helper, its vertex workers and the offline engine. The pinned v1.8.2502 DLLs and
   notices are included by packaging. Strict floating-point compilation preserves the NaN scrub and has a
-  separate source key from the older experimental DXC output. FXC remains the default: synthetic GPU
-  comparisons exceed the numeric threshold; fixed game frames and other GPUs remain unverified.
+  separate source key from the older experimental DXC output. Phase 232 makes DXC the user-requested default; synthetic GPU
+  comparisons exceed the numeric threshold, and fixed game frames/other GPUs remain unverified.
   See docs/dxc-preparation.md and progress Phase 231. The independently completed race pack/loading bar
-  remain on `feature/prewarm-bundle` (2947fe7); this branch does not merge them.
+  were on `feature/prewarm-bundle` (2947fe7); Phase 232 combines that work on `0.2.5`.
 
 - **DXC for guest shaders (Phase 227, opt-in, main patch):** `RSX_SHADER_COMPILER=dxc` compiles guest shaders
   with DXC to SM 6.0 (`dxcompiler.dll` + `dxil.dll` beside gt5p.exe, from the Windows SDK; target vs_6_0/ps_6_0 in
@@ -97,7 +103,8 @@ has the evidence, newest phase first (Phase 231 is the latest; Phases 99 and ear
   Untested inside RecompLauncher itself; not merged or released.
 - **Race hitches (Phase 221, branch feature/hitch-texture-lru, main patch, defaults on):** texture slot
   recency (`RSX_TEX_LRU=0` rollback), texture pool + 64 MB staging ring (`RSX_TEX_POOL=0`), race prewarm on 4
-  threads (`RSX_RACE_PREWARM_THREADS=1`; 66-69 s -> 15-16 s, now inside the loading gate) and a persistent
+  threads (`RSX_RACE_PREWARM_THREADS=1`; 66-69 s -> 15-16 s, now inside the loading gate), one race-pack read
+  (Phase 228, `warmup-v1/race-pack-v1.bin` when it matches the race index; background race warmup uses it too, one pipeline a turn, and the loading gate reuses that read; `RSX_RACE_PREWARM_PACK=0` restores per-file opens) and a persistent
   fast pipeline lookup (`warmup-v1/fp-lookup-v1.bin`, epoch-tagged; `RSX_PSO_FAST_LOOKUP=0`). High Speed Ring
   prepared cache: race-start frame 370-407 -> 113 ms, +7 s camera change 299-317 -> 106 ms, 60 s FrameTest
   max 28.9 ms. The texture-slot LRU overlay is removed; interp/trace/coverage overlays rebased. Remaining:
@@ -2085,6 +2092,8 @@ bullet, the later one is right.
   drives it with posted keys against a scratch settings file. The
   "Compiling shaders" badge (`src/gt5p_shaderbusy.cpp`, 52.1) reads
   `g_rsx_shader_busy` from the backend; `GT5P_SHADER_INDICATOR=0` hides it.
+  The same thread draws a thin bar under the GT logo while the race loading
+  gate waits (`GT5P_RACE_LOAD_BAR=0` hides it).
   Windows over the game must not call synchronous `SetWindowPos` each tick:
   the game window's thread is the present thread, often busy.
 - **Car paint, glass (Phase 51).** `LG2` takes `|x|` (`RSX_LG2_ABS=0`): a
