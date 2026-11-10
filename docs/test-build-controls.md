@@ -1,37 +1,48 @@
-# Controls polish test build (previous host-preset candidate)
+# Controls polish test build
 
-This candidate predates the native mapping link described in [controls-polish.md](controls-polish.md).
-It remains available for comparison; it does not implement the linked Yes/No option.
-
-Local Windows x64 test ZIP built from `feature/controls-polish` implementation
-head `8dc4b5423dba09d4322890882704bcf6cdf67bdb`. No tag or release.
+Updated local Windows x64 test ZIP from `feature/controls-polish`, implementation
+head `1c7cb3e4bfddeca0b9d6bd4417a2804a4634a018`. No main merge, tag or release.
 
 Artifact (ignored):
-`scratch/controls/test-build-8dc4b54-final/tourline-prologue-v0.2.5-controls-test-8dc4b54-windows-x64.zip`
+`scratch/controls/test-build-1c7cb3e-final/tourline-prologue-v0.2.5-controls-test-1c7cb3e-windows-x64.zip`
 
-Size: 103,896,746 bytes; 309 files.
-SHA-256: `a4ba42935381738e2b0c43e5c187ae99fad0911c946ec8f780526651574a680f`.
-Engine SHA-256: `3d991a9e3a1c128cdf67b8abe2d4a90b09bb9caf082042397cbaae17789409f6`.
+Size: 103,900,219 bytes; 309 files.
+SHA-256: `c7c452b7517bf8b745e95f4e31fe61a6ac4750619401a23fad499a9902eb6ac0`.
+Engine SHA-256: `d2a0520c78598220ea2235f2b0ef5d182fb902fabcbb58cbbcac22ac0284858c`.
 
-This retains the verified [0.2.5 background preparation test package](test-build-025-background.md)
-launcher, helper, DLLs, assets and licenses. It substitutes the privately relinked
-controls engine and current RecompLauncher manifest, updates release.ini's engine
-digest, and adds TEST-CONTROLS.txt. The frozen helper is byte-identical to the
-verified base; no helper logic changed for input controls.
+Extract the **entire ZIP into a fresh folder** and run **tourline-prologue.exe**.
+F1 > Controls > Modern controls applies live after profile load:
 
-Packaging ran through the mandatory machine-wide lock. Base ZIP SHA-256 matched
-the recorded value before reading it. ZIP CRC, duplicate paths, every copied or
-replaced payload hash, release engine/helper digests, all 70 helper-manifest files,
-and the 16-setting RecompLauncher manifest passed. No game data, player settings,
-saves or caches are included. Evidence and the local packaging script are under
-`scratch/controls`; native and game/F1 validation of this engine is recorded in
-[controls-polish.md](controls-polish.md). This packaging pass did not repeat the
-base package's offline preparation or physical driving acceptance.
+- **Yes:** R2 accelerate, L2 brake, Cross gear up, Square gear down.
+- **No:** restore Cross accelerate, Square brake, R2 gear up, L2 gear down.
 
-Extract the entire ZIP into a fresh folder and run **tourline-prologue.exe**.
-F1 > Controls provides response/dead-zone settings; F1 > Feedback provides optional
-effects. Change the desired setting, then choose Restart. Keep Modern controls
-Off if R2/L2 are already assigned in the game. That preset targets the standard
-Cross-throttle / Square-brake layout. Feedback defaults Off; tactile acceptance
-and Xbox hardware testing remain open. Existing caches are preserved, although
-the changed engine may require a new preparation generation.
+The option follows the game's actual player-one SIXAXIS mapping, including changes
+made in Options. Custom layouts show No; explicitly choosing No restores these
+four defaults. Other bindings and player two stay unchanged. Use the game's normal
+Save to retain assignments. A PC settings observation never forces an old mapping
+at boot. Modern controls is in F1; its old static RecompLauncher toggle is removed.
+
+Response/dead-zone and optional Feedback settings still require Restart. Feedback
+defaults Off. `GT5P_NATIVE_CONTROLS=0` disables the native mapping link without
+changing assignments; `PAD_CONTROLS_POLISH=0` disables all controls additions.
+
+Native mapping safety tests, 16,128 response cases, 255 guest pressure packets,
+virtual hotplug, parser/manifest and clean pinned-patch checks pass. Real-game F1,
+in-game assignment edits, explicit defaults and game Save/reload pass. No new
+physical driving or tactile acceptance is claimed. SDL2 remains; SDL3 is deferred.
+See [controls-polish.md](controls-polish.md) for evidence and remaining device gaps.
+
+Packaging ran under the required machine-wide lock. The verified
+[0.2.5 base package](test-build-025-background.md) launcher/helper/DLLs/assets/licenses
+are retained; the engine and manifest are replaced, release.ini's engine digest
+updated, and TEST-CONTROLS.txt added. Base SHA-256, ZIP CRC, unique paths, every
+payload hash, release engine/helper hashes and all 70 helper-manifest files pass.
+The 15-setting / 18-key manifest passes separately. No game data, player settings,
+saves or caches are included. The unchanged frozen helper's offline preparation
+was not repeated for this input-only update. Existing caches are retained; the
+engine change may require a new preparation generation.
+
+The previous `8dc4b54` ZIP remains available under
+`scratch/controls/test-build-8dc4b54-final/` for comparison. Its host-only preset is
+superseded by this native mapping link. Packaging evidence and the local script
+are under `scratch/controls/native-mapping` and the artifact's `validation.json`.
