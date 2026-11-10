@@ -1,5 +1,9 @@
 # Offline game shader preparation
 
+Development 0.2.5 uses a short settings-focused menu/race step for foreground
+preparation; full preparation stays available explicitly and in the background.
+See [quick-preparation.md](quick-preparation.md) for scope, controls and evidence.
+
 ### Input templates (format 3, development)
 
 The 12,669-record starter now describes renderer inputs. Records contain program

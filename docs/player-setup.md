@@ -5,6 +5,15 @@ include `port_version=0.2.3` in `release.ini`; its separate `version=03.00` fiel
 identifies the supported disc build. ps3recomp v0.18.0 is the runtime dependency,
 not the port release version. CI names ZIPs `tourline-prologue-v0.2.3-windows-x64-<commit>.zip`.
 
+## Short foreground preparation (0.2.5 development)
+
+`Prepare shaders.cmd`, F1 and accepted offers prepare the 3,546 observed menu/race
+inputs for the saved settings. `Prepare all shaders.cmd` retains full preparation;
+`GT5P_PREPARE_QUICK=0` restores the previous foreground behavior. A short cache
+counts as ready for offers, but full background preparation still continues on
+the next game launch, reusing its results and skipping the race-first step.
+Cleanup waits for full completion. See [quick-preparation.md](quick-preparation.md).
+
 ## Background preparation (Phase 225, replaces the offer by default)
 
 When no completed preparation made by this release is selected, the launcher no longer asks. It starts the
@@ -31,9 +40,9 @@ launch resumes. `logs/prepare-background-pause.txt` records the pauses.
 - `GT5P_PREPARE_BACKGROUND=0` restores the one-time offer below. `GT5P_PREPARE_BACKGROUND_PAUSE=0` never
   pauses. `GT5P_PREPARE_BACKGROUND_WORKERS=<2..12>` sets the compiler workers (default half the logical
   processors). `GT5P_PREPARE_OFFER=0`, `GT5P_PREPARE_VOLUME=0` and `--no-prepared` start nothing.
-- A current preparation is remembered in `prepare-current-<port version>.txt` (the selection it was
-  confirmed for), so later launches skip the helper check.
-- Tests: `scripts/test/launcher_background_native.py` (11 scenarios against the probe),
+- A current full preparation is remembered in `prepare-full-current-<port version>.txt` with its
+  selection/settings/compiler identity, so later launches skip the helper check.
+- Tests: `scripts/test/launcher_background_native.py` (12 scenarios against the probe),
   `scripts/test/background_preparation.py`. Measurements: docs/progress.md Phase 225.
 
 ## First-launch preparation offer, preload default and indicators (v0.2.4)

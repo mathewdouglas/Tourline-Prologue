@@ -36,13 +36,21 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 234)
+## Start here: state of play (2026-11-10, Phase 235)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 234 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 235 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **Short foreground preparation (Phase 235, 0.2.5):** Prepare shaders now builds the observed menu/race union
+  (3,546 inputs), mapped to the saved translation and MSAA; catalogue/interpreter work stays in full preparation.
+  A fresh 1080p/21:9/8x run takes 199 s versus the full baseline's 978 s on this PC, with all native proofs passing.
+  A quick selected cache still triggers full background continuation on the next game launch. Old full caches
+  remain valid; cleanup waits for full completion. `Prepare all shaders.cmd`, launcher `--prepare-full` and helper
+  `--full` retain the broad option; `GT5P_PREPARE_QUICK=0` restores the previous foreground behavior. See
+  docs/quick-preparation.md and progress Phase 235 for coverage and measurement limits.
 
 - **Skip opening movie uses the game's option (Phase 234):** "Skip opening movie" writes the boot flag `opening_after_autoload` (Misc → Other → Opening Movie; 0 skips, 1 plays). The Demo page checkbox is a different movie. `GT5P_NATIVE_OPENING=0` presses Cross as before. A save skipped only in-game plays until this setting is turned on. F1 applies to the movie next launch.
 

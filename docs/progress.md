@@ -9,6 +9,63 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 235 - Short foreground preparation for the current settings (2026-11-10)
+
+**Request.** Reduce the initial preparation to common menu/race pipelines for the
+player's settings; keep broader coverage optional and available in the background.
+
+**Behavior.** Foreground preparation takes the deterministic union of the observed
+warmup plan: 3,546 input records, pinned to the shipped 12,669-record template.
+It keeps original-asset checks, shader derivation, native creation, persistence,
+fresh-process lookup, settings translation and MSAA mapping. It skips catalogue
+enumeration and interpreter work. Private subset/plan metadata and a separate
+token preserve existing full generations. Scope/settings completion metadata
+distinguishes short readiness from full readiness, and settings are checked again
+before publication. The library preparation API is unchanged.
+
+The launcher uses short preparation for existing foreground entry points and
+offers. A current short cache allows broader idle-priority background work on the
+next launch, reusing checked results and skipping its redundant race-first stage.
+The game keeps its starting cache; the completed full result is selected next
+launch. Old full completions remain accepted. Cleanup is scheduled only after
+full completion. `Prepare all shaders.cmd`, launcher `--prepare-full` and helper
+`--full` select full preparation. `GT5P_PREPARE_QUICK=0` rolls foreground behavior
+back; `GT5P_PREPARE_BACKGROUND=0` disables background continuation.
+
+**Fresh measurement.** Same packaged DXC engine as the prior profile, fresh private
+application cache, no reuse, aggregate profiling enabled, RTX 4060/12 logical CPUs,
+1080p/21:9/8x/HP on/aniso 16. Short preparation: **199.048 s**, full baseline:
+**978.308 s** (79.7% less). Both 3,546-record native passes report
+`[3546,3546,3546,0]`; 8x mapping creates and verifies 1,672 pipelines with
+`[1672,1672,1672,0]`. All 1,466 menu and 2,113 race memberships remain after
+mapping; the 2,113-recipe race pack is written. Catalogue/interpreter work is
+absent. OS/driver caches were not cleared: an ordered local comparison with
+different coverage, not a universal time or hitch claim. Evidence:
+`scratch/k236/{validation,timeline,report}.json`; full baseline in
+[preparation-profile-025.md](preparation-profile-025.md).
+
+**Initial checks.** Scope/plan determinism, unknown-input rejection, settings
+identity, quick/full readiness and legacy full acceptance pass. Packaging includes
+the full-preparation command. Launcher background tests pass all 12 cases,
+including quick-selected continuation; first-run/DXC/cleanup offers pass all 26
+native cases. The final frozen helper and launcher build successfully; hash/volume
+native tests pass. All builds and tests use the machine-wide lock.
+
+The final frozen helper's 32-record packed-game test passes cancellation with
+eight translated fragments retained and reused on resume, fresh native proof
+`[32,32,32,0]`, cached/handoff/code-bundle rollbacks, invalid-option rejection,
+quick/full read-only readiness and old-selection/source preservation. After a
+successful quick revalidation, background full preparation skips the race-first
+stage, reuses all 32 default shader derivations and driver blobs, promotes a
+separate full generation, and leaves the quick shader cache unchanged. Evidence:
+`scratch/q237/validation.json` and `background-full.log` (173.23 s for the suite).
+
+**Limits.** This is observed menu/race coverage, not whole-game preparation.
+Unseen pipelines still compile on demand. Existing automatic translation limits
+remain; the default proof also still precedes the additional settings translation,
+so this does not eliminate every off-mode driver creation. No engine/runtime patch,
+starter, main branch, tag or release change. See [quick-preparation.md](quick-preparation.md).
+
 ## Phase 234 - Skip opening movie uses the game's own option (2026-11-10)
 
 **Request.** "Skip opening movie" injected a Cross press (`PAD_SKIP_MOVIE=MovieRoot`) after the movie screen appeared. Link that setting to the game's own option instead.

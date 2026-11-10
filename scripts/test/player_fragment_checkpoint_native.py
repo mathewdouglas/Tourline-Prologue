@@ -171,6 +171,9 @@ def main():
         assert pointer.read_text()==selected_pointer and snapshot(source)==before
         assert snapshot(state.parent)==preserved
     if a.quick:
+        # Rejected resume requests may mark the selected checkpoint incomplete.
+        # Restore a successful completion before exercising the ready-cache branch.
+        run('revalidate-quick')
         quick_before=snapshot(generation/'shadercache')
         full_command=command+['--background','--live-cache',str(generation/'shadercache')]
         with (out/'background-full.log').open('wb') as log:

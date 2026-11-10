@@ -50,6 +50,10 @@ Evidence for finished work goes in [progress.md](progress.md).
   Phase 233 adds a one-time DXC migration offer and optional old-generation cleanup
   after successful preparation, with the recoverable size displayed and Keep as
   the default. Background completion defers cleanup to the next launch.
+  Phase 235 makes foreground preparation a settings-focused menu/race step (3,546 inputs), with full
+  preparation retained explicitly and in the background. Fresh 1080p/21:9/8x wall time is 199 s versus
+  978 s for the full baseline on the dev PC; coverage is intentionally smaller. Old caches remain intact,
+  and cleanup waits for full completion. See [quick-preparation.md](quick-preparation.md).
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;

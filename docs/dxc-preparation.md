@@ -103,9 +103,10 @@ total size in GB. **No** is the default. It warns that deletion removes their
 learned shaders and that FXC/older-renderer rollback will require preparation again.
 The selected generation, unfinished work, ordinary `shadercache`, saves and
 settings are kept. This includes older DXC settings generations, not just FXC.
-No cleanup is scheduled on failure, cancellation or interpreter-only preparation.
+No cleanup is scheduled on failure, cancellation, interpreter-only preparation or
+the short foreground menu/race step (see [quick-preparation.md](quick-preparation.md)).
 
-Foreground preparation offers cleanup after its progress window closes.
+Full foreground preparation offers cleanup after its progress window closes.
 Background preparation schedules it for the next normal launch, before gameplay;
 it never opens a cleanup dialog during play. The answer is recorded once per
 selected generation (`prepare-cleanup-<generation>.done`). A pending offer lives

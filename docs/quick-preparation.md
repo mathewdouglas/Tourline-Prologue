@@ -42,5 +42,18 @@ anisotropy-16/high-precision requirements. Other settings/overrides fall back to
 the existing default translation policy. Shader coverage, renderer defaults and
 runtime patches are unchanged.
 
-Measured acceptance is recorded in progress Phase 235; the full-profile baseline
+Fresh application-cache preparation at 1080p, 21:9, 8x MSAA on the development
+RTX 4060/12-logical-processor PC took **199.05 seconds**, compared with
+**978.31 seconds** for full preparation: 79.7% less wall time. Both runs used
+the same packaged engine, DXC, no application-cache reuse and aggregate profiling.
+OS/driver caches were not cleared; this is an ordered local comparison, not a
+portable time estimate or a comparison with equal coverage.
+
+The short run passed all 3,546 default and 3,546 ultrawide native requests
+(`[3546,3546,3546,0]` each) plus 1,672 retargeted 8x native requests
+(`[1672,1672,1672,0]`). It retained all 1,466 menu and 2,113 race memberships,
+and wrote a 2,113-recipe race pack. Catalogue enumeration and interpreter work
+were absent as intended. Private logs/reports are under `scratch/k236`.
+
+Further acceptance is recorded in progress Phase 235; the full-profile baseline
 and its caveats are in [preparation-profile-025.md](preparation-profile-025.md).
