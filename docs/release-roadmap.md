@@ -1,6 +1,6 @@
 # Release roadmap to 1.0
 
-High-level plan for Tourline Prologue releases from 0.2.5 to 1.0, agreed with
+High-level plan for Tourline Prologue releases from 0.2.5 to 1.0 (0.2.6 added 2026-11-11), agreed with
 the maintainer on 2026-11-05. GT5 is a separate project and is out of scope here.
 Each release has a theme, its main features, and an exit test that says when it
 is done. Order follows dependencies: a smooth, stable D3D12 base first, then
@@ -17,7 +17,8 @@ Evidence for finished work goes in [progress.md](progress.md).
 | Release | Theme | Headline |
 | --- | --- | --- |
 | 0.2.4 | Preparation | 12,669-pipeline starter, catalogue enumeration, freeze and trigger fixes |
-| 0.2.5 | Polish | Hitches, render-target bugs, controls polish |
+| 0.2.5 | Polish (released 2026-11-11) | Background preparation, DXC, hitches, controls polish |
+| 0.2.6 | Polish, continued | Render-target bugs, texture-load warning, smaller items |
 | 0.3.0 | Smooth | Locked 60 FPS, no compile stutter on a prepared install |
 | 0.4.0 | Wheels | Steering wheels with force feedback, sim-rig telemetry |
 | 0.5.0 | Vulkan | Vulkan backend on Windows at parity with D3D12 |
@@ -57,11 +58,7 @@ Evidence for finished work goes in [progress.md](progress.md).
   Phase 236 adds a launcher-owned background status (Preparing / Paused during race), deferred
   completion notice and Ready for next launch state, with no engine/cache identity change.
   `GT5P_PREPARE_BACKGROUND_INDICATOR=0` hides the UI independently of work and race pausing.
-- **Render-target lifetime:** one investigation into targets reused by address
-  after a scene change:
-  - the yellow menu glow after a race;
-  - the black menu slabs after the Race Mode page;
-  - the replay showing overlaid frames, and its missing controls.
+- **Render-target lifetime:** moved to 0.2.6.
 - **Controls polish:**
   - trigger response curve and dead zone in F1;
   - one-step "modern controls" (R2/L2 driving);
@@ -83,13 +80,33 @@ Evidence for finished work goes in [progress.md](progress.md).
   A startup crash while F1 drew the Debug page was a null environment name on
   Debug export. Rows with no environment name are no longer passed to that
   modern-controls check.
-- **Smaller items:**
-  - texture-load warning indicator;
-  - keyboard alongside a connected controller;
-  - an opt-in F1 entry for the shader interpreter. Status: its pipelines are now prepared ahead of use
+- **Smaller items:** moved to 0.2.6 (texture-load warning, keyboard alongside a connected controller,
+  the F1 entry for the shader interpreter). Interpreter status at release: its pipelines are now prepared ahead of use
     (Phase 220, branch `feature/interp-pipeline-prep`, not merged): startup step plus a separate helper stage.
     Phase 224 adds that budget (GPU-time adaptive, `RSX_SHADER_INTERP_BUDGET`); on the dev PC empty-cache
     hitching is the same with the interpreter off, on or capped, so the F1 entry is a visual choice, not a smoothness one.
+- **Build speed:** moved to 0.2.6.
+- **Released 2026-11-11** ([notes](release-v0.2.5.md)). At the maintainer's decision the render-target
+  bugs, the smaller items and build speed moved to 0.2.6 unfinished; the original exit test ("listed bugs
+  fixed or explained") was not met for those.
+
+## 0.2.6 - Polish, continued
+
+Carried over from 0.2.5 on 2026-11-11:
+
+- **Render-target lifetime:** one investigation into targets reused by address
+  after a scene change:
+  - the yellow menu glow after a race;
+  - the black menu slabs after the Race Mode page;
+  - the replay showing overlaid frames, and its missing controls.
+- **DXC evidence:** per-pixel comparison on fixed game frames, and a check on other GPU vendors
+  (the synthetic comparison exceeded its numeric threshold; see [dxc-preparation.md](dxc-preparation.md)).
+- **Controls hardware acceptance:** the feel of DualSense trigger resistance and Xbox trigger vibration.
+- **Smaller items:**
+  - texture-load warning indicator;
+  - keyboard alongside a connected controller;
+  - an opt-in F1 entry for the shader interpreter.
+- **Hitches left:** the driver's GPU clock ramp after a race start, first-time texture creation.
 - **Build speed:** CI cache keyed on lifter inputs, plus a persistent Ninja
   directory.
 - **Exit:** the listed bugs are fixed or explained, and there are no new hitch

@@ -3,6 +3,28 @@
 All notable changes to this port. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.2.5] - 2026-11-11
+
+- Background shader preparation by default: race shaders first, copied into the
+  running game's cache as they finish, paused while racing, with a corner status.
+  First race on an empty cache, started straight away: 11.2 s of long frames ->
+  3.2-3.9 s on the reference PC.
+- "Prepare shaders" is now a short menu-and-race step for the saved settings
+  (199 s against 978 s); "Prepare all shaders.cmd" keeps the full preparation.
+- Guest shaders compile with DXC (shader model 6.0) instead of FXC: 2.6 times
+  less compile time on a race's shader set. 0.2.4 caches are kept but not reused;
+  `RSX_SHADER_COMPILER=fxc` rolls back.
+- Fewer hitches: texture retention and pool, four-thread race loading with a
+  loading bar, saved pipeline lookup, pipelines prepared at the player's MSAA,
+  one shader bundle file, above-normal process priority.
+- Controls: trigger dead zone and response curve, one-step modern controls,
+  optional DualSense trigger resistance, trigger and body vibration, F1 test.
+- RecompLauncher manifest; "Skip opening movie" uses the game's own option.
+- Fixed controller vibration never reaching the game, Bluetooth DualSense body
+  vibration, and a stop on the F1 Debug page.
+- [Release notes](docs/release-v0.2.5.md) and
+  [download](https://github.com/mathewdouglas/Tourline-Prologue/releases/tag/v0.2.5).
+
 ## [0.2.4] - 2026-11-05
 
 - Optional preparation now covers 12,669 verified pipelines (3,446 programs) and
