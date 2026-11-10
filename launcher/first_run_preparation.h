@@ -18,7 +18,7 @@ inline std::wstring estimate(DWORD logical_processors) {
         : L"about 20 to 40 minutes on a PC with fewer than 8 logical processors";
 }
 
-inline bool offer(HICON icon, Kind kind, const std::wstring& window) {
+inline bool offer(HICON icon, Kind kind, const std::wstring& window, bool quick=false) {
     TASKDIALOG_BUTTON buttons[] = {{100, L"Prepare now"}, {101, L"Skip and play"}};
     TASKDIALOGCONFIG td{};
     td.cbSize = sizeof td;
@@ -28,7 +28,7 @@ inline bool offer(HICON icon, Kind kind, const std::wstring& window) {
     if (kind == Kind::DxcUpdate) {
         td.pszMainInstruction = L"Prepare shaders for the updated shader compiler?";
         content = L"This version uses DXC to build shaders. Shaders prepared with the previous FXC compiler cannot be used by DXC. "
-                  L"Your older caches are kept for rollback. After preparation succeeds, you can choose to remove them to free space.\n\n"
+                  L"Your older caches are kept for rollback. After full preparation succeeds, you can choose to remove them to free space.\n\n"
                   L"Preparing now can reduce compilation stutter. You can skip and play; shaders will compile as needed.\n\n";
     } else if (kind == Kind::Update) {
         td.pszMainInstruction = L"Prepare shaders for this version?";
@@ -38,7 +38,10 @@ inline bool offer(HICON icon, Kind kind, const std::wstring& window) {
         td.pszMainInstruction = L"Prepare known shaders before playing?";
         content = L"Setup is complete. Preparing shaders now is optional and can reduce stutter while you play.\n\n";
     }
-    content += L"Preparation builds the game's known shaders and pipelines from your selected game files. "
+    content += quick ? L"Quick preparation builds the common menu and race pipelines for your current settings. "
+                       L"Other shaders compile as needed; broader preparation can continue in the background. " :
+                       L"Preparation builds the game's known shaders and pipelines from your selected game files. ";
+    content +=
                L"Expect " + window + L"; it depends on your PC. You can cancel and start playing, then run "
                L"Prepare shaders.cmd (or F1 > Debug > Prepare shaders) at any time to resume.\n\n"
                L"You will only be asked once for this version.";

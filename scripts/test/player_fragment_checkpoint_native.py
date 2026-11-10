@@ -31,6 +31,7 @@ def main():
         ap.add_argument('--'+name,type=Path,required=True)
     ap.add_argument('--count',type=int,default=32)
     ap.add_argument('--chunk',type=int,default=8)
+    ap.add_argument('--quick',action='store_true',help='Exercise focused preparation and quick/full readiness with a pinned private plan')
     a=ap.parse_args();idle();out=isolated(a.output)
     if out.exists():raise ValueError('Use a fresh ignored output')
     if not 1<=a.chunk<a.count<=256:raise ValueError('Use a bounded multi-chunk sample')
@@ -43,8 +44,14 @@ def main():
     shutil.copyfile(a.elf,storage/'input/EMAIN.ELF')
     original=template.ROOT/'assets/pipeline-templates/gt5p-disc-v2'
     document=template.read(original)
+    quick_plan=None
+    if a.quick:
+        from pipeline_warmup_plan import load
+        quick_plan=load(template.ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',original)
+        allowed=set().union(*map(set,quick_plan['phases'].values()))
     chosen=[];seen=set()
     for record in document['records']:
+        if a.quick and record['key'] not in allowed:continue
         identity=(record['vp']['sha256'],record['vp_gpu'])
         if identity not in seen:
             seen.add(identity);chosen.append(record)
@@ -53,6 +60,13 @@ def main():
     selected=dict(document,records=chosen)
     bundle=install/'assets/pipeline-templates/gt5p-disc-v2'
     template.bundle(selected,bundle)
+    if a.quick:
+        keys={r['key'] for r in chosen}
+        quick_plan=dict(quick_plan,template_sha256=template.template_digest(bundle),
+            phases={p:[k for k in values if k in keys] for p,values in quick_plan['phases'].items()})
+        # The frozen helper's own validated data, changed only in this private fixture.
+        plan_path=install/'preparation/_internal/config/pipeline-warmup/gt5p-disc-v2.json'
+        plan_path.write_text(json.dumps(quick_plan),encoding='utf-8')
     for name in ('player-map.json','volume-map.json'):
         shutil.copyfile(original/name,bundle/name)
     source=storage/'preparation'/('a'*24)/'shadercache'
@@ -60,7 +74,7 @@ def main():
     before=snapshot(source)
     pointer=storage/'prepared-cache.txt'
     previous=source.relative_to(storage).as_posix();pointer.write_text(previous)
-    command=[str(install/'preparation/GT5P-Prepare.exe'),'--install',str(install),
+    command=[str(install/'preparation/GT5P-Prepare.exe')]+([] if a.quick else ['--full'])+['--install',str(install),
              '--storage',str(storage),'--game',str(a.game.resolve())]
     env={k:v for k,v in os.environ.items() if not k.upper().startswith(('GT5P_','RSX_'))}
     # Select the same compiler explicitly after sanitizing renderer variables.
@@ -77,7 +91,8 @@ def main():
         try:
             deadline=time.monotonic()+240
             while child.poll() is None:
-                generations=[p for p in source.parent.parent.iterdir() if p!=source.parent]
+                generations=[p for p in source.parent.parent.iterdir()
+                             if p!=source.parent and (p/'preparation-state.json').is_file()]
                 if generations:
                     # Observe the player status, never open an actively replaced
                     # checkpoint without FILE_SHARE_DELETE on Windows.
@@ -114,7 +129,16 @@ def main():
     assert extra['fragment_jobs_reused']==len(kept)
     selected_pointer=pointer.read_text()
     assert selected_pointer==(generation/'shadercache').relative_to(storage).as_posix()
-    assert (storage/'prepare-cleanup-pending.txt').read_text()==selected_pointer
+    if a.quick:
+        assert not (storage/'prepare-cleanup-pending.txt').exists()
+        scope=json.loads((generation/'preparation-scope.json').read_text())
+        assert scope['kind']=='quick' and scope['records']==a.count
+        assert 'enumeration' not in first
+        for flag,expected in (('--check-selected',0),('--check-full-selected',3)):
+            checked=subprocess.run([command[0],flag,'--install',str(install),'--storage',str(storage),
+                '--game',str(a.game.resolve())],env=env,capture_output=True,timeout=60)
+            assert checked.returncode==expected,(flag,checked.stderr)
+    else:assert (storage/'prepare-cleanup-pending.txt').read_text()==selected_pointer
     assert snapshot(source)==before
     run('cached',{'GT5P_PREPARE_FRAGMENT_CHUNK':'4096'})
     cached=json.loads((generation/'report.json').read_text())['additional_translation']
@@ -146,6 +170,18 @@ def main():
         run(name,overrides,False)
         assert pointer.read_text()==selected_pointer and snapshot(source)==before
         assert snapshot(state.parent)==preserved
+    if a.quick:
+        quick_before=snapshot(generation/'shadercache')
+        full_command=command+['--background','--live-cache',str(generation/'shadercache')]
+        with (out/'background-full.log').open('wb') as log:
+            completed=subprocess.run(full_command,env=env,stdout=log,stderr=subprocess.STDOUT,
+                timeout=300,creationflags=subprocess.CREATE_NO_WINDOW)
+        assert completed.returncode==0,(out/'background-full.log').read_text(errors='replace')
+        assert 'Background race stage:' not in (out/'background-full.log').read_text(errors='replace')
+        assert pointer.read_text()!=selected_pointer and snapshot(generation/'shadercache')==quick_before
+        full_generation=storage/Path(pointer.read_text()).parent
+        assert json.loads((full_generation/'preparation-scope.json').read_text())['kind']=='full'
+        assert snapshot(source)==before
     (out/'validation.json').write_text(json.dumps(dict(records=a.count,checkpointed_fragments=len(kept),
         resumed_fragments=extra['fragment_jobs_reused'],native_counts=extra['native_counts'],
         clean_path=True,old_selection_preserved_on_cancel=True,source_unchanged=True,
@@ -154,6 +190,8 @@ def main():
         native_handoff_rollback_reused_all=True,
         code_bundle_rollback_reused_all=True,invalid_code_bundle_and_shader_profile_rejected=True,
         cleanup_scheduled_only_after_success=True,
+        focused_preparation=a.quick,
+        quick_to_background_full_preserves_source=a.quick,
         seconds=time.perf_counter()-started,
         limitation='Frozen offline subset on one GPU; no live rendering or stutter measurement.'),indent=2)+'\n')
     print('Frozen fragment checkpoint, resume, rollback and selection/source preservation passed:',out)

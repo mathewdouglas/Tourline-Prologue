@@ -16,13 +16,14 @@ int wmain(int argc, wchar_t** argv) {
         DeleteFileW(L"prepare-cleanup-pending.txt");
         return 0;
     }
-    if (argc>1 && !wcscmp(argv[1],L"--check-selected")) {
+    if (argc>1 && (!wcscmp(argv[1],L"--check-selected") || !wcscmp(argv[1],L"--check-full-selected"))) {
         // The launcher's read-only "is the current preparation selected" question.
         // Leaves its own record and never probe.txt, which marks a game start.
         FILE* record=nullptr;
         if (!_wfopen_s(&record,L"check.txt",L"a, ccs=UTF-8") && record) { fwprintf(record,L"argc=%d\n",argc); fclose(record); }
         wchar_t selected[16]{};
         GetEnvironmentVariableW(L"GT5P_PROBE_SELECTED",selected,16);
+        if (!wcscmp(argv[1],L"--check-full-selected") && GetEnvironmentVariableW(L"GT5P_PROBE_QUICK_SELECTED",nullptr,0)) return 3;
         return !wcscmp(selected,L"1") ? 0 : !wcscmp(selected,L"error") ? 1 : 3;
     }
     if (argc>1 && (!wcscmp(argv[1],L"--collect-contribution") || !wcscmp(argv[1],L"--verify-contribution"))) {

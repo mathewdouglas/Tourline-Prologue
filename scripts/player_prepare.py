@@ -137,7 +137,7 @@ def release_identity(install):
     return digest.hexdigest()
 
 
-def selected_is_current(storage, install):
+def selected_is_current(storage, install, full=False):
     """Read only. True when prepared-cache.txt selects a completed preparation made by this release."""
     pointer=storage/'prepared-cache.txt'
     if not pointer.is_file() or pointer.is_symlink():return False
@@ -147,7 +147,16 @@ def selected_is_current(storage, install):
         recorded=regular_read(storage/'prepared-identity.txt',128).decode('ascii').strip()
         state=json.loads(regular_read(storage/selected.rpartition('/')[0]/'preparation-state.json',65536))
     except (OSError,ValueError):return False
-    return isinstance(state,dict) and state.get('phase')=='complete' and recorded==release_identity(install)
+    if not (isinstance(state,dict) and state.get('phase')=='complete' and recorded==release_identity(install)):
+        return False
+    try:
+        import preparation_quick
+        scope=preparation_quick.scope(storage/selected.rpartition('/')[0])
+        if scope:
+            if scope['settings']!=preparation_quick.settings_key(storage):return False
+            if full and scope['kind']!='full':return False
+    except (OSError,ValueError):return False
+    return True
 
 
 def safe_storage(storage):
@@ -253,10 +262,12 @@ def main():
     source.add_argument('--game',type=Path,help='The already configured disc/PS3_GAME folder')
     ap.add_argument('--launcher-pid',type=int,default=0)
     ap.add_argument('--no-reuse',action='store_true',help='Prepare without reading the previous selected cache')
+    ap.add_argument('--full',action='store_true',help='Prepare the full starter and catalogue instead of the focused foreground step')
     ap.add_argument('--interp-pipelines-only',action='store_true',
                     help='Only prepare shader-interpreter pipelines into the selected completed preparation')
     ap.add_argument('--check-selected',action='store_true',
                     help='Read only: exit 0 if a completed preparation of the current identity is selected, 3 if not')
+    ap.add_argument('--check-full-selected',action='store_true',help='Read only: require full preparation, not just quick menu/race readiness')
     ap.add_argument('--offer-cache-cleanup',action='store_true',
                     help='Offer removal of older completed generations after successful preparation, with no game running')
     ap.add_argument('--background',action='store_true',
@@ -265,7 +276,10 @@ def main():
     a=ap.parse_args()
     storage=safe_storage(a.storage)
     install=a.install.resolve()
-    if a.check_selected:sys.exit(0 if selected_is_current(storage,install) else 3)
+    if a.check_selected or a.check_full_selected:
+        sys.exit(0 if selected_is_current(storage,install,full=a.check_full_selected) else 3)
+    import preparation_quick
+    quick=preparation_quick.enabled() and not (a.full or a.background or a.interp_pipelines_only or a.offer_cache_cleanup)
     live=None
     if a.background:
         import background_preparation
@@ -278,6 +292,7 @@ def main():
         background_preparation.lower_priority()
     selection=select_settings(storage)
     translation=selection['mode']
+    quick_settings=preparation_quick.settings_key(storage) if quick else None
     def idle_for_player():
         # Verify the optional visible launcher owner. Exclude only our actual
         # parent, after verifying its full image path; never ignore another game.
@@ -313,11 +328,19 @@ def main():
     engine=install/'runtime/gt5p.exe';decoder=install/'preparation/decoder.dll'
     bundle=install/'assets/pipeline-templates/gt5p-disc-v2'
     document=template.read(bundle,legacy=os.environ.get('GT5P_PREPARE_INPUT_TEMPLATE')=='0')
+    quick_plan=None
+    if quick:
+        from pipeline_warmup_plan import load as load_quick_plan
+        quick_plan=load_quick_plan(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',bundle)
+        if quick_plan['template_sha256']!=template.template_digest(bundle):
+            raise ValueError('Quick warmup plan does not match the starter')
+        preparation_quick.records(document,quick_plan)
     from pipeline_template_inputs import input_contract
     if input_contract(document['compatibility'])!=template.compatibility(engine,decoder,storage/'input/EMAIN.ELF'):
         raise ValueError('This template does not match the installed game/renderer')
     location_map=bundle/'player-map.json'
     metadata_items=[document,read_map(location_map)]
+    if quick:metadata_items.append(dict(quick_preparation_v1=quick_plan,settings=quick_settings))
     if document.get('version') == 3:
         metadata_items.append(selection)
     volume=volume_map=None
@@ -342,7 +365,7 @@ def main():
     from pipeline_warmup_plan import read as read_plan, load as load_plan
     plan_document=(load_plan(plan,bundle) if document.get('version') == 3 else read_plan(plan)) if packs else None
     from preparation_enumeration import enabled as enumerate_enabled, load as load_enumeration, sample_share
-    enumeration=load_enumeration(install/'assets/shader-enumeration/gt5p-disc-v1',bundle) if enumerate_enabled() else None
+    enumeration=load_enumeration(install/'assets/shader-enumeration/gt5p-disc-v1',bundle) if not quick and enumerate_enabled() else None
     collapse=sample_share() if enumeration is not None else False
     token=preparation_token(metadata,hashlib.sha256(engine.read_bytes()).hexdigest(),
                             hashlib.sha256(decoder.read_bytes()).hexdigest(),packs,plan_document,
@@ -352,6 +375,10 @@ def main():
     # two generations can exceed the old 100000-entry scan limit.
     if parent.exists():preflight_tree(parent, generation_entry_budget()*MAX_GENERATIONS)
     parent.mkdir(exist_ok=True)
+    if quick:
+        bundle,quick_path,quick_plan=preparation_quick.stage_inputs(document,quick_plan,parent/('quick-inputs-'+token))
+        document=template.read(bundle)
+        if translation=='default':plan,plan_document=quick_path,quick_plan
     cancel=storage/'prepare.cancel';status=storage/'prepare-status.txt'
     last_status=['',0.0]
     def progress(phase,counts):
@@ -391,7 +418,8 @@ def main():
         status.write_text('Interpreter pipelines complete.',encoding='utf-8')
         return
     race_folder=None
-    if a.background:
+    if a.background and not (reuse is not None and selected_is_current(storage,install) and
+            (preparation_quick.scope(reuse.parent) or {}).get('kind')=='quick'):
         race_folder=parent/('race-'+token)
         race=race_stage(race_folder,document,bundle,translation,live,storage,engine,decoder,location_map,
                         a.assets.resolve() if a.assets else None,volume,volume_map,progress,run_owned)
@@ -426,6 +454,8 @@ def main():
         raise
     except Exception as exc:  # noqa: BLE001 - optional; the game creates these pipelines on demand
         report['msaa_map']=dict(status='failed',reason=str(exc))
+    if quick and msaa_pipeline_map.enabled() and report['msaa_map'].get('status')!='complete':
+        raise ValueError('Focused preparation could not validate the settings-specific MSAA pipelines; previous selection kept')
     # Phase 221: the renderer's fast pipeline lookup table for each prepared translation (hints only; never
     # changes prepared shaders, native blobs or the token). GT5P_PREPARE_FAST_LOOKUP=0 skips it.
     try:
@@ -442,7 +472,7 @@ def main():
         # translation pass); the race prewarm and fast lookup otherwise have nothing resident at 21:9 / >1080p.
         try:
             from pipeline_warmup_plan import load as load_plan_v3, stage_translated
-            report['translated_plan']=stage_translated(load_plan_v3(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',bundle),
+            report['translated_plan']=stage_translated(quick_plan if quick else load_plan_v3(ROOT/'config/pipeline-warmup/gt5p-disc-v2.json',bundle),
                 report,out/'shadercache/warmup-v1')
         except Exception as exc:  # noqa: BLE001 - optional; the game learns membership during play
             report['translated_plan']=dict(status='failed',reason=str(exc))
@@ -465,11 +495,16 @@ def main():
     template.save_report(out/'report.json',report)
     # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
     # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.
-    interp_stage(install,storage,out,progress,run_owned)
+    if not quick:interp_stage(install,storage,out,progress,run_owned)
     # Switch only after successful shader/native/persistence validation. Existing
     # caches remain intact; game demand can add missing/settings-specific entries.
     pointer=storage/'prepared-cache.txt';pending=pointer.with_suffix('.tmp')
     identity=storage/'prepared-identity.txt'
+    verify_settings(selection,storage)
+    if quick and preparation_quick.settings_key(storage)!=quick_settings:
+        raise ValueError('Settings changed during focused preparation; previous selection kept')
+    if quick or preparation_quick.enabled():
+        preparation_quick.publish_scope(out,storage,quick,len(document['records']))
     # Recorded first: a pointer without a matching fingerprint only costs one more offer.
     identity.write_text(release_identity(install)+'\n',encoding='ascii')
     pending.write_text((out/'shadercache').relative_to(storage).as_posix(),encoding='utf-8');pending.replace(pointer)
@@ -478,7 +513,7 @@ def main():
     # after background completion. Cleanup never interrupts a running game.
     try:
         import preparation_cleanup
-        preparation_cleanup.schedule(storage)
+        if not quick:preparation_cleanup.schedule(storage)
     except (OSError,ValueError) as exc:
         print('Cache cleanup offer not scheduled: '+str(exc),flush=True)
     if race_folder is not None and race_folder.is_dir() and not race_folder.is_symlink():

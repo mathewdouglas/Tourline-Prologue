@@ -174,6 +174,7 @@ def main():
              'START-HERE.txt': regular(ROOT / 'launcher/START-HERE.txt'),
              'Change storage.cmd': regular(ROOT / 'launcher/Change storage.cmd'),
              'Prepare shaders.cmd': regular(ROOT / 'launcher/Prepare shaders.cmd'),
+             'Prepare all shaders.cmd': regular(ROOT / 'launcher/Prepare all shaders.cmd'),
              'Collect pipeline template.cmd': regular(ROOT / 'launcher/Collect pipeline template.cmd'),
              'Resume pipeline verification.cmd': regular(ROOT / 'launcher/Resume pipeline verification.cmd'),
              # RecompLauncher reads this beside tourline-prologue.exe (docs/recomplauncher.md).

@@ -423,7 +423,7 @@ static void offer_cache_cleanup(const fs::path& disc) {
     }
     catch (...) {}
 }
-static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game, bool notices=true) {
+static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets, bool continue_to_game, bool notices=true, bool full=false) {
     auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
     if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256"))
         fail(L"The preparation helper is missing or does not match this release. Re-extract the full ZIP.");
@@ -436,10 +436,14 @@ static DWORD prepare_cache(const fs::path& disc, const fs::path& prepare_assets,
     fs::remove(data/L"prepare.cancel");
     std::ofstream(data/L"prepare-status.txt") << "Starting preparation...";
     auto source=packed?L" --game "+quote(disc):L" --assets "+quote(assets);
-    DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
+    DWORD result=run(helper,L"--install "+quote(install)+L" --storage "+quote(data)+source+
+        (full?L" --full":L"")+L" --launcher-pid "+std::to_wstring(GetCurrentProcessId()),data,L"prepare",true);
     if (result && result!=2) fail(L"Preparation did not finish. Normal play is still available. Logs are in:\n\n"+(data/L"logs").wstring());
     if (!result) offer_cache_cleanup(disc);
-    if (notices && !result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
+    if (notices && !result && prepare_assets.empty() && !continue_to_game) MessageBoxW(nullptr,
+        !full && env(L"GT5P_PREPARE_QUICK")!=L"0" ?
+        L"Common menu and race pipelines are ready for your settings. Launch tourline-prologue.exe to play. Broader preparation can continue in the background. Other shaders compile as needed.":
+        L"Known pipelines prepared. Launch tourline-prologue.exe to play. Uncovered pipelines and different settings use normal demand compilation.",L"Project Tourline Prologue",MB_OK|MB_ICONINFORMATION);
     return result;
 }
 // One-time offer per port version. A small marker in the launcher's storage records that it was
@@ -455,11 +459,11 @@ static void mark_offer(const std::wstring& version) {
 }
 // 0: a completed preparation of the current identity is selected. 3: it is not. -1: unknown
 // (helper missing or failed); the launcher then offers nothing and records nothing.
-static int selected_preparation(const fs::path& disc) {
+static int selected_preparation(const fs::path& disc, bool full=false) {
     try {
         auto helper=install/L"preparation"/L"GT5P-Prepare.exe";
         if (!fs::is_regular_file(helper) || hash(helper)!=release_value(L"prepare_sha256")) return -1;
-        DWORD code=run(helper,L"--check-selected --install "+quote(install)+L" --storage "+quote(data)+L" --game "+quote(disc),
+        DWORD code=run(helper,(full?L"--check-full-selected --install ":L"--check-selected --install ")+quote(install)+L" --storage "+quote(data)+L" --game "+quote(disc),
             data,L"prepare-check");
         return code==0 || code==3 ? (int)code : -1;
     } catch (const Failure&) { return -1; } catch (const std::exception&) { return -1; }
@@ -585,19 +589,25 @@ static void stop_background(Background& b) {
 static bool preparation_current(const fs::path& disc) {
     const std::wstring version=release_value(L"port_version");
     const auto pointer=utf8_file(data/L"prepared-cache.txt");
-    const fs::path done=data/(L"prepare-current-"+version+L".txt");
-    if (plain_version(version) && !pointer.empty() && utf8_file(done)==pointer) return true;
-    int state=selected_preparation(disc);
+    const fs::path done=data/(L"prepare-full-current-"+version+L".txt");
+    const auto settings=data/L"gt5p_settings.toml";
+    const auto settings_hash=fs::is_regular_file(settings)?hash(settings):L"";
+    const auto identity=pointer+L"\n"+settings_hash+L"\n"+env(L"RSX_SHADER_COMPILER")+L"\n"+
+        env(L"RSX_SHADER_INTERP")+L"\n"+env(L"RSX_SHADER_INTERP_VP")+L"\nfull-v1";
+    if (plain_version(version) && !pointer.empty() && utf8_file(done)==identity) return true;
+    int state=selected_preparation(disc,true);
     if (state==0 && plain_version(version) && !pointer.empty()) {
-        try { std::ofstream f(done, std::ios::binary); auto n=WideCharToMultiByte(CP_UTF8,0,pointer.c_str(),(int)pointer.size(),nullptr,0,nullptr,nullptr);
-              std::string t(n,'\0'); WideCharToMultiByte(CP_UTF8,0,pointer.c_str(),(int)pointer.size(),t.data(),n,nullptr,nullptr); f<<t; } catch (...) {}
+        try { std::ofstream f(done, std::ios::binary); auto n=WideCharToMultiByte(CP_UTF8,0,identity.c_str(),(int)identity.size(),nullptr,0,nullptr,nullptr);
+              std::string t(n,'\0'); WideCharToMultiByte(CP_UTF8,0,identity.c_str(),(int)identity.size(),t.data(),n,nullptr,nullptr); f<<t; } catch (...) {}
     }
     return state!=3;   // unknown (-1) starts nothing
 }
 // The same offer, preparation and failure handling for both launches.
 static void offer_preparation(const fs::path& disc, first_run_preparation::Kind kind, const std::wstring& version) {
     DWORD cpus = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-    bool yes = first_run_preparation::offer(brand_icon(), kind, first_run_preparation::estimate(cpus));
+    bool quick=env(L"GT5P_PREPARE_QUICK")!=L"0";
+    bool yes = first_run_preparation::offer(brand_icon(), kind,
+        quick?L"a few minutes":first_run_preparation::estimate(cpus),quick);
     if (plain_version(version)) mark_offer(version);
     if (!yes) return;
     try { prepare_cache(disc,{},true); }
@@ -609,7 +619,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     try {
         int argc = 0; auto argv = CommandLineToArgvW(GetCommandLineW(), &argc);
         if (!argv) fail(L"Could not read launcher options.");
-        bool force = false, open = false, unknown = false, choose_storage = false, prepare = false, no_prepared = false;
+        bool force = false, open = false, unknown = false, choose_storage = false, prepare = false, full_prepare=false, no_prepared = false;
         fs::path storage, prepare_assets;
         for (int i = 1; i < argc; ++i) {
             if (!wcscmp(argv[i], L"--setup")) force = true;
@@ -617,6 +627,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             else if (!wcscmp(argv[i], L"--open-data")) open = true;
             else if (!wcscmp(argv[i], L"--choose-storage")) choose_storage = true;
             else if (!wcscmp(argv[i], L"--prepare")) prepare = true;
+            else if (!wcscmp(argv[i], L"--prepare-full")) { prepare=true;full_prepare=true; }
             else if (!wcscmp(argv[i], L"--no-prepared")) no_prepared = true;
             else if (!wcscmp(argv[i], L"--prepare-assets") && i+1<argc) { prepare=true;prepare_assets=argv[++i]; }
             else if (!wcscmp(argv[i], L"--set-storage") && i+1 < argc) storage = argv[++i];
@@ -701,7 +712,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         }
         if (quiet) { CoUninitialize(); return 0; }
         if (prepare) {
-            prepare_cache(disc,prepare_assets,false);
+            prepare_cache(disc,prepare_assets,false,true,full_prepare);
             CoUninitialize();return 0;
         }
         // One DXC migration offer, including when background preparation is enabled.

@@ -55,6 +55,7 @@ def main():
                  ('background-race-pause', {'GT5P_PROBE_RACE': '1', 'GT5P_PROBE_DELAY_MS': '300'}, [], None, True, 1),
                  ('background-no-pause', {'GT5P_PROBE_RACE': '1', 'GT5P_PREPARE_BACKGROUND_PAUSE': '0'}, [], None, True, 1),
                  ('already-prepared', {'GT5P_PROBE_SELECTED': '1'}, [], 'preparation/0123456789abcdef01234567/shadercache', False, 1),
+                 ('quick-prepared', {'GT5P_PROBE_SELECTED':'1','GT5P_PROBE_QUICK_SELECTED':'1'}, [], 'preparation/0123456789abcdef01234567/shadercache', True, 1),
                  ('check-error', {'GT5P_PROBE_SELECTED': 'error'}, [], None, False, 1),
                  ('background-disabled', {'GT5P_PREPARE_BACKGROUND': '0', 'GT5P_PREPARE_OFFER': '0'}, [], None, False, 0),
                  ('offer-disabled', {'GT5P_PREPARE_OFFER': '0'}, [], None, False, 0),
@@ -64,6 +65,7 @@ def main():
             (data/'input').mkdir(parents=True)
             (data/'input/EMAIN.ELF').write_bytes(elf)
             (data/'setup.ini').write_text('[game]\ndirectory='+str(disc)+'\n', encoding='utf-16')
+            (data/'gt5p_settings.toml').write_text('[video]\nresolution="720p"\naspect="16:9"\nmsaa=2\n')
             # Offer answered already: background mode must not depend on the old marker.
             (data/('prepare-offer-'+version+'.done')).write_text('answered\n')
             if pointer:
@@ -110,8 +112,8 @@ def main():
                     assert len((data/'restart-pids.txt').read_text(encoding='utf-8-sig').split()) == 2, (label, 'no restart')
             if label == 'already-prepared':
                 # Remembered: the next launch does not ask the helper again.
-                remembered = data/('prepare-current-'+version+'.txt')
-                assert remembered.read_text(encoding='utf-8') == pointer, (label, 'not remembered')
+                remembered = data/('prepare-full-current-'+version+'.txt')
+                assert remembered.read_text(encoding='utf-8').startswith(pointer+'\n'), (label, 'not remembered')
                 again = subprocess.run([launcher], env=dict(env, GT5P_PROBE_DELAY_MS='0'), timeout=30)
                 assert again.returncode == 0 and (data/'check.txt').read_text(encoding='utf-8-sig').count('argc=') == 1, label
                 assert not record.exists(), label
