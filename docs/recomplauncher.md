@@ -15,7 +15,9 @@ listed, the next release carrying it is enough.
   and verifies the disc folder itself, so RecompLauncher does not ask a second time.
 - **Settings (level 2)** edit `gt5p_settings.toml` in place: resolution, aspect, window mode,
   MSAA, V-Sync, texture filtering, skip movie and button prompts, plus Smooth colour and Preload
-  known shaders under Advanced. Keys are `section/key`; RecompLauncher changes only those lines,
+  known shaders under Advanced. Development controls polish adds six Controls choices
+  (response, dead zone, standard-layout preset and three optional feedback settings);
+  see [controls-polish.md](controls-polish.md). These apply after restart. Keys are `section/key`; RecompLauncher changes only those lines,
   and reads the file again after the game closes, so F1 changes show on its page.
 - **`config.new`** writes the launcher's first-run preset (720p, 2x MSAA, background shader
   work, `[meta] defaults_version = 1`) when RecompLauncher starts the game before our launcher

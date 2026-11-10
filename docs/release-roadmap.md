@@ -67,6 +67,12 @@ Evidence for finished work goes in [progress.md](progress.md).
   - one-step "modern controls" (R2/L2 driving);
   - DualSense adaptive triggers at a fixed resistance, through SDL;
   - Xbox trigger rumble.
+  Development implementation on `feature/controls-polish`: F1 Controls/Feedback,
+  settings-neutral trigger shaping, a standard-layout host preset, and opt-in SDL2
+  fixed DualSense resistance / game-signal Xbox trigger vibration. SDL3 is deferred;
+  a connected DualSense accepts enable/clear API requests, but tactile and driving acceptance remain open. Arbitrary custom game
+  assignment rewriting remains open. See [controls-polish.md](controls-polish.md)
+  for exact switches, native evidence and hardware/transport gaps.
 - **Smaller items:**
   - texture-load warning indicator;
   - keyboard alongside a connected controller;
