@@ -9,6 +9,62 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 236 - Visible background preparation and deferred completion (2026-11-10)
+
+**Request.** Confirm broader preparation is running, show when it is paused for
+races, and notify the player when it is done without interrupting racing.
+
+**Behavior.** The existing launcher watcher owns a small bottom-left, click-through
+overlay. Preparing means the helper is running; Paused means its owned processes
+were actually suspended. Success comes only from the owned helper exiting with
+code zero, after its existing selection/publication contract. It never treats an
+intermediate Complete status line as whole-job success. Failure/cancellation while
+playing shows Incomplete in non-race screens, with normal play still available.
+
+The completion notice is hidden while the race event is set and waits for it to
+clear in menus. After eight visible seconds it becomes a smaller Ready for next
+launch status. Focus loss/minimization hides the overlay and pauses that notice
+timer; settings restarts retain the helper/notice and reattach to the new game
+window. No input, activation, taskbar entry or modal prompt. Race suspension stays
+on by default. Its rollback does not disable notification deferral: the same event
+is observed even when suspension is disabled, and Preparing remains the truthful
+status in that mode. Quitting retains the existing checkpoint cancellation.
+
+`GT5P_PREPARE_BACKGROUND_INDICATOR=0` disables this UI only;
+`GT5P_PREPARE_BACKGROUND_PAUSE=0` and `GT5P_PREPARE_BACKGROUND=0` retain their
+independent controls. The overlay uses the existing watcher, with no file reads
+or new work on the renderer thread. View transitions are logged in
+`logs/prepare-background-status.txt`. No engine/runtime, template, shader key,
+preparation identity or publication change; the launcher alone is rebuilt.
+
+**Validation.** Through the machine-wide lock, the production launcher builds
+and passes all 15 background cases (including actual heartbeat pause/resume,
+indicator-only rollback and both switches off), and all 26 first-run/DXC/cleanup
+cases. The deterministic native policy test covers race/menu deferral, focus
+loss, exactly eight visible seconds, ready persistence and failure. The visible
+native UI fixture passes five scenarios: pause/resume plus settings restart,
+completion/ready, completion while racing with pause off, unsuccessful completion,
+and indicator-off with suspension still working. It checks foreign-window
+ownership after restart, click-through hit testing, unchanged foreground window,
+no success notification during racing, and no overlay surviving launcher exit.
+
+The final launcher is also exercised over the real 1080p/native-21:9/8x game
+window, with a synthetic timed helper to control the status transitions. Preparing,
+Complete and Ready appear; owned window shots are inspected, and all processes
+exit. Engine SHA remains `6d2e3a3e554869c7b861a1fcb2eb8677dc30099f1b0057db47b320c0172bdcf0`.
+This verifies real-window attachment/presentation, not a new real-helper full
+preparation, race timing or whole-game acceptance. Prior frozen-helper publication
+proof remains in Phase 235. Evidence: `scratch/u236/final-ui/validation.json`, its
+five fixture directories/screenshots, and `scratch/u236/real/validation.json` and
+owned game/overlay screenshots. All test stores/saves/caches are private copies.
+Read-only checks against the retained Phase 235 stores also remain unchanged:
+quick selection returns 0, requiring full for that selection returns 3, and the
+old full selection returns 0 (`scratch/u236/readiness.json`). No re-preparation
+or cache clearing is needed to add this launcher UI.
+
+See [background-preparation-status.md](background-preparation-status.md) for player
+states and controls. Work stays on `0.2.5`; no merge, tag or release.
+
 ## Phase 235 - Short foreground preparation for the current settings (2026-11-10)
 
 **Request.** Reduce the initial preparation to common menu/race pipelines for the

@@ -54,6 +54,9 @@ Evidence for finished work goes in [progress.md](progress.md).
   preparation retained explicitly and in the background. Fresh 1080p/21:9/8x wall time is 199 s versus
   978 s for the full baseline on the dev PC; coverage is intentionally smaller. Old caches remain intact,
   and cleanup waits for full completion. See [quick-preparation.md](quick-preparation.md).
+  Phase 236 adds a launcher-owned background status (Preparing / Paused during race), deferred
+  completion notice and Ready for next launch state, with no engine/cache identity change.
+  `GT5P_PREPARE_BACKGROUND_INDICATOR=0` hides the UI independently of work and race pausing.
 - **Render-target lifetime:** one investigation into targets reused by address
   after a scene change:
   - the yellow menu glow after a race;

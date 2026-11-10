@@ -32,6 +32,11 @@ straight away. It pauses during races (from the grid preview's Start) and
 stops when you quit, then carries on next time. When it has finished, the next
 launch uses the full preparation. If a short preparation is ready, it reuses that
 cache and skips the race-first step. Logs: logs\prepare-background.out/.err.
+The bottom-left status confirms Preparing or Paused during race. When full
+preparation finishes, a brief notice waits until you are outside racing, then
+shows Ready for next launch. Switching away/minimizing hides the status and
+pauses its notice timer. GT5P_PREPARE_BACKGROUND_INDICATOR=0 hides this UI only;
+race pausing and background preparation keep their independent controls.
 Set GT5P_PREPARE_BACKGROUND=0 to turn it off (the launcher then offers
 preparation once instead), or GT5P_PREPARE_BACKGROUND_PAUSE=0 to keep it
 running during races.

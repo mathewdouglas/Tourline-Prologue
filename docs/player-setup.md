@@ -42,8 +42,16 @@ launch resumes. `logs/prepare-background-pause.txt` records the pauses.
   processors). `GT5P_PREPARE_OFFER=0`, `GT5P_PREPARE_VOLUME=0` and `--no-prepared` start nothing.
 - A current full preparation is remembered in `prepare-full-current-<port version>.txt` with its
   selection/settings/compiler identity, so later launches skip the helper check.
-- Tests: `scripts/test/launcher_background_native.py` (13 scenarios against the probe),
+- Tests: `scripts/test/launcher_background_native.py` (15 scenarios against the probe),
   `scripts/test/background_preparation.py`. Measurements: docs/progress.md Phase 225.
+
+Phase 236 adds a small bottom-left Preparing / Paused during race status, followed
+by a completion notice and Ready for next launch. Completion waits while racing;
+switching away or minimizing hides it and pauses its eight-second visible timer.
+`GT5P_PREPARE_BACKGROUND_INDICATOR=0` hides the status only. Race pausing and
+background work retain their independent switches. See
+[background-preparation-status.md](background-preparation-status.md) for states,
+failure handling and validation. The visible native UI fixture adds five scenarios.
 
 ## First-launch preparation offer, preload default and indicators (v0.2.4)
 

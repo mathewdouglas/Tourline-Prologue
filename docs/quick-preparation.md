@@ -24,6 +24,11 @@ race-first stage when a current short generation is selected. The current game
 keeps its selected short cache; the full result is selected for the next launch.
 `GT5P_PREPARE_BACKGROUND=0` disables that continuation.
 
+The launcher shows Preparing or Paused during race in the bottom-left corner.
+Successful full completion produces a brief notice outside racing, then Ready
+for next launch. `GT5P_PREPARE_BACKGROUND_INDICATOR=0` hides this UI without
+disabling work or race pausing. See [background-preparation-status.md](background-preparation-status.md).
+
 Older completed full preparations still count as full. No old generation is
 deleted or invalidated merely by adding this mode. The optional old-cache cleanup
 offer is scheduled after full completion, not after replacing a broad cache with

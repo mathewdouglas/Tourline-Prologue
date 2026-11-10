@@ -27,7 +27,8 @@ class Windows:
             ('BringWindowToTop',W.BOOL,[W.HWND]),('PeekMessageW',W.BOOL,[C.POINTER(W.MSG),W.HWND,W.UINT,W.UINT,W.UINT]),
             ('GetWindowRect',W.BOOL,[W.HWND,C.POINTER(W.RECT)]),('GetWindowDC',W.HDC,[W.HWND]),
             ('ReleaseDC',C.c_int,[W.HWND,W.HDC]),('PrintWindow',W.BOOL,[W.HWND,W.HDC,W.UINT]),
-            ('SendMessageW',W.LPARAM,[W.HWND,W.UINT,W.WPARAM,W.LPARAM])):
+            ('SendMessageW',W.LPARAM,[W.HWND,W.UINT,W.WPARAM,W.LPARAM]),
+            ('PostMessageW',W.BOOL,[W.HWND,W.UINT,W.WPARAM,W.LPARAM])):
             fn=getattr(u,name);fn.restype=result;fn.argtypes=arguments
         u.EnumWindows.argtypes=[self.callback,W.LPARAM]
         k.OpenEventW.argtypes=[W.DWORD,W.BOOL,W.LPCWSTR];k.OpenEventW.restype=W.HANDLE

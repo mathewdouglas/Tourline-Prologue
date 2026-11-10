@@ -36,13 +36,20 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 235)
+## Start here: state of play (2026-11-10, Phase 236)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 235 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 236 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **Background preparation status (Phase 236):** a launcher-owned bottom-left status shows Preparing or
+  Paused during race. Successful helper exit defers the completion notice while racing, then shows Ready
+  for next launch after eight visible seconds. Failure shows Incomplete. It follows settings restarts,
+  hides when minimized/unfocused and takes no input/focus. `GT5P_PREPARE_BACKGROUND_INDICATOR=0` hides it;
+  race pausing remains independently controlled by `GT5P_PREPARE_BACKGROUND_PAUSE`. No engine/cache identity
+  change. Native process/UI checks and real-window presentation pass; see docs/background-preparation-status.md.
 
 - **Short foreground preparation (Phase 235, 0.2.5):** Prepare shaders now builds the observed menu/race union
   (3,546 inputs), mapped to the saved translation and MSAA; catalogue/interpreter work stays in full preparation.
