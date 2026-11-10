@@ -1,5 +1,34 @@
 # Controls polish test build
 
+Current local Windows x64 test ZIP from `feature/controls-polish`, head
+`79ecafc80a0ce6c8f545a7d02ecc330d40517082`. No main merge, tag or release.
+
+Artifact (ignored):
+`scratch/controls/test-build-79ecafc-final/tourline-prologue-v0.2.5-controls-test-79ecafc-windows-x64.zip`
+
+Size: 103,903,698 bytes; 309 files.
+SHA-256: `74d8c47d5280b305ac99968095350e75712b723f85caccb818678344f17e9c00`.
+Engine SHA-256: `c97b9005cf4226f44e4d947dfa0ec36ac79c70db3d85ee8bead610fa9936acfd`.
+
+Extract the entire ZIP into a fresh folder and run **tourline-prologue.exe**.
+This build adds the vibration follow-up on top of the native modern-controls link:
+the 128-byte capability response, Bluetooth enhanced reports when feedback is
+enabled, and F1 **Test controller vibration**. A Bluetooth DualSense player felt
+two probe pulses. The F1 button logged `low=24576 high=24576 result=0 test=1`.
+Race strength and timing still need a play test. Turn on the game's Vibration
+Function as well, then Restart after enabling SDL controller vibration.
+
+Packaging used the locked wrapper. The verified 0.2.5 launcher, helper, DLLs,
+assets and licenses are retained. The engine and manifest are replaced, and
+`release.ini` carries the new engine digest. Base SHA-256, ZIP CRC, unique
+paths, every payload hash, release engine/helper hashes and all 70 helper
+manifest files pass. The 15-setting manifest passes. No game data, settings,
+saves or caches are included. Evidence is `validation.json` beside the ZIP.
+
+The `1c7cb3e` ZIP below predates the vibration fixes.
+
+## Previous native-mapping package
+
 Updated local Windows x64 test ZIP from `feature/controls-polish`, implementation
 head `1c7cb3e4bfddeca0b9d6bd4417a2804a4634a018`. No main merge, tag or release.
 

@@ -106,3 +106,6 @@ route delivered **721** nonzero guest requests with body output disabled, so
 those commands were not forwarded to the controller. USB DualSense, DualSense
 Edge, Xbox trigger/body motors, Steam Input and DS4Windows remain unverified.
 No invented ABS, wheel-slip, RPM or other vehicle signal is used.
+
+Local test ZIP, head `79ecafc`, is recorded in
+[test-build-controls.md](test-build-controls.md). It is not a release.
