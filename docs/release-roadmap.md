@@ -73,6 +73,12 @@ Evidence for finished work goes in [progress.md](progress.md).
   fixed DualSense resistance / game-signal Xbox trigger vibration. SDL3 is deferred;
   a connected DualSense accepts enable/clear API requests, but tactile and driving acceptance remain open. F1 detects the in-game mapping and No restores only the four defaults. See [controls-polish.md](controls-polish.md)
   for exact switches, native evidence and hardware/transport gaps.
+  The vibration follow-up fixes the 128-byte guest capability response, requests
+  Bluetooth enhanced reports on feedback opt-in, and adds an F1 vibration test.
+  The player felt two Bluetooth DualSense probe pulses. The F1 test logged an
+  accepted 250 ms body pulse (`low=24576 high=24576 result=0`). The corrected HSR
+  route delivers 721 nonzero guest motor requests with body output left disabled.
+  Race strength and timing still need a play test. See [controller-vibration.md](controller-vibration.md).
 - **Smaller items:**
   - texture-load warning indicator;
   - keyboard alongside a connected controller;

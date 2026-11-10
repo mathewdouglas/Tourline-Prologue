@@ -1,6 +1,5 @@
 /* Standalone Windows integration checks against the runtime sources.
- * SDL virtual pads are process-local. Audio uses real WASAPI streams behind
- * a test enumerator; no OS devices or default-output settings are changed. */
+ * SDL virtual pads are process-local; synthetic outputs use API spies. */
 #include "libs/input/cellPad.c"
 
 
@@ -120,10 +119,11 @@ static void test_pad_worker(void)
 }
 
 
-static int body_calls, trigger_calls, effect_calls, fail_effect;
+static int body_calls, trigger_calls, effect_calls, fail_effect, fail_body;
+static u32 got_ms;
 static u16 got_left, got_right;
 static u8 got_packet[47];
-static int fake_body(void* p,u16 l,u16 r,u32 ms) { body_calls++; CHECK(ms==1000); got_left=l;got_right=r;return 0; }
+static int fake_body(void* p,u16 l,u16 r,u32 ms) { body_calls++; CHECK(ms==1000 || ms==250); got_ms=ms; got_left=l;got_right=r;return fail_body?-1:0; }
 static int fake_triggers(void* p,u16 l,u16 r,u32 ms) { trigger_calls++; CHECK(ms==1000);return 0; }
 static int fake_has(void* p) { return 1; }
 static int fake_effect(void* p,const void* b,int n) { effect_calls++;CHECK(n==47);memcpy(got_packet,b,47);return fail_effect?-1:0; }
@@ -149,6 +149,64 @@ static void test_effects(void)
     s_sdl.GameControllerRumble=NULL;s_sdl.GameControllerRumbleTriggers=NULL;s_sdl.GameControllerSendEffect=NULL;
     pad_sdl_effects(0,2000,0);s_sdl_pad[0]=NULL;
     puts("PASS: effect packet, game motor levels, 400ms renewal, stop, resume, failure suppression, missing exports");
+}
+static void test_capability_size(void) {
+    CHECK(sizeof(CellPadCapabilityInfo)==128);
+    vm_base=(uint8_t*)malloc(0x20000);CHECK(vm_base);ppu_vm_size=0x20000;s_pad_initialized=1;
+    for(unsigned p=0;p<CELL_PAD_MAX_PORT_NUM;p++) {
+        memset(vm_base,0xA5,0x20000);
+        CHECK(cellPadGetCapabilityInfo(p,(CellPadCapabilityInfo*)(uintptr_t)0x10000)==CELL_OK);
+        CHECK(vm_read32(0x10000)&CELL_PAD_CAPABILITY_ACTUATOR);
+        for(unsigned i=4;i<128;i++)CHECK(vm_base[0x10000+i]==0);
+        for(unsigned i=0;i<0x20000;i++)if(i<0x10000 || i>=0x10080)CHECK(vm_base[i]==0xA5);
+    }
+    _putenv_s("PAD_CAPABILITY_INFO_FIX","0");memset(vm_base,0xA5,0x20000);
+    CHECK(cellPadGetCapabilityInfo(0,(CellPadCapabilityInfo*)(uintptr_t)0x10000)==CELL_OK);
+    for(unsigned i=128;i<256;i++)CHECK(vm_base[0x10000+i]==0); // Reproduce the previous overwrite.
+    _putenv_s("PAD_CAPABILITY_INFO_FIX","");
+    free(vm_base);vm_base=NULL;
+    puts("PASS: 128-byte capability ABI for all seven ports, big-endian actuator flag, guard bytes intact; legacy rollback reproduces overwrite");
+}
+static int hint_calls;
+static int fake_hint(const char* key,const char* value) {
+    CHECK(!strcmp(value,"1"));
+    CHECK(!strcmp(key,"SDL_JOYSTICK_HIDAPI_PS5_RUMBLE") || !strcmp(key,"SDL_JOYSTICK_HIDAPI_PS4_RUMBLE"));
+    hint_calls++;return 1;
+}
+static void test_feedback_hints(void) {
+    s_sdl.SetHint=fake_hint;
+    _putenv_s("PAD_SDL_RUMBLE","");_putenv_s("PAD_ADAPTIVE_TRIGGERS","");
+    pad_feedback_hints();CHECK(hint_calls==0);
+    _putenv_s("PAD_SDL_RUMBLE","1");pad_feedback_hints();CHECK(hint_calls==2);
+    _putenv_s("PAD_SDL_ENHANCED_REPORTS","0");pad_feedback_hints();CHECK(hint_calls==2);
+    _putenv_s("PAD_SDL_ENHANCED_REPORTS","");_putenv_s("PAD_CONTROLS_POLISH","0");pad_feedback_hints();CHECK(hint_calls==2);
+    _putenv_s("PAD_CONTROLS_POLISH","");_putenv_s("PAD_SDL_RUMBLE","");_putenv_s("PAD_ADAPTIVE_TRIGGERS","1");pad_feedback_hints();CHECK(hint_calls==4);
+    puts("PASS: enhanced reports only with feedback opt-in; dedicated and master rollbacks");
+}
+static void test_guest_feedback(void) {
+    vm_base=(uint8_t*)calloc(1,0x20000);CHECK(vm_base);ppu_vm_size=0x20000;
+    s_pad_initialized=1;s_sdl_ok=1;s_sdl_pad[0]=(void*)1;s_sdl_type[0]=0;
+    s_sdl.GameControllerRumble=fake_body;s_sdl.GameControllerRumbleTriggers=fake_triggers;
+    s_sdl.GameControllerHasRumbleTriggers=fake_has;
+    vm_base[0x10000]=1;vm_base[0x10001]=128;
+    CHECK(cellPadSetActDirect(0,(CellPadActParam*)(uintptr_t)0x10000)==CELL_OK);
+    CHECK(s_effect_request[0]==0xffff8080u);
+    pad_sdl_effects(0,1000,1);CHECK(got_left==32896 && got_right==65535 && body_calls==1);
+    pad_sdl_effects(0,1001,2);CHECK(!got_left && !got_right && !s_effect_request[0]);
+    int triggered=trigger_calls;
+    CHECK(pad_feedback_test()==1);unsigned long long until=s_feedback_test_until;
+    pad_sdl_effects(0,until-249,2);CHECK(pad_feedback_test_status()==2 && got_left==24576 && got_right==24576 && got_ms==250);
+    CHECK(trigger_calls==triggered); // Test is body only, even with trigger vibration enabled.
+    pad_sdl_effects(0,until,2);CHECK(!got_left && !got_right && !s_feedback_test_until);
+    CHECK(pad_feedback_test()==1);pad_sdl_effects(0,s_feedback_test_until-249,0);CHECK(pad_feedback_test_status()==-5 && !s_feedback_test_until);
+    CHECK(pad_feedback_test()==1);s_sdl_pad[0]=NULL;pad_sdl_effects(0,s_feedback_test_until-249,2);CHECK(pad_feedback_test_status()==-2);
+    s_sdl_pad[0]=(void*)1;CHECK(pad_feedback_test()==1);pad_sdl_effects(0,s_feedback_test_until+1,2);CHECK(pad_feedback_test_status()==-6);
+    fail_body=1;CHECK(pad_feedback_test()==1);pad_sdl_effects(0,s_feedback_test_until-249,2);CHECK(pad_feedback_test_status()==-3 && s_body_error[0]);
+    pad_sdl_effects(0,s_feedback_test_until,2);CHECK(!got_left && !got_right);fail_body=0;
+    _putenv_s("PAD_CONTROLS_POLISH","0");CHECK(pad_feedback_test()==-4);_putenv_s("PAD_CONTROLS_POLISH","");
+    _putenv_s("PAD_FEEDBACK_TEST","0");CHECK(pad_feedback_test()==-7);
+    s_sdl_pad[0]=NULL;s_sdl_ok=0;free(vm_base);vm_base=NULL;
+    puts("PASS: real guest actuator bytes to SDL, F1-only 250ms body test, timed stop, focus loss, no device, expiry, API failure and rollbacks");
 }
 static void test_shapes(void)
 {
@@ -208,6 +266,9 @@ int main(int argc,char** argv)
     else if(!strcmp(argv[1],"fallback")) { CHECK(!pad_sdl_dyn_read());pad_poll_xinput();puts("PASS: no-SDL XInput fallback"); }
     else if(!strcmp(argv[1],"hardware"))test_hardware();
     else if(!strcmp(argv[1],"effects"))test_effects();
+    else if(!strcmp(argv[1],"capability-size"))test_capability_size();
+    else if(!strcmp(argv[1],"feedback-hints"))test_feedback_hints();
+    else if(!strcmp(argv[1],"guest-feedback"))test_guest_feedback();
     else if(!strcmp(argv[1],"ports"))test_pad_ports();
     else if(!strcmp(argv[1],"worker"))test_pad_worker();
     else if(!strcmp(argv[1],"devices")) { CHECK(pad_sdl_dyn_init());pad_sdl_dyn_scan();printf("DEVICES %d\n",s_sdl.NumJoysticks()); }

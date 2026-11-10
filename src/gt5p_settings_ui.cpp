@@ -57,6 +57,8 @@ extern "C" {
 extern volatile int g_pad_input_blocked;        /* cellPad.c */
 extern volatile uint32_t g_pad_menu_buttons;    /* cellPad.c: bit 16 = PS button */
 extern volatile uint32_t g_pad_inject_buttons;  /* cellPad.c: pressed for the title on port 0 */
+int pad_feedback_test(void);
+int pad_feedback_test_status(void);
 void pad_set_keyboard_enabled(int on);          /* cellPad.c */
 void rsx_d3d12_set_present_sync(int interval);  /* rsx_d3d12_backend.c */
 void gt5p_shader_indicator_enable(int on);      /* gt5p_shaderbusy.cpp */
@@ -88,7 +90,7 @@ struct Item {
     void (*set)(Gt5pSettings&, int);
     void (*apply)(int);                      /* live; nullptr: after a restart */
     int key = -1;                            /* a keyboard binding: its button (gt5p_keymap.h) */
-    int action = 0;                         /* launcher-owned tool; activated only with Enter/Cross/click */
+    int action = 0;                         /* explicit action; Enter/Cross/click, never Left/Right */
 };
 
 const std::vector<Choice> kOnOff = { {1, L"On"}, {0, L"Off"} };
@@ -220,10 +222,13 @@ const std::vector<Item>& items()
           [](const Gt5pSettings& s) { return (int)s.trigger_rumble; },
           [](Gt5pSettings& s, int v) { s.trigger_rumble = v; }, nullptr },
         { L"FEEDBACK", L"SDL controller vibration",
-          L"Experimental: forwards the game's vibration commands to SDL controller body motors. Independent of trigger rumble; unsupported devices ignore it. Restart to apply.",
+          L"Forwards the game's vibration commands to controller body motors. Also turn on player-one vibration in the game's Options > Hardware > Vibration Settings. Bluetooth DualSense uses enhanced reports; power cycle it before using DirectInput in another app if needed. Restart to apply.",
           "PAD_SDL_RUMBLE", kOnOff,
           [](const Gt5pSettings& s) { return (int)s.sdl_rumble; },
           [](Gt5pSettings& s, int v) { s.sdl_rumble = v; }, nullptr },
+        { L"FEEDBACK", L"Test controller vibration",
+          L"A short player-one body-motor pulse, independent of race events and the game's vibration setting. Enable SDL controller vibration and Restart first. Keep this game focused. SDL acceptance does not prove a physical vibration was felt.",
+          "PAD_FEEDBACK_TEST", {}, [](const Gt5pSettings&) { return 0; }, [](Gt5pSettings&, int) {}, nullptr, -1, 4 },
         KEY_ITEM(0, L"Cross"),  KEY_ITEM(1, L"Circle"), KEY_ITEM(2, L"Square"), KEY_ITEM(3, L"Triangle"),
         KEY_ITEM(4, L"L1"),     KEY_ITEM(5, L"R1"),     KEY_ITEM(6, L"L2"),     KEY_ITEM(7, L"R2"),
         KEY_ITEM(8, L"L3"), KEY_ITEM(9, L"R3"), KEY_ITEM(10, L"Start"), KEY_ITEM(11, L"Select"),
@@ -462,8 +467,26 @@ void set_value(int id, int v);
 
 void reset_keys();
 
+bool s_feedback_waiting;
+void feedback_status(int status)
+{
+    switch(status) {
+    case 1: s_status=L"Testing controller vibration for 250 ms..."; break;
+    case 2: s_status=L"SDL accepted the test. If nothing was felt, check the controller connection."; break;
+    case -2: s_status=L"No SDL controller is available on player one."; break;
+    case -3: s_status=L"SDL could not vibrate this controller. See the game log for its error."; break;
+    case -4: s_status=L"Enable SDL controller vibration, then choose Restart before testing."; break;
+    case -5: s_status=L"Vibration test stopped because the game lost focus."; break;
+    case -6: s_status=L"Vibration test expired before SDL could send it. Try again."; break;
+    case -7: s_status=L"PAD_FEEDBACK_TEST=0 disables the vibration test."; break;
+    }
+}
 void pipeline_tool(int action)
 {
+    if (action==4) {
+        int result=pad_feedback_test(); feedback_status(result); s_feedback_waiting=result==1;
+        return;
+    }
     if (!tourline_restart::tools_available()) {
         s_status = getenv("RSX_PSO_PROVENANCE") ?
             L"Collection is already active. Close the game to finish and verify it." :
@@ -1669,6 +1692,10 @@ DWORD WINAPI ui_thread(LPVOID)
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         if (!IsWindow(s_game)) return 0;
 
+        if(s_feedback_waiting) {
+            int result=pad_feedback_test_status();
+            if(result!=1) { s_feedback_waiting=false; feedback_status(result); if(s_open)redraw(); }
+        }
         static int modern_was=-2;
         int modern_now=gt5p_modern_controls_state();
         if(modern_now>=0 && !gt5p_modern_controls_pending() && modern_now!=modern_was) {

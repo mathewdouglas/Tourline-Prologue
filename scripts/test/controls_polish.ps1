@@ -24,7 +24,7 @@ $compileMap | Set-Content "$dir/build-map.cmd"
 if ($LASTEXITCODE) { throw 'Mapping compile failed' }
 & "$dir/mapping.exe"
 if ($LASTEXITCODE) { throw 'Native mapping test failed' }
-foreach($mode in $(if ($Hardware) { @('hardware') } else { @('shapes','packets','effects','devices','ports','worker') })) {
+foreach($mode in $(if ($Hardware) { @('hardware') } else { @('shapes','packets','effects','capability-size','feedback-hints','guest-feedback','devices','ports','worker') })) {
  & "$dir/controls.exe" $mode
  if ($LASTEXITCODE) { throw "Failed $mode" }
 }

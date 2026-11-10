@@ -8,7 +8,8 @@
     {
       "patch": "patches/ps3recomp-controls-polish.patch",
       "files": {
-        "libs/input/cellPad.c": "a98629dd4f133562cf3e75862ab996b84bf56773dd741eea156deb1368d4388d"
+        "libs/input/cellPad.c": "a720a22a68b408f8ce1bd00c4918da83c16d8a00196637786d94f5a5c969710c",
+        "libs/input/cellPad.h": "f6cc06be31308b070619a3d0ec50df9fdf5a92df501ef5f0bbe9c077a17f890b"
       }
     }
   ]

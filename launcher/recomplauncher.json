@@ -293,7 +293,7 @@
       "id": "sdl_rumble",
       "label": "SDL Controller Vibration",
       "group": "Controls",
-      "help": "Experimental: forward the game's body-motor commands through SDL2. Restart to apply.",
+      "help": "Forward the game's body-motor commands through SDL2. Also enable the game's Vibration Function. Bluetooth DualSense uses enhanced reports; power cycle before using DirectInput in another app if needed. Restart to apply.",
       "choices": [
         {
           "label": "Off",

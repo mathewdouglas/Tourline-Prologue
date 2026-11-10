@@ -76,7 +76,7 @@ APIs retain normal input. A failed adaptive request is reported once and suppres
 until device replacement. Xbox trigger vibration is gated by SDL's capability query;
 XInput alone cannot supply trigger-motor output.
 
-Output is suppressed while F1 blocks game input, while unfocused, or after 250 ms
+Ordinary game output is suppressed while F1 blocks game input, while unfocused, or after 250 ms
 without a host input poll. Vibration requests last 1,000 ms and renew every 400 ms;
 inactive output clears queued levels so old vibration does not resume on focus
 return. Disconnect clears queued state before another device can occupy the port.
@@ -206,3 +206,12 @@ Fresh-process reload of that modern save also passes: with a new PC settings
 file (default false), F1 shows Yes and the native tuple is 9/10/5/4 without any
 host mapping request. This confirms persistence uses the game save, not a TOML
 preset replay. Evidence: `scratch/controls/native-mapping/{accept,save.log,reload}`.
+
+The [controller vibration follow-up](controller-vibration.md) corrects the capability
+response ABI (128 bytes), enables the required Bluetooth reports on feedback opt-in,
+and adds an explicit 250 ms F1 body-vibration test with result/error reporting. Only
+that requested test can run while F1 blocks game output. A Bluetooth DualSense
+player felt two probe pulses. The F1 button then logged an accepted body pulse
+(`low=24576 high=24576 result=0 test=1`). Race strength and timing remain a play
+test: the 721 guest motor requests were captured with body output disabled.
+The early test builds above predate these corrections.

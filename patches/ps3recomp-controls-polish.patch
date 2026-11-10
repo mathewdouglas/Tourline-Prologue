@@ -1,5 +1,5 @@
 diff --git a/libs/input/cellPad.c b/libs/input/cellPad.c
-index c20a298..1c73cfd 100644
+index c20a298..337e236 100644
 --- a/libs/input/cellPad.c
 +++ b/libs/input/cellPad.c
 @@ -103,6 +103,9 @@ volatile u32 g_pad_menu_buttons;
@@ -59,13 +59,14 @@ index c20a298..1c73cfd 100644
      if (g_pad_milestone_hook) g_pad_milestone_hook(b);
      if (g_pad_screen_hook) g_pad_screen_hook(b);
      if (!on) return;
-@@ -929,12 +965,79 @@ static struct {
+@@ -929,12 +965,123 @@ static struct {
      void* (*GameControllerGetJoystick)(void*);
      int   (*JoystickInstanceID)(void*);
      const char* (*GetError)(void);
 +    int   (*GameControllerRumble)(void*, u16, u16, u32);
 +    int   (*GameControllerRumbleTriggers)(void*, u16, u16, u32);
 +    int   (*GameControllerHasRumbleTriggers)(void*);
++    int   (*GameControllerHasRumble)(void*);
 +    int   (*GameControllerSendEffect)(void*, const void*, int);
      int   (*GameControllerGetType)(void*);   /* optional: SDL 2.0.12 */
  } s_sdl;
@@ -91,6 +92,30 @@ index c20a298..1c73cfd 100644
 +    packet[10] = packet[21] = on ? 0x01 : 0x05;
 +    if (on) packet[12] = packet[23] = 110;
 +}
++/* The F1 test is an explicit, bounded body-motor pulse on player one.
++ * Only this pulse may run while the settings page blocks ordinary game output. */
++static unsigned long long s_feedback_test_until;
++static int s_feedback_test_result;
++static u32 s_body_last[PAD_MAX_HOST_PORTS];
++static unsigned long long s_body_sent[PAD_MAX_HOST_PORTS];
++static int s_body_error[PAD_MAX_HOST_PORTS];
++static int pad_feedback_trace_enabled(void)
++{
++    static int on = -1;
++    if (on < 0) { const char* e=getenv("PAD_FEEDBACK_TRACE"); on=e && !strcmp(e,"1"); }
++    return on;
++}
++static void pad_feedback_hints(void)
++{
++    /* Opting into feedback also opts into the reports that Bluetooth PS4/PS5
++     * controllers need. SDL environment hints still have higher priority. */
++    const char* rollback=getenv("PAD_SDL_ENHANCED_REPORTS");
++    if ((!rollback || strcmp(rollback,"0")) &&
++        (pad_control_int("PAD_SDL_RUMBLE",1) || pad_control_int("PAD_ADAPTIVE_TRIGGERS",1))) {
++        s_sdl.SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE","1");
++        s_sdl.SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE","1");
++    }
++}
 +static void pad_sdl_effects(int i, unsigned long long now, int active)
 +{
 +    void* gc = s_sdl_pad[i];
@@ -98,17 +123,36 @@ index c20a298..1c73cfd 100644
 +    if (adaptive < 0) { adaptive = pad_control_int("PAD_ADAPTIVE_TRIGGERS", 1);
 +                       triggers = pad_control_int("PAD_TRIGGER_RUMBLE", 1);
 +                       body = pad_control_int("PAD_SDL_RUMBLE", 1); }
++    unsigned long long until=__atomic_load_n(&s_feedback_test_until,__ATOMIC_RELAXED);
++    int testing=i==0 && until;
++    if (testing && (!gc || !(active&2) || now>=until)) {
++        __atomic_store_n(&s_feedback_test_until,0,__ATOMIC_RELAXED);
++        if (!gc || !(active&2)) __atomic_store_n(&s_feedback_test_result,gc?-5:-2,__ATOMIC_RELAXED);
++        else if (__atomic_load_n(&s_feedback_test_result,__ATOMIC_RELAXED)==1)
++            __atomic_store_n(&s_feedback_test_result,-6,__ATOMIC_RELAXED);
++        testing=0;
++    }
 +    if (!gc) return;
-+    u32 levels = active ? __atomic_load_n(&s_effect_request[i], __ATOMIC_RELAXED) : 0;
++    u32 levels = (active&1) ? __atomic_load_n(&s_effect_request[i], __ATOMIC_RELAXED) : 0;
++    u32 body_levels=testing ? 0x60006000u : levels;
++    if (body && ((testing && __atomic_load_n(&s_feedback_test_result,__ATOMIC_RELAXED)==1) || body_levels!=s_body_last[i] || (body_levels && now-s_body_sent[i]>=PAD_RUMBLE_RENEW_MS))) {
++        int rc=s_sdl.GameControllerRumble ? s_sdl.GameControllerRumble(gc,(u16)body_levels,(u16)(body_levels>>16),testing?250:PAD_RUMBLE_HOLD_MS) : -1;
++        if (rc<0 && !s_body_error[i]) {
++            printf("[cellPad] port %d: SDL vibration failed: %s\n",i,!s_sdl.GameControllerRumble?"SDL rumble API unavailable":s_sdl.GetError?s_sdl.GetError():"SDL rumble error");
++            s_body_error[i]=1;
++        }
++        if (testing) __atomic_store_n(&s_feedback_test_result,rc<0?-3:2,__ATOMIC_RELAXED);
++        if (pad_feedback_trace_enabled() && body_levels && (!s_body_last[i] || now-s_body_sent[i]>=PAD_RUMBLE_RENEW_MS))
++            printf("[pad-feedback] port %d SDL body low=%u high=%u result=%d test=%d\n",i,(u16)body_levels,(u16)(body_levels>>16),rc,testing);
++        s_body_last[i]=body_levels; s_body_sent[i]=now;
++    }
 +    if (levels != s_effect_last[i] || (levels && now - s_effect_sent[i] >= PAD_RUMBLE_RENEW_MS)) {
-+        if (body && s_sdl.GameControllerRumble)
-+            s_sdl.GameControllerRumble(gc, (u16)levels, (u16)(levels >> 16), PAD_RUMBLE_HOLD_MS);
 +        if (triggers && s_sdl.GameControllerRumbleTriggers && s_sdl.GameControllerHasRumbleTriggers &&
 +            s_sdl.GameControllerHasRumbleTriggers(gc))
 +            s_sdl.GameControllerRumbleTriggers(gc, (u16)levels, (u16)(levels >> 16), PAD_RUMBLE_HOLD_MS);
 +        s_effect_last[i] = levels; s_effect_sent[i] = now;
 +    }
-+    int want = adaptive && active && s_sdl_type[i] == 7;
++    int want = adaptive && (active&1) && s_sdl_type[i] == 7;
 +    if (want != s_effect_adaptive[i] && (!s_effect_failed[i] || !want) && s_sdl.GameControllerSendEffect) {
 +        u8 packet[47]; pad_dualsense_packet(packet, want);
 +        if (s_sdl.GameControllerSendEffect(gc, packet, sizeof packet) < 0) {
@@ -120,14 +164,14 @@ index c20a298..1c73cfd 100644
 +        } else s_effect_adaptive[i] = want;
 +    }
 +    /* A focus/overlay loss must not revive an old vibration on return. */
-+    if (!active) __atomic_store_n(&s_effect_request[i], 0, __ATOMIC_RELAXED);
++    if (!(active&1)) __atomic_store_n(&s_effect_request[i], 0, __ATOMIC_RELAXED);
 +}
 +static int pad_effects_active(unsigned long long now)
 +{
 +    DWORD pid = 0;
 +    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
 +    unsigned long long poll = __atomic_load_n(&s_effect_poll_ms, __ATOMIC_RELAXED);
-+    return !g_pad_input_blocked && pid == GetCurrentProcessId() && poll && now - poll < 250;
++    return pid == GetCurrentProcessId() ? 2 | (!g_pad_input_blocked && poll && now-poll<250 ? 1 : 0) : 0;
 +}
 +static void pad_sdl_effects_exit(void)
 +{
@@ -139,18 +183,26 @@ index c20a298..1c73cfd 100644
  
  /* SDL_GameControllerType, else the name, to a g_pad_device_family code. */
  static int pad_sdl_family(void* gc)
-@@ -991,6 +1094,10 @@ static int pad_sdl_dyn_init(void)
+@@ -991,12 +1138,18 @@ static int pad_sdl_dyn_init(void)
      PAD_SDL_FN(GetError, "SDL_GetError")
  #undef PAD_SDL_FN
      *(FARPROC*)&s_sdl.GameControllerGetType = GetProcAddress(m, "SDL_GameControllerGetType");
 +    *(FARPROC*)&s_sdl.GameControllerRumble = GetProcAddress(m, "SDL_GameControllerRumble");
 +    *(FARPROC*)&s_sdl.GameControllerRumbleTriggers = GetProcAddress(m, "SDL_GameControllerRumbleTriggers");
 +    *(FARPROC*)&s_sdl.GameControllerHasRumbleTriggers = GetProcAddress(m, "SDL_GameControllerHasRumbleTriggers");
++    *(FARPROC*)&s_sdl.GameControllerHasRumble = GetProcAddress(m, "SDL_GameControllerHasRumble");
 +    *(FARPROC*)&s_sdl.GameControllerSendEffect = GetProcAddress(m, "SDL_GameControllerSendEffect");
      /* Watch OS device notifications in SDL's joystick thread; the owner below
       * pumps SDL events and reads input for our native (non-SDL) window. */
      s_sdl.SetHint("SDL_JOYSTICK_THREAD", "1");
-@@ -1005,6 +1112,7 @@ static int pad_sdl_dyn_init(void)
+     s_sdl.SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+     s_sdl.SetHint("SDL_JOYSTICK_HIDAPI_PS5", "1");
+     s_sdl.SetHint("SDL_JOYSTICK_HIDAPI_PS4", "1");
++    pad_feedback_hints();
+     s_sdl.SetMainReady();
+     if (s_sdl.Init(0x00002000u /* SDL_INIT_GAMECONTROLLER */) != 0) {
+         printf("[cellPad] SDL_Init failed: %s%c", s_sdl.GetError(), 10);
+@@ -1005,6 +1158,7 @@ static int pad_sdl_dyn_init(void)
      printf("[cellPad] SDL2 loaded: controllers are read through SDL%c", 10);
      fflush(stdout);
      s_sdl_ok = 1;
@@ -158,28 +210,59 @@ index c20a298..1c73cfd 100644
      return 1;
  }
  
-@@ -1056,6 +1164,9 @@ static void pad_poll_sdl_dyn(void)
+@@ -1029,11 +1183,25 @@ static void pad_sdl_dyn_scan(void)
+             printf("[cellPad] port %d: %s (type %d, family %d)%c", slot, nm ? nm : "controller",
+                    s_sdl.GameControllerGetType ? s_sdl.GameControllerGetType(s_sdl_pad[slot]) : -1,
+                    s_sdl_family[slot], 10);
++            printf("[cellPad] port %d feedback: SDL-body=%d trigger-motors=%d body-enabled=%d\n",slot,
++                   s_sdl.GameControllerHasRumble?s_sdl.GameControllerHasRumble(s_sdl_pad[slot]):-1,
++                   s_sdl.GameControllerHasRumbleTriggers?s_sdl.GameControllerHasRumbleTriggers(s_sdl_pad[slot]):-1,
++                   pad_control_int("PAD_SDL_RUMBLE",1));
+             fflush(stdout);
+         }
+     }
+ }
+ 
++static void pad_sdl_clear_feedback(int i)
++{
++    __atomic_store_n(&s_effect_request[i],0,__ATOMIC_RELAXED);
++    s_effect_last[i]=0; s_effect_sent[i]=0;
++    s_effect_adaptive[i]=s_effect_failed[i]=0;
++    s_body_last[i]=0; s_body_sent[i]=0; s_body_error[i]=0;
++    if(i==0 && __atomic_exchange_n(&s_feedback_test_until,0,__ATOMIC_RELAXED))
++        __atomic_store_n(&s_feedback_test_result,-2,__ATOMIC_RELAXED);
++}
++
+ static u8 pad_sdl_dyn_axis(int raw)
+ {
+     /* the same dead zone the XInput path uses */
+@@ -1056,6 +1224,7 @@ static void pad_poll_sdl_dyn(void)
          if (s_sdl_pad[i] && !s_sdl.GameControllerGetAttached(s_sdl_pad[i])) {
              s_sdl.GameControllerClose(s_sdl_pad[i]);
              s_sdl_pad[i] = NULL;
-+            __atomic_store_n(&s_effect_request[i], 0, __ATOMIC_RELAXED);
-+            s_effect_last[i] = 0; s_effect_sent[i] = 0;
-+            s_effect_adaptive[i] = s_effect_failed[i] = 0;
++            pad_sdl_clear_feedback(i);
              last_scan = 0;
              printf("[cellPad] port %d: controller removed\n", i);
              fflush(stdout);
-@@ -1070,6 +1181,10 @@ static void pad_poll_sdl_dyn(void)
+@@ -1069,9 +1238,15 @@ static void pad_poll_sdl_dyn(void)
+         memset(hs, 0, sizeof(*hs));
          hs->analog_lx = hs->analog_ly = hs->analog_rx = hs->analog_ry = 128;
          if (!gc || !s_sdl.GameControllerGetAttached(gc)) {
-             if (gc) { s_sdl.GameControllerClose(gc); s_sdl_pad[i] = NULL;
-+                      __atomic_store_n(&s_effect_request[i], 0, __ATOMIC_RELAXED);
-+                      s_effect_last[i] = 0; s_effect_sent[i] = 0;
-+                      s_effect_adaptive[i] = s_effect_failed[i] = 0;
-+                      last_scan = 0;
-                       printf("[cellPad] port %d: controller removed%c", i, 10); fflush(stdout); }
+-            if (gc) { s_sdl.GameControllerClose(gc); s_sdl_pad[i] = NULL;
+-                      printf("[cellPad] port %d: controller removed%c", i, 10); fflush(stdout); }
++            if (gc) {
++                s_sdl.GameControllerClose(gc); s_sdl_pad[i]=NULL;
++                pad_sdl_clear_feedback(i);
++                last_scan=0;
++                printf("[cellPad] port %d: controller removed\n",i); fflush(stdout);
++            }
              hs->connected = 0;
++            if(i==0 && __atomic_exchange_n(&s_feedback_test_until,0,__ATOMIC_RELAXED))
++                __atomic_store_n(&s_feedback_test_result,-2,__ATOMIC_RELAXED);
              continue;
-@@ -1111,6 +1226,7 @@ static void pad_poll_sdl_dyn(void)
+         }
+         static const struct { int sdl; u16 btn; } map[] = {
+@@ -1111,6 +1286,7 @@ static void pad_poll_sdl_dyn(void)
          hs->press_square   = (btns & CELL_PAD_CTRL_SQUARE)   ? 255 : 0;
          hs->press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
          hs->press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
@@ -187,7 +270,7 @@ index c20a298..1c73cfd 100644
      }
  }
  
-@@ -1129,7 +1245,7 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
+@@ -1129,7 +1305,7 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
  {
      int ok = pad_sdl_dyn_init();
      if (!ok) { SetEvent((HANDLE)ready); return 0; }
@@ -196,7 +279,7 @@ index c20a298..1c73cfd 100644
          s_sdl.PumpEvents();
          /* Input is read directly, so discard queued SDL events after pumping. */
          s_sdl.FlushEvents(0, 0xFFFFu);
-@@ -1143,6 +1259,8 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
+@@ -1143,6 +1319,8 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
          if (ready) { SetEvent((HANDLE)ready); ready = NULL; }
          Sleep(PAD_POLL_INTERVAL_MS);
      }
@@ -205,7 +288,7 @@ index c20a298..1c73cfd 100644
  }
  
  static int pad_sdl_dyn_read(void)
-@@ -1166,7 +1284,7 @@ static int pad_sdl_dyn_read(void)
+@@ -1166,7 +1344,7 @@ static int pad_sdl_dyn_read(void)
          started = 1;
          HANDLE ready = CreateEventW(NULL, TRUE, FALSE, NULL);
          HANDLE thread = ready ? CreateThread(NULL, 0, pad_sdl_worker, ready, 0, NULL) : NULL;
@@ -214,7 +297,38 @@ index c20a298..1c73cfd 100644
          if (ready) CloseHandle(ready);
          if (!thread) return 0;
      }
-@@ -1248,6 +1366,10 @@ static void pad_poll_backend(void)
+@@ -1182,6 +1360,30 @@ static int pad_sdl_dyn_read(void)
+ 
+ #endif /* PAD_BACKEND_XINPUT: SDL2 at run time */
+ 
++/* Host-only F1 API: no SDL handle crosses to the UI thread. */
++int pad_feedback_test(void)
++{
++#if PAD_BACKEND_XINPUT
++    const char* test=getenv("PAD_FEEDBACK_TEST");
++    if (test && !strcmp(test,"0")) return -7;
++    if (!pad_control_int("PAD_SDL_RUMBLE",1)) return -4;
++    if (!s_sdl_ok) return -2;
++    __atomic_store_n(&s_feedback_test_result,1,__ATOMIC_RELAXED);
++    __atomic_store_n(&s_feedback_test_until,GetTickCount64()+250,__ATOMIC_RELAXED);
++    return 1;
++#else
++    return -2;
++#endif
++}
++int pad_feedback_test_status(void)
++{
++#if PAD_BACKEND_XINPUT
++    return __atomic_load_n(&s_feedback_test_result,__ATOMIC_RELAXED);
++#else
++    return -2;
++#endif
++}
++
+ /* ---------------------------------------------------------------------------
+  * Poll dispatcher
+  * -----------------------------------------------------------------------*/
+@@ -1248,6 +1450,10 @@ static void pad_poll_backend(void)
      unsigned long long now = pad_now_ms();
      if (s_last_ms && now - s_last_ms < PAD_POLL_INTERVAL_MS) goto done;
      s_last_ms = now;
@@ -225,7 +339,7 @@ index c20a298..1c73cfd 100644
      /* A real pad streams reports at roughly this rate whether or not anything
       * changed, and libpad buffers them; a fresh sweep is a fresh report for
       * every port. cellPadGetData hands each one out exactly once. */
-@@ -1261,6 +1383,7 @@ static void pad_poll_backend(void)
+@@ -1261,6 +1467,7 @@ static void pad_poll_backend(void)
  #elif PAD_BACKEND_SDL2
      pad_poll_sdl2();
  #endif
@@ -233,7 +347,7 @@ index c20a298..1c73cfd 100644
  #ifdef _WIN32
      /* A PAD_HOLD script drives port 0 even with a controller plugged in;
       * otherwise an unattended run depends on what is connected. */
-@@ -1307,7 +1430,8 @@ static void pad_poll_backend(void)
+@@ -1307,7 +1514,8 @@ static void pad_poll_backend(void)
  #if PAD_BACKEND_XINPUT
        if (s_guide) all |= 1u << 16;
  #endif
@@ -243,22 +357,49 @@ index c20a298..1c73cfd 100644
        if (g_pad_input_blocked)
            for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) {
                PadHostState* hs = &s_host_state[i];
-@@ -1373,6 +1497,10 @@ s32 cellPadEnd(void)
+@@ -1373,6 +1581,11 @@ s32 cellPadEnd(void)
          return CELL_PAD_ERROR_NOT_OPENED;
  
      pad_lock();
 +#if PAD_BACKEND_XINPUT
 +    __atomic_store_n(&s_effect_poll_ms, 0, __ATOMIC_RELAXED);
++    __atomic_store_n(&s_feedback_test_until,0,__ATOMIC_RELAXED);
 +    for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) __atomic_store_n(&s_effect_request[i], 0, __ATOMIC_RELAXED);
 +#endif
      pad_shutdown_backend();
      pad_unlock();
  
-@@ -2017,6 +2145,12 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
+@@ -1988,8 +2201,12 @@ s32 cellPadGetCapabilityInfo(u32 port_no, CellPadCapabilityInfo* info)
+         return CELL_PAD_ERROR_INVALID_PARAMETER;
+ 
+     u32 info_ea = (u32)(uintptr_t)info;
+-    for (u32 i = 0; i < CELL_PAD_MAX_CODES; i++)
+-        vm_write32(info_ea + i * 4, 0);
++    /* GetCapabilityInfo has 32 words. GT5P allocates 0x80 bytes on its
++     * manager's stack; using the 64 button-data codes overwrote its saved
++     * capability-buffer pointer and made actuator support disappear. */
++    const char* legacy=getenv("PAD_CAPABILITY_INFO_FIX");
++    const u32 words=legacy && !strcmp(legacy,"0") ? 64u : 32u;
++    for (u32 i = 0; i < words; i++) vm_write32(info_ea + i * 4, 0);
+ 
+     /* Report standard DualShock 3 capabilities */
+     vm_write32(info_ea, CELL_PAD_CAPABILITY_PS3_CONFORMITY
+@@ -2017,6 +2234,23 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
      u16 lo, hi;
      pad_rumble_levels(param->motor[CELL_PAD_ACTUATOR_PARAM_SMALL],
                        param->motor[CELL_PAD_ACTUATOR_PARAM_LARGE], &lo, &hi);
 +#if PAD_BACKEND_XINPUT
++    if (pad_feedback_trace_enabled()) {
++        static u32 calls[PAD_MAX_HOST_PORTS], nonzero[PAD_MAX_HOST_PORTS];
++        static unsigned long long last[PAD_MAX_HOST_PORTS];
++        u32 n=__atomic_add_fetch(&calls[port_no],1,__ATOMIC_RELAXED);
++        u32 nz=lo||hi ? __atomic_add_fetch(&nonzero[port_no],1,__ATOMIC_RELAXED) : __atomic_load_n(&nonzero[port_no],__ATOMIC_RELAXED);
++        unsigned long long now=GetTickCount64(), was=__atomic_load_n(&last[port_no],__ATOMIC_RELAXED);
++        if (n==1 || ((lo||hi) && nz==1) || now-was>=1000) {
++            __atomic_store_n(&last[port_no],now,__ATOMIC_RELAXED);
++            printf("[pad-feedback] guest port=%u calls=%u nonzero=%u low=%u high=%u SDL=%d active-flags=%d\n",port_no,n,nz,lo,hi,s_sdl_ok,pad_effects_active(now));
++        }
++    }
 +    if (s_sdl_ok) {
 +        __atomic_store_n(&s_effect_request[port_no], (u32)lo | ((u32)hi << 16), __ATOMIC_RELAXED);
 +        return CELL_OK; /* SDL handles belong exclusively to their owner. */
@@ -267,3 +408,16 @@ index c20a298..1c73cfd 100644
      s_rumble[port_no].lo = lo;
      s_rumble[port_no].hi = hi;
  
+diff --git a/libs/input/cellPad.h b/libs/input/cellPad.h
+index b35fcb6..4a9aab3 100644
+--- a/libs/input/cellPad.h
++++ b/libs/input/cellPad.h
+@@ -158,7 +158,7 @@ typedef struct CellPadPeriphInfo {
+ 
+ /* Capability info for a specific port */
+ typedef struct CellPadCapabilityInfo {
+-    u32 info[CELL_PAD_MAX_CODES];
++    u32 info[32]; /* SDK capability response is 128 bytes, unlike pad button data. */
+ } CellPadCapabilityInfo;
+ 
+ /* Actuator (vibration) parameter */
