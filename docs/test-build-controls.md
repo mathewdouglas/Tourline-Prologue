@@ -18,8 +18,8 @@ environment name is fixed. Vibration behaviour is otherwise the same package:
 the 128-byte capability response, Bluetooth enhanced reports when feedback is
 enabled, and F1 **Test controller vibration**. A Bluetooth DualSense player felt
 two probe pulses. The F1 button logged `low=24576 high=24576 result=0 test=1`.
-Race strength and timing still need a play test. Turn on the game's Vibration
-Function as well, then Restart after enabling SDL controller vibration.
+The player reported this package working as expected in play. Turn on the game's
+Vibration Function as well, then Restart after enabling SDL controller vibration.
 
 Packaging used the locked wrapper. The verified 0.2.5 launcher, helper, DLLs,
 assets and licenses are retained. The engine and manifest are replaced, and

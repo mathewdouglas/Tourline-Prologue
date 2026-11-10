@@ -100,17 +100,15 @@ outputs with normalized hashes in `config/ps3recomp.json`; the main patch is int
   player had just felt. A following race launch was not started after a test
   window was reported stuck white and then closed.
 
-Remaining physical acceptance: collision and kerb vibration during a race,
-strength and timing, focus/F1/exit clearing, and reconnects. The corrected HSR
-route delivered **721** nonzero guest requests with body output disabled, so
-those commands were not forwarded to the controller. USB DualSense, DualSense
-Edge, Xbox trigger/body motors, Steam Input and DS4Windows remain unverified.
-No invented ABS, wheel-slip, RPM or other vehicle signal is used.
-
-A later play of that package stopped during startup with a null read. The fault
+The corrected HSR route delivered **721** nonzero guest requests with body
+output disabled, so those commands were not forwarded to the controller. A later
+play of the `79ecafc` package stopped during startup with a null read. The fault
 was F1 drawing the Debug page: Debug export has no environment name, and the
-modern-controls label passed it to `strcmp`. The vibration path was not on the
-faulting stack. Rows with no environment name are now skipped by that check.
+modern-controls label passed it to `strcmp`. Rows with no environment name are
+now skipped by that check. The player reported the fixed `d872f39` package
+working as expected in play. USB DualSense, DualSense Edge, Xbox trigger/body
+motors, Steam Input and DS4Windows remain unverified. No invented ABS,
+wheel-slip, RPM or other vehicle signal is used.
 
 Local test ZIP, head `d872f39`, is recorded in
 [test-build-controls.md](test-build-controls.md). It replaces `79ecafc` and is

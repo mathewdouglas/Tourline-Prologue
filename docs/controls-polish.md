@@ -220,4 +220,5 @@ A play of the vibration test package stopped in a null read while F1 was drawing
 the Debug page. Debug export has no environment name. The modern-controls label
 compared that empty name with `strcmp`. Drawing the row, changing it, and
 confirming it now treat a missing name as not the modern-controls row. The
-vibration path was not the faulting code.
+vibration path was not the faulting code. The player then reported the
+`d872f39` package working as expected in play.
