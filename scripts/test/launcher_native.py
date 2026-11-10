@@ -57,7 +57,11 @@ def main():
                 'version=03.00\nelf_sha256='+hashlib.sha256(elf).hexdigest()
                 +'\ngame_sha256='+engine_hash+'\n')
 
-        env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0')
+        # This fixture exercises launch/storage ownership with a stand-in helper.
+        # Its not-selected reply must not open an unrelated DXC migration offer.
+        # The real first-run offers are covered by launcher_first_run_native.py.
+        env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0',
+                   GT5P_PREPARE_OFFER='0')
         env.pop('GT5P_PROBE_DELAY_MS', None)
 
         def check(label, expected=0, extra=()):
