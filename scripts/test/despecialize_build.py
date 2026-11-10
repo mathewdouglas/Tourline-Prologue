@@ -44,7 +44,7 @@ def runtime_tree(dest, base_repo, overlays=()):
     subprocess.run(['git', 'clone', '-q', '-c', 'core.autocrlf=false', '--no-hardlinks', str(base_repo), str(dest)], check=True)
     git(dest, 'config', 'core.autocrlf', 'false')
     git(dest, 'checkout', '-q', '--detach', manifest['commit'])
-    for patch in [ROOT / manifest['patch'], *map(Path, overlays)]:
+    for patch in [ROOT / manifest['patch'], *[ROOT / o['patch'] for o in manifest.get('overlays', [])], *map(Path, overlays)]:
         git(dest, 'apply', '--whitespace=nowarn', str(patch))
     return dest
 

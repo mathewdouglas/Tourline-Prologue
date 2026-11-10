@@ -4,6 +4,7 @@ Never resets, stashes or overwrites an existing dirty checkout. The legacy
 shared runtime is left alone. PS3RECOMP_DIR or --path overrides the destination.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,10 @@ def main():
     args = parser.parse_args()
     path = args.path.resolve()
     patch = ROOT / manifest["patch"]
+    overlays = manifest.get("overlays", [])
+    excluded = sorted({name for overlay in overlays for name in overlay["files"]})
+    overlay_ok = all((path / name).is_file() and hashlib.sha256((path / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == digest
+                     for overlay in overlays for name, digest in overlay["files"].items())
     if not patch.is_file():
         raise SystemExit(f"Compatibility patch missing: {patch}")
     if not path.exists():
@@ -38,7 +43,7 @@ def main():
     if top != path or path == ROOT:
         raise SystemExit(f"Destination must be a separate runtime checkout: {path}")
     head = git(path, "rev-parse", "HEAD", check=False).stdout.strip()
-    if head == manifest["commit"] and not git(path, "apply", "--reverse", "--check", str(patch), check=False).returncode:
+    if head == manifest["commit"] and overlay_ok and not git(path, "apply", "--reverse", "--check", *["--exclude=" + name for name in excluded], str(patch), check=False).returncode:
         print(f"{manifest['version']} + GT5P compatibility patch present: {path}")
         return
     if args.check:
@@ -49,6 +54,9 @@ def main():
     git(path, "checkout", "--detach", manifest["commit"])
     git(path, "apply", "--check", str(patch))
     git(path, "apply", str(patch))
+    for overlay in overlays:
+        git(path, "apply", "--check", str(ROOT / overlay["patch"]))
+        git(path, "apply", str(ROOT / overlay["patch"]))
     print(f"Prepared {manifest['version']} + GT5P compatibility patch: {path}")
 
 

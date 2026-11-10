@@ -36,6 +36,12 @@ struct Gt5pSettings {
     /* [input] */
     bool sdl_controllers = true;    /* PlayStation / Switch / generic pads via SDL2.dll */
     bool keyboard        = true;    /* keyboard as pad 1 when no controller is connected */
+    int trigger_deadzone = 0;       /* 0..20 percent; rescale the remaining travel */
+    int trigger_curve = 0;          /* 0 linear, 1 gentle, 2 quick */
+    bool modern_controls = false;  /* host preset for standard Cross/Square game assignments */
+    bool adaptive_triggers = false; /* fixed DualSense resistance, experimental hardware */
+    bool trigger_rumble = false;    /* supported Xbox triggers: existing game motor signals */
+    bool sdl_rumble = false;        /* forward game body motors through dynamic SDL2 */
     int button_prompts   = 0;       /* 0 auto, 1 PlayStation, 2 Xbox, 3 Nintendo, 4 keyboard (gt5p_glyphs.h) */
 
     /* [keyboard]: the key (Windows virtual-key code, 0 none) for each button,

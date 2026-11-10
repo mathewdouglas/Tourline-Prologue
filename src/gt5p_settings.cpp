@@ -42,6 +42,7 @@ std::mutex g_skip_mu;              /* store and the in-game option both write sk
  * override it, and the settings page says so. */
 const char* const kEnvNames[] = {
     "GT5P_RESOLUTION", "RSX_MSAA", "RSX_PRESENT_SYNC", "RSX_SHADER_CACHE", "GT5P_SHADER_INDICATOR", "GT5P_PRELOAD_INDICATOR",
+    "PAD_TRIGGER_DEADZONE", "PAD_TRIGGER_CURVE", "PAD_MODERN_CONTROLS", "PAD_ADAPTIVE_TRIGGERS", "PAD_TRIGGER_RUMBLE", "PAD_SDL_RUMBLE",
     "PAD_NO_SDL", "PAD_NO_KEYBOARD", "PS3_VERBOSE",
     "GT5P_VBLANK_HZ", "SPURS_LANE_PIN", "SPURS_JL_SPU3", "RSX_SHADER_ASYNC", "RSX_SHADER_WARMUP", "RSX_PSO_ASYNC", "RSX_RACE_PREWARM", "PAD_SKIP_MOVIE",
 };
@@ -196,6 +197,12 @@ bool known_key(std::string_view section, std::string_view key)
         {"video", "vsync"},          {"video", "shader_cache"},
         {"video", "shader_indicator"}, {"video", "preload_indicator"}, {"video", "shader_precompile"}, {"video", "shader_warmup"}, {"video", "pipeline_async"}, {"video", "race_preload"},
         {"input", "sdl_controllers"}, {"input", "keyboard"}, {"input", "button_prompts"},
+        {"input", "trigger_deadzone"},
+        {"input", "trigger_curve"},
+        {"input", "modern_controls"},
+        {"input", "adaptive_triggers"},
+        {"input", "trigger_rumble"},
+        {"input", "sdl_rumble"},
         {"game", "skip_movie"},       {"game", "smooth_colour"},    {"game", "anisotropy"},
         {"performance", "vblank_hz"}, {"performance", "lane_pinning"},
         {"performance", "fifth_spu_lane"},
@@ -271,6 +278,20 @@ void parse_into(const toml::table& tbl, Gt5pSettings& s)
     read_bool(tbl["video"]["shader_precompile"], "video.shader_precompile", s.shader_precompile);
     read_bool(tbl["input"]["sdl_controllers"], "input.sdl_controllers", s.sdl_controllers);
     read_bool(tbl["input"]["keyboard"], "input.keyboard", s.keyboard);
+    if (auto n = tbl["input"]["trigger_deadzone"]) {
+        auto v = n.value_exact<int64_t>();
+        if (v && *v >= 0 && *v <= 20) s.trigger_deadzone = (int)*v;
+        else warn("input.trigger_deadzone must be an integer from 0 to 20; keeping the default");
+    }
+    if (auto n = tbl["input"]["trigger_curve"]) {
+        auto v = n.value_exact<int64_t>();
+        if (v && *v >= 0 && *v <= 2) s.trigger_curve = (int)*v;
+        else warn("input.trigger_curve must be an integer from 0 to 2; keeping the default");
+    }
+    read_bool(tbl["input"]["modern_controls"], "input.modern_controls", s.modern_controls);
+    read_bool(tbl["input"]["adaptive_triggers"], "input.adaptive_triggers", s.adaptive_triggers);
+    read_bool(tbl["input"]["trigger_rumble"], "input.trigger_rumble", s.trigger_rumble);
+    read_bool(tbl["input"]["sdl_rumble"], "input.sdl_rumble", s.sdl_rumble);
     read_prompts(tbl["input"]["button_prompts"], s.button_prompts);
     for (int i = 0; i < GT5P_KEY_BUTTONS; i++) {
         const char* k = gt5p_key_button(i).key;
@@ -319,6 +340,12 @@ void apply_env(const Gt5pSettings& s)
     /* The pad switches test for presence, so only the "off" case sets one. */
     if (!s.sdl_controllers) set_default_env("PAD_NO_SDL", "1");
     if (!s.keyboard)        set_default_env("PAD_NO_KEYBOARD", "1");
+    snprintf(buf, sizeof buf, "%d", (int)s.trigger_deadzone); set_default_env("PAD_TRIGGER_DEADZONE", buf);
+    snprintf(buf, sizeof buf, "%d", (int)s.trigger_curve); set_default_env("PAD_TRIGGER_CURVE", buf);
+    snprintf(buf, sizeof buf, "%d", (int)s.modern_controls); set_default_env("PAD_MODERN_CONTROLS", buf);
+    snprintf(buf, sizeof buf, "%d", (int)s.adaptive_triggers); set_default_env("PAD_ADAPTIVE_TRIGGERS", buf);
+    snprintf(buf, sizeof buf, "%d", (int)s.trigger_rumble); set_default_env("PAD_TRIGGER_RUMBLE", buf);
+    snprintf(buf, sizeof buf, "%d", (int)s.sdl_rumble); set_default_env("PAD_SDL_RUMBLE", buf);
     set_default_env("PAD_KEYMAP", gt5p_keymap_format(s.keys).c_str());
     set_default_env("GT5P_GLYPHS", kPromptNames[s.button_prompts >= 0 && s.button_prompts < 5 ? s.button_prompts : 0]);
     /* Cross press once MovieRoot is read (cellPad.c). The native link does not
@@ -357,6 +384,30 @@ void reflect_env(Gt5pSettings& s)
     s.sdl_controllers = getenv("PAD_NO_SDL") == nullptr;
     s.keyboard        = getenv("PAD_NO_KEYBOARD") == nullptr;
     if (const char* e = getenv("GT5P_GLYPHS")) { const int c = prompt_code(e); if (c >= 0) s.button_prompts = c; }
+    if (const char* e = getenv("PAD_TRIGGER_DEADZONE")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.trigger_deadzone = *e && !*end && n >= 0 && n <= 20 ? (int)n : 0;
+    }
+    if (const char* e = getenv("PAD_TRIGGER_CURVE")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.trigger_curve = *e && !*end && n >= 0 && n <= 2 ? (int)n : 0;
+    }
+    if (const char* e = getenv("PAD_MODERN_CONTROLS")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.modern_controls = *e && !*end && n >= 0 && n <= 1 ? (int)n : 0;
+    }
+    if (const char* e = getenv("PAD_ADAPTIVE_TRIGGERS")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.adaptive_triggers = *e && !*end && n >= 0 && n <= 1 ? (int)n : 0;
+    }
+    if (const char* e = getenv("PAD_TRIGGER_RUMBLE")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.trigger_rumble = *e && !*end && n >= 0 && n <= 1 ? (int)n : 0;
+    }
+    if (const char* e = getenv("PAD_SDL_RUMBLE")) {
+        char* end; long n = strtol(e, &end, 10);
+        s.sdl_rumble = *e && !*end && n >= 0 && n <= 1 ? (int)n : 0;
+    }
     if (const char* e = getenv("PAD_KEYMAP")) gt5p_keymap_parse(e, s.keys);
     /* Native mode leaves PAD_SKIP_MOVIE unset on purpose. Reflecting that
      * absence would clear a skip the file asked for. An outside value still wins. */
@@ -505,6 +556,20 @@ bool gt5p_settings_save(const Gt5pSettings& s, const std::string& path)
          "# keyboard art; a PlayStation pad keeps the game's own), or one of\n"
          "# \"playstation\", \"xbox\", \"nintendo\", \"keyboard\". [GT5P_GLYPHS]\n"
          "button_prompts = \"" << kPromptNames[s.button_prompts >= 0 && s.button_prompts < 5 ? s.button_prompts : 0] << "\"\n"
+         "\n"
+         "# PAD_TRIGGER_DEADZONE: 0..20. Restart to apply.\n"
+         "trigger_deadzone = " << s.trigger_deadzone << "\n"
+         "# Trigger response: 0 linear, 1 gentle, 2 quick. [PAD_TRIGGER_CURVE] Restart to apply.\n"
+         "trigger_curve = " << s.trigger_curve << "\n"
+         "# Standard game Cross/Square layout only: R2 throttle / L2 brake during races.\n"
+         "# Keep Off when already assigned R2/L2 in-game. [PAD_MODERN_CONTROLS]\n"
+         "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n"
+         "# PAD_ADAPTIVE_TRIGGERS: opt-in; unsupported devices ignore this. Restart to apply.\n"
+         "adaptive_triggers = " << (s.adaptive_triggers ? "true" : "false") << "\n"
+         "# PAD_TRIGGER_RUMBLE: opt-in; unsupported devices ignore this. Restart to apply.\n"
+         "trigger_rumble = " << (s.trigger_rumble ? "true" : "false") << "\n"
+         "# PAD_SDL_RUMBLE: opt-in; unsupported devices ignore this. Restart to apply.\n"
+         "sdl_rumble = " << (s.sdl_rumble ? "true" : "false") << "\n"
          "\n"
          "[keyboard]\n"
          "# The key for each button when playing with the keyboard (also the F1 page's\n"

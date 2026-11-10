@@ -46,11 +46,11 @@ try {
     cap "page0"
     "--- defaults the new file got:"
     Get-Content $toml | Select-String "^(shader_indicator|preload_indicator|shader_warmup|pipeline_async|race_preload) ="
-    for ($page = 1; $page -le 6; $page++) { key 0x22; Start-Sleep -Milliseconds 500; cap "page$page" }
+    for ($page = 1; $page -le 8; $page++) { key 0x22; Start-Sleep -Milliseconds 500; cap "page$page" }
     # Back to the Game page from the Debug page; its fifth row is the preload indicator.
     "--- toggling the Shader preload indicator (Game page, fifth row)"
-    key 0x21 6                   # Page Up to the first page
-    key 0x22 4                   # Video, Shaders, Input, Keyboard, Game (page order, from the shots above)
+    key 0x21 8                   # Page Up to the first page
+    key 0x22 6                   # Video, Shaders, Input, Controls, Feedback, Keyboard, Game (page order, from the shots above)
     key 0x28 4; key 0x27         # fifth row, right: on
     Start-Sleep -Milliseconds 500; cap "game_toggled"
     Get-Content $toml | Select-String "^(shader_indicator|preload_indicator|shader_warmup) ="

@@ -166,6 +166,174 @@
         { "label": "Keyboard", "set": { "input/button_prompts": "\"keyboard\"" } }
       ],
       "defaults": { "input/button_prompts": "\"auto\"" }
+    },
+    {
+      "id": "trigger_deadzone",
+      "label": "Trigger Dead Zone",
+      "group": "Controls",
+      "help": "Removes initial travel and rescales both triggers. Restart to apply.",
+      "choices": [
+        {
+          "label": "0%",
+          "set": {
+            "input/trigger_deadzone": "0"
+          }
+        },
+        {
+          "label": "2%",
+          "set": {
+            "input/trigger_deadzone": "2"
+          }
+        },
+        {
+          "label": "5%",
+          "set": {
+            "input/trigger_deadzone": "5"
+          }
+        },
+        {
+          "label": "10%",
+          "set": {
+            "input/trigger_deadzone": "10"
+          }
+        },
+        {
+          "label": "15%",
+          "set": {
+            "input/trigger_deadzone": "15"
+          }
+        },
+        {
+          "label": "20%",
+          "set": {
+            "input/trigger_deadzone": "20"
+          }
+        }
+      ],
+      "defaults": {
+        "input/trigger_deadzone": "0"
+      }
+    },
+    {
+      "id": "trigger_curve",
+      "label": "Trigger Response",
+      "group": "Controls",
+      "help": "Gentle gives finer control near rest; Quick reaches high pressure sooner. Restart to apply.",
+      "choices": [
+        {
+          "label": "Linear",
+          "set": {
+            "input/trigger_curve": "0"
+          }
+        },
+        {
+          "label": "Gentle",
+          "set": {
+            "input/trigger_curve": "1"
+          }
+        },
+        {
+          "label": "Quick",
+          "set": {
+            "input/trigger_curve": "2"
+          }
+        }
+      ],
+      "defaults": {
+        "input/trigger_curve": "0"
+      }
+    },
+    {
+      "id": "modern_controls",
+      "label": "Modern Controls (Standard Layout)",
+      "group": "Controls",
+      "help": "R2 throttle / L2 brake for the game's standard Cross/Square assignments. Keep Off if already using in-game R2/L2 assignments. Saves stay intact. Restart to apply.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "input/modern_controls": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "input/modern_controls": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "input/modern_controls": "false"
+      }
+    },
+    {
+      "id": "adaptive_triggers",
+      "label": "DualSense Fixed Resistance",
+      "group": "Controls",
+      "help": "Experimental fixed resistance through SDL2; no telemetry. Unsupported devices ignore it. Restart to apply.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "input/adaptive_triggers": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "input/adaptive_triggers": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "input/adaptive_triggers": "false"
+      }
+    },
+    {
+      "id": "trigger_rumble",
+      "label": "Xbox Trigger Rumble",
+      "group": "Controls",
+      "help": "Experimental: game large/small motor commands to supported left/right trigger motors through SDL2. No ABS or slip telemetry. Restart to apply.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "input/trigger_rumble": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "input/trigger_rumble": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "input/trigger_rumble": "false"
+      }
+    },
+    {
+      "id": "sdl_rumble",
+      "label": "SDL Controller Vibration",
+      "group": "Controls",
+      "help": "Experimental: forward the game's body-motor commands through SDL2. Restart to apply.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": {
+            "input/sdl_rumble": "false"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "input/sdl_rumble": "true"
+          }
+        }
+      ],
+      "defaults": {
+        "input/sdl_rumble": "false"
+      }
     }
   ]
 }

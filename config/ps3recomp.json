@@ -3,5 +3,13 @@
   "version": "v0.18.0",
   "commit": "4e8f3ca87a3e1d87bb83b8b7e9348fe2685cd514",
   "directory": "ps3recomp-gt5p-v018",
-  "patch": "patches/ps3recomp-4e8f3ca8-local.patch"
+  "patch": "patches/ps3recomp-4e8f3ca8-local.patch",
+  "overlays": [
+    {
+      "patch": "patches/ps3recomp-controls-polish.patch",
+      "files": {
+        "libs/input/cellPad.c": "e9998bc3bca50fbc4c82106b9d1dd895b7860073c818f70e3df818e9f50b01e2"
+      }
+    }
+  ]
 }

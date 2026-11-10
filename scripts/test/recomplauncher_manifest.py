@@ -28,6 +28,8 @@ ACCEPTED = {
     ('game', 'anisotropy'): {1, 4, 8, 16},
     ('input', 'button_prompts'): {'auto', 'playstation', 'xbox', 'nintendo', 'keyboard'},
     ('meta', 'defaults_version'): {1},
+    ('input', 'trigger_deadzone'): set(range(21)),
+    ('input', 'trigger_curve'): {0, 1, 2},
 }
 BOOLEAN = {True, False}
 
@@ -53,6 +55,12 @@ race_preload = true
 sdl_controllers = true
 keyboard = true
 button_prompts = "auto"
+trigger_deadzone = 0
+trigger_curve = 0
+modern_controls = false
+adaptive_triggers = false
+trigger_rumble = false
+sdl_rumble = false
 
 [keyboard]
 cross = "Z"

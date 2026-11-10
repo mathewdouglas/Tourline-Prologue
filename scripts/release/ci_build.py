@@ -116,7 +116,7 @@ def main():
     # Content-address the patched runtime so a new pin/overlay never edits the
     # development runtime or an older CI runtime with a different patch.
     manifest = json.loads((ROOT/'config/ps3recomp.json').read_text())
-    identity = hashlib.sha256((ROOT/'config/ps3recomp.json').read_bytes() + (ROOT/manifest['patch']).read_bytes()).hexdigest()[:20]
+    identity = hashlib.sha256((ROOT/'config/ps3recomp.json').read_bytes() + (ROOT/manifest['patch']).read_bytes() + b''.join((ROOT/o['patch']).read_bytes() for o in manifest.get('overlays', []))).hexdigest()[:20]
     runtime = paths['runtime_cache']/identity
     runtime.parent.mkdir(parents=True, exist_ok=True)
     os.environ['PS3RECOMP_DIR'] = str(runtime)
