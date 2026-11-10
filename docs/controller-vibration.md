@@ -112,5 +112,6 @@ was F1 drawing the Debug page: Debug export has no environment name, and the
 modern-controls label passed it to `strcmp`. The vibration path was not on the
 faulting stack. Rows with no environment name are now skipped by that check.
 
-Local test ZIP, head `79ecafc`, is recorded in
-[test-build-controls.md](test-build-controls.md). It is not a release.
+Local test ZIP, head `d872f39`, is recorded in
+[test-build-controls.md](test-build-controls.md). It replaces `79ecafc` and is
+not a release.
