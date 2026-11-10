@@ -492,6 +492,15 @@ def main():
             report['race_pack']=dict(status='skipped',reason='no race index')
     except Exception as exc:  # noqa: BLE001 - optional; the next race can write this pack from the files
         report['race_pack']=dict(status='failed',reason=str(exc))
+    # Phase 237: every prepared shader in one file (the renderer's RSX_DXBC_BUNDLE), so the first launch reads
+    # shaders with one positioned read instead of a file open each. GT5P_PREPARE_DXBC_BUNDLE=0 skips it; the game
+    # then builds the bundle itself in the background. A failure leaves the per-shader files, which stay anyway.
+    if os.environ.get('GT5P_PREPARE_DXBC_BUNDLE','1')!='0':
+        try:
+            import dxbc_bundle
+            report['dxbc_bundle']=dxbc_bundle.build(out/'shadercache',poll=lambda:progress('shader-bundle',{}))
+        except Exception as exc:  # noqa: BLE001 - optional; the renderer imports the files itself
+            report['dxbc_bundle']=dict(status='failed',reason=str(exc))
     template.save_report(out/'report.json',report)
     # Phase 220: interpreter pipelines, a separate cheap stage. It has its own report, never changes the
     # preparation token, prepared shaders or native blobs, and a failure here keeps the full preparation.

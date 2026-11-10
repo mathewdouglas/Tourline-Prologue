@@ -760,6 +760,22 @@ int main(int argc, char* argv[])
      * motion, Phase 102). PS3_PPU_CORES=topo for one thread per core. */
     if (!getenv("PS3_PPU_CORES")) _putenv_s("PS3_PPU_CORES", "topo-ht");
 
+    /* Those guest threads share four logical CPUs, and the scheme above gives most of them normal host
+     * priority or less (the thread that prepares frames is "normal", the title's timer service "idle").
+     * In a normal-class process any other program's CPU work that Windows places on those CPUs runs at the
+     * same level or above and takes whole scheduler slices from them, while the rest of the machine is
+     * idle for them because they may not move: runs of 100 to 300 ms frames with the renderer waiting for
+     * commands (Phase 237). One class up, every game thread except the idle band is above an ordinary
+     * program's threads and the order among the game's own threads is unchanged.
+     * GT5P_PRIORITY_CLASS=normal for the old class, =high for one more. Not for offline preparation. */
+    { const char* cls = getenv("GT5P_PRIORITY_CLASS");
+      const char* offline = getenv("GT5P_SHADER_PRECOMPILE_ONLY");
+      const DWORD want = cls && !_stricmp(cls, "normal") ? 0
+                       : cls && !_stricmp(cls, "high")   ? HIGH_PRIORITY_CLASS
+                       : ABOVE_NORMAL_PRIORITY_CLASS;
+      if (want && !(offline && offline[0] && strcmp(offline, "0")) && SetPriorityClass(GetCurrentProcess(), want))
+          fprintf(stderr, "[sched] process priority class: %s\n", want == HIGH_PRIORITY_CLASS ? "high" : "above normal"); }
+
     /* The title's frame pacer pads each frame with a sleep up to the slowest
      * of the last four (up to 50 ms) once one passes a vblank. On a console
      * frame times vary by microseconds; here an SPU wait or a preempted

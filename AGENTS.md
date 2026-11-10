@@ -36,13 +36,23 @@ boot milestone upstream reaches.
 Treat every statement about BCUS98158 as a hypothesis unless it appears under
 "Measured on the disc build" below.
 
-## Start here: state of play (2026-11-10, Phase 236)
+## Start here: state of play (2026-11-11, Phase 237)
 
 Read this section first when picking the work up in a new session on this
 machine. Everything below it is the long record; [docs/progress.md](docs/progress.md)
-has the evidence, newest phase first (Phase 236 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
+has the evidence, newest phase first (Phase 237 is the latest; Phases 99 and earlier are in docs/progress-archive.md).
 
 ### What works now
+
+- **Hitches: shader bundle and process priority (Phase 237):** shaders are read from one bundle file
+  (`RSX_DXBC_BUNDLE`, written by preparation and kept up by the game) instead of a 5-6 ms file open each;
+  21:9 8x second launch: frames >100 ms 23 -> 5, worst 985 -> 203 ms, 1,092 file reads -> 0. The process runs at
+  above-normal class (`GT5P_PRIORITY_CLASS=normal` rollback): with 8 busy background processes
+  23.4 FPS / max 510 ms -> 59.5 FPS / max 72 ms. First launch after a 21:9 preparation (preparation writes the
+  bundle): >100 ms frames 23 -> 6, worst 1,051 -> 244 ms. Tried and dropped (no measurable gain): a GPU keep-warm
+  pass for the race-start clock ramp, texture heap headroom, lifting the guest idle band above IDLE. Remaining: the driver's GPU clock ramp (~1-2 s of 30-80 ms GPU frames after the race start), first
+  launch fast-lookup misses with a private engine. Tools: `scripts/diag/thread_cpu_poll.py`/`thread_cpu_table.py`,
+  `scripts/test/background_load.py`. See docs/progress.md Phase 237.
 
 - **Background preparation status (Phase 236):** a launcher-owned bottom-left status shows Preparing or
   Paused during race. Successful helper exit defers the completion notice while racing, then shows Ready

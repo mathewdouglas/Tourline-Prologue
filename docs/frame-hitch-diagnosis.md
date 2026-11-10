@@ -84,6 +84,8 @@ The earlier separate overlays (`ps3recomp-texture-slot-lru.patch`, and the Phase
 | `GT5P_RACE_LOAD_BAR` | on | `=0` | Thin bar under the GT logo while the race loading gate is waiting. The fill is pipelines finished in that race set, including ones the driver rejected. It stays hidden for the first 200 ms so a short gate does not flash. |
 | `RSX_PSO_FAST_LOOKUP` | on | `=0` | Persistent map from a session-independent draw key to the native pipeline hash (`warmup-v1/fp-lookup-v1.bin`, epoch-tagged); a first-in-process miss whose pipeline is resident skips HLSL/DXBC rebuilding. |
 | `RSX_TEX_PLACED` | on | `=0` | Textures are placed in 64 MB pre-made default heaps (first fit, coalescing; `RSX_TEX_HEAP_MB`, `RSX_TEX_HEAP_MAX`, `RSX_TEX_HEAP_PRE`) instead of one committed resource each. |
+| `RSX_DXBC_BUNDLE` | on | `=0` | Phase 237. Source-keyed shaders come from one file, `dxbc-bundle-v1.dat` + `.idx` beside them (one positioned read, CRC-32 checked), instead of a file open each (5-6 ms in a directory of 17,000-57,000 files). Preparation writes it (`scripts/dxbc_bundle.py`, `GT5P_PREPARE_DXBC_BUNDLE=0` skips); the game appends what it reads or compiles and imports missing files on three lowest-priority threads (`RSX_DXBC_BUNDLE_IMPORT=<n>`, `0` none). Per-shader files stay. Off in offline preparation. |
+| `GT5P_PRIORITY_CLASS` | above normal | `=normal` (`=high` one more) | Phase 237. The game's process class. Guest threads are pinned to four logical CPUs; at normal class other programs' work landing there took whole time slices from them. |
 
 Why: each new texture upload made two committed resources (texture plus its own staging
 buffer), about 1 ms together, so a frame where about 190 textures appear for the first time

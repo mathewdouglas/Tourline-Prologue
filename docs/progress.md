@@ -9,6 +9,84 @@ wrong far more often than the measurements under them. Before a conclusion goes
 in here, run the one command that would falsify it; label anything untested as a
 hypothesis in the text itself.
 
+## Phase 237 - Hitches: shader bundle, process priority; three ideas measured and dropped (2026-11-11)
+
+**Request.** Review the state of the game; there should be no hitching at all. Reduce hitches and look for easy
+gains. Starting point (Phase 221/236): prepared High Speed Ring race start about 113 ms with the fast lookup table;
+the last combined trace had 14 intervals over 50 ms, worst 311 ms.
+
+**Method.** Private engines from the current main patch + controls + frame-hitch-trace overlays
+(`scratch/nh/build.py`, reference objects read-only), `hitch_capture.py hsr prepared` from fixed seed caches,
+one locked run per row, focus not enforced. New read-only tools: `scripts/diag/thread_cpu_poll.py` (per-thread CPU
+every 50 ms while a route runs) with `thread_cpu_table.py`, and `scripts/test/background_load.py` (8 busy
+normal-priority processes from 50 s after launch). GPU clock with `nvidia-smi -lms 100`. A private engine never
+matches the fast lookup table's epoch, so every run here misses it ("hit 0"): the 50-80 ms of pipeline lookup in
+race-start frames is that artifact. Both sides of each pair miss equally.
+
+### What the remaining long frames were
+
+- **The 100-311 ms frames 30-33 s into the race (packfix trace) are outside the renderer.** Replay is 6-10 ms,
+  draws present every frame, GPU 4-6 ms. A guest timeline (`PS3_TIMELINE`) shows the thread that prepares frames
+  (PDI:1:400c3b40) running 18-28 ms of CPU in 85-215 ms frames, with 60-170 ms of each frame neither running nor
+  waiting: runnable but not scheduled. Guest threads are pinned to four logical CPUs (`topo-ht`), at normal host
+  priority or below (the title's timer service "Main Thread", priority 2048, is at IDLE). Anything else Windows
+  puts on those CPUs takes whole slices from them, and they may not move.
+- **Shader file opens.** First use of a shader in a process opens `<cache>/<key>.dxbc`: 5-6 ms each on this NVMe
+  drive in a directory of 17,000-57,000 files, on the recording/replay thread. The race/menu packs cover what an
+  earlier visit used; a first launch after preparation, every translated (21:9, >1080p) preparation, new cars and
+  pages fall through. 21:9 8x race start: 165 reads, 454 ms in one 1,051 ms frame; menu frames 556-745 ms.
+- **GPU clock ramp.** Through the loading screen and grid the RTX 4060 runs at 210-630 MHz; it reaches 2565 MHz
+  0.8-1.9 s after the race's real frames begin. Those frames need 30-60 ms of GPU (16:9 2x) or 55-90 ms (21:9 8x)
+  against 3-8 ms after: three to eight 100-ms frames right after the start, prepared or not.
+
+### Changes (defaults; rollback switches)
+
+- **`RSX_DXBC_BUNDLE` (main patch, on; `=0` per-file).** `dxbc-bundle-v1.dat` (bytecode appended) and
+  `dxbc-bundle-v1.idx` (u64 key, u64 offset, u32 size, u32 CRC-32) beside the shader files, one handle, one
+  positioned read per lookup; a failed checksum drops the record and reads the file. Shaders read from files or
+  compiled are appended; three lowest-priority threads import missing files at startup (`RSX_DXBC_BUNDLE_IMPORT=<n>`,
+  `0` none); per-shader files stay for preparation, its checks and `=0`. Opened without write sharing: a second
+  process leaves it off. Off in offline preparation. `scripts/dxbc_bundle.py` writes the same files at the end of
+  player preparation (`GT5P_PREPARE_DXBC_BUNDLE=0` skips); `scripts/test/dxbc_bundle.py` checks format, CRC,
+  filtering, corruption detection and cancellation.
+- **`GT5P_PRIORITY_CLASS` (src/main.cpp, above normal; `=normal` old, `=high` one more).** Not in offline
+  preparation.
+
+The main patch's backend section was regenerated with `rc024_patch_splice.py`; a fresh export plus the patch
+reproduces the edited file exactly (the PPU-thread section is unchanged), and the controls, frame-hitch-trace, shader-interp,
+pipeline-use-coverage and shader-source-dump overlays all apply (the bundle shutdown call sits after
+`pso_warm_clear()` so the interpreter overlay's context is unchanged).
+
+### Measurements
+
+| Runs | Condition | Result |
+| --- | --- | --- |
+| ldC / ldD2 | 16:9 2x prepared, 8 busy background processes; normal class / above normal (bundle off) | 23.4 FPS, p99 152 ms, max 510 ms, 92.1% late / **59.5 FPS, p99 27 ms, max 72 ms, 4.1% late** |
+| uwD / uwC | 21:9 8x prepared, second launch (packs removed, bundle present), bundle off / on | after grid: >100 ms 23 / **5**, excess in >50 ms frames 5.9 / **1.4 s**, worst 985 / **203 ms**, shader file reads 1,092 / **0** |
+| uwA / uwB | same, first launch, bundle empty (in-game import still running, 1 thread, 161 s) | >100 ms 23 / 18, worst 1,051 / 785 ms: the import was too slow to help a first launch; hence 3 importers and the preparation-written bundle |
+| uwA / uwE | 21:9 8x, first launch after preparation: no bundle / bundle written by `dxbc_bundle.py` (25,812 shaders, 261 MiB; the game loads every record, 0 rejected) | menu/pit frames >100 ms 591, 745 ms / **gone**; after grid >100 ms 23 / **6**, excess 6.7 / **1.5 s**, worst 1,051 / **244 ms** |
+| f1 / fd | final engine (the committed patch + controls/trace overlays), HSR 16:9 2x prepared / dealership | 59.7 FPS, p99 18.6 ms, max 55.7 ms; three import threads built a 4,234-shader bundle in 8 s; race shots correct / dealership (ACURA) drawn correctly, route then stopped by its own foreground check (another window took focus), not an engine fault |
+
+Unloaded 16:9 2x prepared runs stay at 59.9 FPS, p99 18 ms; the race start is 98-228 ms over 2-3 frames in every
+variant (CPU lookup artifact above, plus the GPU clock ramp).
+
+### Tried and dropped
+
+- **GPU keep-warm pass.** An extra offscreen shading pass on near-empty frames to hold the GPU clock: first with a
+  6 ms/frame target after any scene (wA/wB), then race-targeted from the loading gate's release at 13 ms (wC). The
+  driver meets a time target at its low clock; the ramp moved from +1.2-1.9 s to +0.8 s at best and the race-start
+  frames were within noise (wA 228/122, wB 174/111/98, wC 192/100/98 ms). Not shipped. Holding the clock needs
+  `SetStablePowerState` (developer mode) or vendor profiles, neither available to players.
+- **Guest idle band at host LOWEST.** THREAD_PRIORITY_IDLE is base 1 in every class but realtime, so the class
+  alone leaves the timer service ("Main Thread", priority 2048) below any other program. Lifting that band to
+  LOWEST when the class is raised (ldE, same load) gave 55.7 FPS, p99 39 ms, 16.0% late against 59.5 FPS, 4.1% late
+  without it (ldD2). One run each, but no evidence for it: not shipped.
+- **Texture heap headroom / not-zeroed heaps.** Race-start allocation 8.6-11 -> 6.3-7.1 ms, but the +7 s camera
+  change 2.3-3.0 -> 3.9-5.5 ms; no net gain. Not shipped.
+
+**Open.** The GPU clock ramp after the race start; Daytona and dealership routes under load; other GPUs/drivers;
+SSD vs HDD (the bundle should matter more on a hard disk; untested). One machine, one save, one run per row.
+
 ## Phase 236 - Visible background preparation and deferred completion (2026-11-10)
 
 **Request.** Confirm broader preparation is running, show when it is paused for
