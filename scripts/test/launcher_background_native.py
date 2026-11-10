@@ -5,7 +5,7 @@ offer, idle priority, --background with the cache the game uses, and prepare.can
 helper's job is closed after it). A selected, current full preparation starts nothing and is remembered so later
 launches skip the helper check. GT5P_PREPARE_BACKGROUND=0, GT5P_PREPARE_OFFER=0 and --no-prepared start nothing.
 Settings restarts keep the helper running. While the game signals a race (GT5P_RACE_EVENT) every process of the
-helper's job is suspended, and resumed back in the menus (GT5P_PREPARE_BACKGROUND_PAUSE=0: no event, no pause).
+helper's job is suspended, and resumed back in the menus (GT5P_PREPARE_BACKGROUND_PAUSE=0: no suspension).
 """
 import argparse
 import ctypes as C
@@ -60,6 +60,8 @@ def main():
                  ('background-restart', {'GT5P_PROBE_RESTART_ONCE': '1'}, [], None, True, 1),
                  ('background-race-pause', {'GT5P_PROBE_RACE': '1', 'GT5P_PROBE_DELAY_MS': '300'}, [], None, True, 1),
                  ('background-no-pause', {'GT5P_PROBE_RACE': '1', 'GT5P_PREPARE_BACKGROUND_PAUSE': '0'}, [], None, True, 1),
+                 ('background-no-indicator', {'GT5P_PROBE_RACE':'1','GT5P_PREPARE_BACKGROUND_INDICATOR':'0'}, [], None, True, 1),
+                 ('background-no-pause-or-indicator', {'GT5P_PROBE_RACE':'1','GT5P_PREPARE_BACKGROUND_PAUSE':'0','GT5P_PREPARE_BACKGROUND_INDICATOR':'0'}, [], None, True, 1),
                  ('already-prepared', {'GT5P_PROBE_SELECTED': '1'}, [], 'preparation/0123456789abcdef01234567/shadercache', False, 1),
                  ('quick-prepared', {'GT5P_PROBE_SELECTED':'1','GT5P_PROBE_QUICK_SELECTED':'1'}, [], 'preparation/0123456789abcdef01234567/shadercache', True, 1),
                  ('settings-locked', {'GT5P_PROBE_SELECTED':'1'}, [], 'preparation/0123456789abcdef01234567/shadercache', False, 1),
@@ -81,7 +83,7 @@ def main():
             env = dict(os.environ, GT5P_USER_DIR=str(data), PS3_VERBOSE='0', GT5P_PROBE_DELAY_MS='400',
                        GT5P_PROBE_SELECTED='0',GT5P_PREPARE_DXC_OFFER='0',GT5P_PREPARE_CLEANUP='0')
             for name in ('GT5P_PREPARE_OFFER', 'GT5P_PREPARE_BACKGROUND', 'GT5P_PREPARE_VOLUME', 'GT5P_PROBE_BACKGROUND_MS',
-                         'GT5P_PREPARE_BACKGROUND_PAUSE', 'GT5P_RACE_EVENT', 'GT5P_PROBE_RACE'):
+                         'GT5P_PREPARE_BACKGROUND_PAUSE', 'GT5P_PREPARE_BACKGROUND_INDICATOR', 'GT5P_RACE_EVENT', 'GT5P_PROBE_RACE'):
                 env.pop(name, None)
             env.update(extra)
             locked=None
@@ -114,11 +116,13 @@ def main():
                 assert values['outcome'] == want, (label, values['outcome'])
                 assert (data/'logs/prepare-background.out').exists(), label
                 game = read(data/'probe.txt')
-                if label == 'background-race-pause':
+                if label in ('background-race-pause','background-no-indicator'):
                     assert game['race_event'] == 'opened' and game['race_paused'] == '1' and game['race_resumed'] == '1', (label, game)
                     pause = read(data/'logs/prepare-background-pause.txt')
                     assert int(pause['pauses']) == 1 and 1000 <= int(pause['paused_ms']) <= 3000, (label, pause)
                 elif label == 'background-no-pause':
+                    assert game['race_event']=='opened' and game['race_paused']=='0' and game['race_resumed']=='1',(label,game)
+                elif label == 'background-no-pause-or-indicator':
                     assert 'race_event' not in game, (label, game)   # no event was created or passed on
                 else:
                     assert 'race_paused' not in game, label

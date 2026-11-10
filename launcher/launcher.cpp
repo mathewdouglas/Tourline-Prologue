@@ -18,6 +18,7 @@
 #include <cwctype>
 #include "preparation_ui.h"
 #include "first_run_preparation.h"
+#include "background_preparation_ui.h"
 #include "storage_link.h"
 #include "../src/gt5p_restart.h"
 
@@ -33,6 +34,7 @@ struct Handle {
 static fs::path install, data;
 static bool quiet = false;
 static bool silent_errors = false;
+static volatile LONG background_game_pid=0;
 static std::wstring profile(const fs::path& file, const wchar_t* section, const wchar_t* key) {
     std::array<wchar_t, 32768> b{};
     const DWORD n = GetPrivateProfileStringW(section, key, L"", b.data(), (DWORD)b.size(), file.c_str());
@@ -246,6 +248,8 @@ static DWORD run(const fs::path& exe, const std::wstring& args, const fs::path& 
     if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW|CREATE_SUSPENDED, nullptr, cwd.c_str(), &si, &pi))
         fail(L"Could not start " + exe.wstring() + L" (Windows error " + std::to_wstring(GetLastError()) + L"). Re-extract the complete release ZIP.");
     Handle process(pi.hProcess), thread(pi.hThread);
+    struct Playing { bool active; ~Playing() {if (active) InterlockedExchange(&background_game_pid,0);} } playing{!wcscmp(tag,L"play")};
+    if (playing.active) InterlockedExchange(&background_game_pid,static_cast<LONG>(pi.dwProcessId));
     if (!AssignProcessToJobObject(job.h, process.h)) {
         TerminateProcess(process.h, 1); // only the suspended child created above
         fail(L"Could not attach the launched application to its process group.");
@@ -473,12 +477,13 @@ static int selected_preparation(const fs::path& disc, bool full=false) {
 // the cache the game is using, then runs the full preparation, which the next launch selects. Stopped with the
 // game: prepare.cancel at a checkpoint (work kept for resume), then the job closes. GT5P_PREPARE_BACKGROUND=0
 // restores the one-time offer instead.
-// While a race runs the helper is paused: the game sets GT5P_RACE_EVENT (a manual-reset event this launcher
-// creates) from the race loading screen until a menu loads, and a watcher suspends every process in the
-// helper's job meanwhile (resumed in the menus). Measured: a helper still compiling during the race added
+// While a race runs the helper is paused: the game arms GT5P_RACE_EVENT at loading and sets it at grid Start
+// until a menu loads. The watcher suspends every process in the helper's job meanwhile (resumed in menus).
+// The indicator observes the same event even with the pause rollback off. A helper compiling during racing added
 // 3-4 s of hitching to the first race. GT5P_PREPARE_BACKGROUND_PAUSE=0 never pauses.
 struct Background {
     HANDLE process=nullptr, job=nullptr, race=nullptr, stop=nullptr, watcher=nullptr;
+    bool indicator=false, pause=true;
     volatile LONG pauses=0; volatile LONG64 paused_ms=0;
 };
 static bool background_enabled() { return env(L"GT5P_PREPARE_BACKGROUND")!=L"0"; }
@@ -488,7 +493,9 @@ static DWORD WINAPI background_watch(LPVOID arg) {
     HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
     auto suspend=ntdll ? reinterpret_cast<NtProcess>(GetProcAddress(ntdll,"NtSuspendProcess")) : nullptr;
     auto resume=ntdll ? reinterpret_cast<NtProcess>(GetProcAddress(ntdll,"NtResumeProcess")) : nullptr;
-    if (!suspend || !resume) return 0;
+    const bool can_pause=b.pause && suspend && resume;
+    background_preparation_ui::Overlay overlay;
+    auto previous=background_preparation_ui::View::Hidden;
     std::vector<HANDLE> held;   // processes this watcher suspended, resumed exactly once
     ULONGLONG since=0;
     auto release=[&] {
@@ -497,24 +504,40 @@ static DWORD WINAPI background_watch(LPVOID arg) {
         if (since) { InterlockedAdd64(&b.paused_ms,(LONG64)(GetTickCount64()-since)); since=0; }
     };
     while (WaitForSingleObject(b.stop,250)!=WAIT_OBJECT_0) {
-        if (WaitForSingleObject(b.race,0)!=WAIT_OBJECT_0) { release(); continue; }
-        if (!since) { since=GetTickCount64(); InterlockedIncrement(&b.pauses); }
-        // Every process in the job, including ones started since the last pass.
-        struct { JOBOBJECT_BASIC_PROCESS_ID_LIST list; ULONG_PTR more[511]; } ids{};
-        if (!QueryInformationJobObject(b.job,JobObjectBasicProcessIdList,&ids,sizeof ids,nullptr)) continue;
-        for (DWORD i=0;i<ids.list.NumberOfProcessIdsInList;++i) {
-            const DWORD pid=(DWORD)ids.list.ProcessIdList[i];
-            if (std::any_of(held.begin(),held.end(),[&](HANDLE h){ return GetProcessId(h)==pid; })) continue;
-            HANDLE h=OpenProcess(PROCESS_SUSPEND_RESUME|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
-            if (h && suspend(h)>=0) held.push_back(h);
-            else if (h) CloseHandle(h);
+        MSG message;
+        while (PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {TranslateMessage(&message);DispatchMessageW(&message);}
+        const bool racing=b.race && WaitForSingleObject(b.race,0)==WAIT_OBJECT_0;
+        const bool finished=WaitForSingleObject(b.process,0)==WAIT_OBJECT_0;
+        if (!can_pause || !racing || finished) release();
+        else {
+            // Every process in the job, including ones started since the last pass.
+            struct { JOBOBJECT_BASIC_PROCESS_ID_LIST list; ULONG_PTR more[511]; } ids{};
+            if (QueryInformationJobObject(b.job,JobObjectBasicProcessIdList,&ids,sizeof ids,nullptr))
+            for (DWORD i=0;i<ids.list.NumberOfProcessIdsInList;++i) {
+                const DWORD pid=(DWORD)ids.list.ProcessIdList[i];
+                if (std::any_of(held.begin(),held.end(),[&](HANDLE h){ return GetProcessId(h)==pid; })) continue;
+                HANDLE h=OpenProcess(PROCESS_SUSPEND_RESUME|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
+                if (h && suspend(h)>=0) held.push_back(h);
+                else if (h) CloseHandle(h);
+            }
+            if (!held.empty() && !since) {since=GetTickCount64();InterlockedIncrement(&b.pauses);}
+        }
+        if (b.indicator) {
+            DWORD code=1;if (finished) GetExitCodeProcess(b.process,&code);
+            using namespace background_preparation_ui;
+            const Work work=finished?(code==0?Work::Complete:Work::Incomplete):!held.empty()?Work::Paused:Work::Preparing;
+            overlay.tick(static_cast<DWORD>(background_game_pid),work,racing,GetTickCount64());
+            if (overlay.view()!=previous) {
+                previous=overlay.view();
+                try {std::ofstream(data/L"logs"/L"prepare-background-status.txt",std::ios::app)<<name(previous)<<"\n";} catch (...) {}
+            }
         }
     }
     release();
     return 0;
 }
 static void watch_background(Background& b) {
-    if (!b.process || !b.race) return;
+    if (!b.process || (!b.race && !b.indicator)) return;
     b.stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     if (b.stop) b.watcher=CreateThread(nullptr,0,background_watch,&b,0,nullptr);
 }
@@ -557,7 +580,10 @@ static Background start_background(const fs::path& disc, const fs::path& live) {
         }
         CloseHandle(pi.hThread);
         b.process=pi.hProcess; b.job=job;
-        if (env(L"GT5P_PREPARE_BACKGROUND_PAUSE")!=L"0") {
+        b.indicator=env(L"GT5P_PREPARE_BACKGROUND_INDICATOR")!=L"0";
+        if (b.indicator) std::ofstream(data/L"logs"/L"prepare-background-status.txt",std::ios::trunc);
+        b.pause=env(L"GT5P_PREPARE_BACKGROUND_PAUSE")!=L"0";
+        if (b.pause || b.indicator) {
             // The game opens it by name; created before the game starts.
             const std::wstring name=L"Local\\TourlinePrologue-Race-"+std::to_wstring(GetCurrentProcessId());
             b.race=CreateEventW(nullptr,TRUE,FALSE,name.c_str());

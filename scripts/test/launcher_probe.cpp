@@ -70,7 +70,9 @@ int wmain(int argc, wchar_t** argv) {
             Sleep(20);
         }
         if (!_wfopen_s(&record,L"background.txt",L"a, ccs=UTF-8") && record) { fwprintf(record,L"outcome=%ls\n",outcome); fclose(record); }
-        return wcscmp(outcome,L"cancelled") ? 0 : 2;
+        if (!wcscmp(outcome,L"cancelled")) return 2;
+        wchar_t exit_code[16]{};
+        return GetEnvironmentVariableW(L"GT5P_PROBE_BACKGROUND_EXIT",exit_code,16)?_wtoi(exit_code):0;
     }
     FILE* f = nullptr;
     if (_wfopen_s(&f, L"probe.txt", L"w, ccs=UTF-8") || !f) return 2;
