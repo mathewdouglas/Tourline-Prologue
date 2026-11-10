@@ -55,5 +55,21 @@ The short run passed all 3,546 default and 3,546 ultrawide native requests
 and wrote a 2,113-recipe race pack. Catalogue enumeration and interpreter work
 were absent as intended. Private logs/reports are under `scratch/k236`.
 
+The final frozen helper also passes a fresh 1080p/16:9/2x run in **103.23 s**,
+including all 3,546 native proofs, both shader packs and the 2,113-recipe race
+pack (`scratch/d236`). No full-preparation timing at those same settings was
+taken in this comparison.
+
+On the same native-ultrawide High Speed Ring route, short and full preparation
+each record about **0.76 s** of excess frame time in the first 30 seconds (33.37 ms
+budget; screenshot intervals excluded). The standard later FrameTest reports
+59.9 FPS short / 59.4 FPS full. This one ordered pair supports the short default
+on this PC; it is not evidence that less preparation makes gameplay faster.
+The whole short trace still compiles 118 guest shaders versus 33 with the full
+cache. A repeat using the learned short cache compiles zero shaders, with all
+3,743 driver calls after the first present using cached blobs. Repeat timing is
+not compared because focus was lost for part of it. See progress for provenance
+and the native-scaled/other-GPU/whole-game limits.
+
 Further acceptance is recorded in progress Phase 235; the full-profile baseline
 and its caveats are in [preparation-profile-025.md](preparation-profile-025.md).

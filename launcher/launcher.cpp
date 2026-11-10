@@ -591,7 +591,9 @@ static bool preparation_current(const fs::path& disc) {
     const auto pointer=utf8_file(data/L"prepared-cache.txt");
     const fs::path done=data/(L"prepare-full-current-"+version+L".txt");
     const auto settings=data/L"gt5p_settings.toml";
-    const auto settings_hash=fs::is_regular_file(settings)?hash(settings):L"";
+    std::wstring settings_hash;
+    try { if (fs::is_regular_file(settings)) settings_hash=hash(settings); }
+    catch (...) { return selected_preparation(disc,true)!=3; } // An optional memo must never prevent play.
     const auto identity=pointer+L"\n"+settings_hash+L"\n"+env(L"RSX_SHADER_COMPILER")+L"\n"+
         env(L"RSX_SHADER_INTERP")+L"\n"+env(L"RSX_SHADER_INTERP_VP")+L"\nfull-v1";
     if (plain_version(version) && !pointer.empty() && utf8_file(done)==identity) return true;

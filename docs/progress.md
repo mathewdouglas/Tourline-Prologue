@@ -46,8 +46,9 @@ different coverage, not a universal time or hitch claim. Evidence:
 
 **Initial checks.** Scope/plan determinism, unknown-input rejection, settings
 identity, quick/full readiness and legacy full acceptance pass. Packaging includes
-the full-preparation command. Launcher background tests pass all 12 cases,
-including quick-selected continuation; first-run/DXC/cleanup offers pass all 26
+the full-preparation command. Launcher background tests pass all 13 cases,
+including quick-selected continuation and a locked settings file (memo failure
+falls back to the helper check without blocking play); first-run/DXC/cleanup offers pass all 26
 native cases. The final frozen helper and launcher build successfully; hash/volume
 native tests pass. All builds and tests use the machine-wide lock.
 
@@ -60,9 +61,50 @@ stage, reuses all 32 default shader derivations and driver blobs, promotes a
 separate full generation, and leaves the quick shader cache unchanged. Evidence:
 `scratch/q237/validation.json` and `background-full.log` (173.23 s for the suite).
 
+The final frozen helper also passes a fresh 1080p/16:9/2x preparation in
+**103.229 s**: all 3,546 native requests/probes pass, both shader packs are
+written (1,593 distinct shaders), and the 2,113-recipe race pack and unchanged
+menu/race counts are present. MSAA mapping correctly needs no new pipelines at
+2x. Evidence: `scratch/d236/{validation,report}.json`. This has no same-settings
+full baseline, so no percentage speedup is inferred from the ultrawide baseline.
+
+**Live High Speed Ring.** Same engine/save hashes, 1080p/native 21:9/8x,
+`RSX_ULTRAWIDE=2`, `RSX_SHADER_WARMUP=1`, interpreter and background helper off.
+Each process gets a separate copy of the prepared cache. The repeat is a copy of
+the first quick run's learned cache. The display is kept awake; OS/driver caches
+are retained. Corrected trials are `hsr-prepared-{quick,full,quick-repeat}238`.
+An earlier `quick236` run used the wrong anamorphic override and was aborted;
+it is excluded. Quick startup loads all 5,218 lookup entries and the 2,113-recipe
+race pack. Inspected grid/gameplay window shots render correctly.
+
+RSX present-interval accounting excludes screenshots and background intervals:
+
+| Cache | First 30 s excess above 33.37 ms | First 30 s max | Later sample p99 / max |
+| --- | ---: | ---: | ---: |
+| Short | 0.757 s | 184.0 ms | 18.7 / 43.0 ms |
+| Full | 0.757 s | 178.1 ms | 21.6 / 152.8 ms |
+
+Both first windows retain 994 intervals/~24.1 s after screenshot exclusions,
+with no focus exclusions. This one ordered pair shows comparable race-start
+behavior; it does not establish that the smaller cache improves steady play.
+The separate standard FrameTest reports 59.9 FPS short / 59.4 FPS full.
+The complete traces record 118 guest shader compiles short / 33 full: the smaller
+scope still incurs first-encounter work. The repeat records **zero shader
+compiles**, and all **3,743** driver calls after its first present use cached
+blobs. Repeat timing is excluded from comparison because focus was lost for
+part of the run. This verifies learned-cache reuse, not a fully foreground
+repeat benchmark. All owned games exit; source caches/saves remain intact.
+Evidence: `scratch/k236/game-comparison.json`, the named route directories and
+their contexts, traces, screenshots, window/shot timestamps and FrameTest files.
+
+Reproduction: `scripts/test/hitch_capture.py hsr prepared --seed-cache <private-cache>
+--engine <same-engine> --suffix <fresh-label> --env RSX_MSAA=8 --env GT5P_ULTRAWIDE=1
+--env RSX_ULTRAWIDE=2 --env RSX_SHADER_WARMUP=1`, through `run_locked.py`.
+
 **Limits.** This is observed menu/race coverage, not whole-game preparation.
 Unseen pipelines still compile on demand. Existing automatic translation limits
-remain; the default proof also still precedes the additional settings translation,
+remain; new fresh acceptance covers 16:9 and 21:9, not a new 1440p/4K run. The
+default proof also still precedes the additional settings translation,
 so this does not eliminate every off-mode driver creation. No engine/runtime patch,
 starter, main branch, tag or release change. See [quick-preparation.md](quick-preparation.md).
 

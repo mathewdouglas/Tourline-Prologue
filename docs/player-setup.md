@@ -42,7 +42,7 @@ launch resumes. `logs/prepare-background-pause.txt` records the pauses.
   processors). `GT5P_PREPARE_OFFER=0`, `GT5P_PREPARE_VOLUME=0` and `--no-prepared` start nothing.
 - A current full preparation is remembered in `prepare-full-current-<port version>.txt` with its
   selection/settings/compiler identity, so later launches skip the helper check.
-- Tests: `scripts/test/launcher_background_native.py` (12 scenarios against the probe),
+- Tests: `scripts/test/launcher_background_native.py` (13 scenarios against the probe),
   `scripts/test/background_preparation.py`. Measurements: docs/progress.md Phase 225.
 
 ## First-launch preparation offer, preload default and indicators (v0.2.4)

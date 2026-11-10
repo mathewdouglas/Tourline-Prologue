@@ -2,12 +2,14 @@
 
 A configured install without a completed preparation of this release starts the helper beside the game: no
 offer, idle priority, --background with the cache the game uses, and prepare.cancel when the game exits (the
-helper's job is closed after it). A selected, current preparation starts nothing and is remembered so later
+helper's job is closed after it). A selected, current full preparation starts nothing and is remembered so later
 launches skip the helper check. GT5P_PREPARE_BACKGROUND=0, GT5P_PREPARE_OFFER=0 and --no-prepared start nothing.
 Settings restarts keep the helper running. While the game signals a race (GT5P_RACE_EVENT) every process of the
 helper's job is suspended, and resumed back in the menus (GT5P_PREPARE_BACKGROUND_PAUSE=0: no event, no pause).
 """
 import argparse
+import ctypes as C
+from ctypes import wintypes as W
 import hashlib
 import os
 from pathlib import Path
@@ -29,6 +31,10 @@ def main():
     ap.add_argument('--launcher', type=Path, required=True)
     ap.add_argument('--probe', type=Path, required=True)
     args = ap.parse_args()
+    api=C.WinDLL('kernel32',use_last_error=True)
+    api.CreateFileW.argtypes=[W.LPCWSTR,W.DWORD,W.DWORD,W.LPVOID,W.DWORD,W.DWORD,W.HANDLE]
+    api.CreateFileW.restype=W.HANDLE
+    api.CloseHandle.argtypes=[W.HANDLE]
     with tempfile.TemporaryDirectory(prefix='Tourline background ') as temp:
         root = Path(temp)
         install, disc = root/'Install', root/'Game/PS3_GAME'
@@ -56,6 +62,7 @@ def main():
                  ('background-no-pause', {'GT5P_PROBE_RACE': '1', 'GT5P_PREPARE_BACKGROUND_PAUSE': '0'}, [], None, True, 1),
                  ('already-prepared', {'GT5P_PROBE_SELECTED': '1'}, [], 'preparation/0123456789abcdef01234567/shadercache', False, 1),
                  ('quick-prepared', {'GT5P_PROBE_SELECTED':'1','GT5P_PROBE_QUICK_SELECTED':'1'}, [], 'preparation/0123456789abcdef01234567/shadercache', True, 1),
+                 ('settings-locked', {'GT5P_PROBE_SELECTED':'1'}, [], 'preparation/0123456789abcdef01234567/shadercache', False, 1),
                  ('check-error', {'GT5P_PROBE_SELECTED': 'error'}, [], None, False, 1),
                  ('background-disabled', {'GT5P_PREPARE_BACKGROUND': '0', 'GT5P_PREPARE_OFFER': '0'}, [], None, False, 0),
                  ('offer-disabled', {'GT5P_PREPARE_OFFER': '0'}, [], None, False, 0),
@@ -77,7 +84,14 @@ def main():
                          'GT5P_PREPARE_BACKGROUND_PAUSE', 'GT5P_RACE_EVENT', 'GT5P_PROBE_RACE'):
                 env.pop(name, None)
             env.update(extra)
-            done = subprocess.run([launcher]+flags, env=env, timeout=60)
+            locked=None
+            if label=='settings-locked':
+                locked=api.CreateFileW(str(data/'gt5p_settings.toml'),0x80000000,0,None,3,128,None)
+                assert locked not in (None,W.HANDLE(-1).value),C.get_last_error()
+            try:
+                done = subprocess.run([launcher]+flags, env=env, timeout=60)
+            finally:
+                if locked is not None:api.CloseHandle(locked)
             assert done.returncode == 0, (label, done.returncode, (data/'logs/setup.err').read_text() if (data/'logs/setup.err').exists() else '')
             assert (data/'probe.txt').exists(), (label, 'game did not start')
             record = data/'background.txt'
