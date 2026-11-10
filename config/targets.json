@@ -33,6 +33,11 @@
     "aspect_16_9_float": "0x01287DD0",
     "ui_aspect_16_9_float": "0x0126AE5C",
     "scene_camera_aspect_16_9_float": "0x01280924",
-    "ui_label_mask_func": "0x00768340"
+    "ui_label_mask_func": "0x00768340",
+    "controls_core": "0x013936F0",
+    "controls_vtable": "0x0125C148",
+    "controls_get": "0x004FB088",
+    "controls_set": "0x004F8198",
+    "controls_load": "0x004FAA28"
   }
 }

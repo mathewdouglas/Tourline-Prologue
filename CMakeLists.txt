@@ -165,6 +165,7 @@ add_executable(gt5p
     src/gt5p_uifix.cpp
     src/gt5p_spu_native.c
     src/gt5p_settings.cpp
+    src/gt5p_controls.cpp
     src/gt5p_opening.cpp
     src/gt5p_profview.cpp
     src/gt5p_debug_export.cpp
@@ -220,6 +221,17 @@ else()
     list(APPEND GT5P_MAIN_DEFS "GT5P_SPURS_SYNTH_DONE=0")
 endif()
 set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS "${GT5P_MAIN_DEFS}")
+# The controller link's measured addresses are scoped to this host source.
+set(GT5P_CONTROLS_DEFS "")
+foreach(key IN ITEMS core vtable get set load)
+    string(JSON value ERROR_VARIABLE missing GET "${GT5P_T}" "controls_${key}")
+    if(missing)
+        set(value 0)
+    endif()
+    string(TOUPPER "${key}" upper)
+    list(APPEND GT5P_CONTROLS_DEFS "GT5P_CONTROLS_${upper}=${value}u")
+endforeach()
+set_source_files_properties(src/gt5p_controls.cpp PROPERTIES COMPILE_DEFINITIONS "${GT5P_CONTROLS_DEFS}")
 # toml++ (MIT, external/tomlplusplus, v3.4.0) for gt5p_settings.toml. Scoped to
 # the one file that uses it, like the definitions above, so adding it does not
 # change the lifted chunks' command lines and rebuild them.

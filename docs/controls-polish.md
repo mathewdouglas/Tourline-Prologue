@@ -6,22 +6,28 @@ The existing Phase 218 partial-pressure fix remains in place.
 
 ## Player controls
 
-F1 has a **Controls** page and a **Feedback** page. All new values require a
-restart. RecompLauncher exposes the same six choices; its first-run preset stays
-unchanged. Existing files default to linear response, zero dead zone, the game's
-own assignments and no new effects. No save or game assignment table is edited.
+F1 has a **Controls** page and a **Feedback** page. Response, dead zone and
+feedback changes require a restart; Modern controls applies live once the game
+has loaded its profile. RecompLauncher exposes the five restart-based choices;
+Modern controls is in F1 because it reads and changes the game's current mapping.
+Its first-run preset stays unchanged. Existing files retain linear response,
+zero dead zone and no new effects. Custom game mappings stay intact until a player
+explicitly chooses Yes or No.
 
 | TOML key under `[input]` | Environment override | Values / default |
 | --- | --- | --- |
 | `trigger_deadzone` | `PAD_TRIGGER_DEADZONE` | Integer 0..20 percent; default 0. F1 offers 0/2/5/10/15/20. |
 | `trigger_curve` | `PAD_TRIGGER_CURVE` | 0 Linear (default), 1 Gentle, 2 Quick |
-| `modern_controls` | `PAD_MODERN_CONTROLS` | false / 0 by default; true / 1 enables the standard-layout host preset |
+| `modern_controls` | `PAD_MODERN_CONTROLS` | Last observed game mapping (not a boot command); F1 No / Yes changes the four assignments |
 | `adaptive_triggers` | `PAD_ADAPTIVE_TRIGGERS` | false / 0 by default; true / 1 requests fixed DualSense resistance |
 | `trigger_rumble` | `PAD_TRIGGER_RUMBLE` | false / 0 by default; true / 1 forwards game motor levels to supported trigger motors |
 | `sdl_rumble` | `PAD_SDL_RUMBLE` | false / 0 by default; true / 1 forwards game motor levels to SDL body motors |
 
 `PAD_CONTROLS_POLISH=0` disables all six runtime additions, independently of saved
-values. Individual `=0` overrides restore each default. Environment values win over
+values. `GT5P_NATIVE_CONTROLS=0` disables only the native mapping link. For Modern
+controls, an explicit `PAD_MODERN_CONTROLS=1` is a one-shot startup request for the
+modern mapping; `=0` requests the four defaults. It is not continuous enforcement.
+Other individual `=0` overrides restore their defaults. Environment values win over
 the file and F1 reports the individual overrides. `PAD_NO_SDL=1` retains XInput /
 keyboard fallback. `PAD_PRESS_FORCE_FULL=1` is the older Phase 218 rollback and
 intentionally defeats partial pressure; leave it unset for these controls.
@@ -36,17 +42,22 @@ backend-specific digital thresholds. When shaping is chosen, nonzero shaped
 pressure sets the digital bit; a zero value clears it so injection fix-up cannot
 turn a suppressed input into full pressure.
 
-**Modern controls is a standard-layout preset, not a universal assignment editor.**
-It makes R2 supply Cross pressure and L2 supply Square pressure during the existing
-RaceRoot / QuickArcade race scope. That gives R2 throttle / L2 brake with the game's
-standard Cross-throttle / Square-brake assignments. Original face buttons remain
-available, including pause-menu confirmation; R2/L2's old digital functions are
-suppressed in that scope. F1 uses physical buttons. Other screens keep their input.
-Turning it Off restores the original host mapping. Modes with different screen
-roots need acceptance. The preset does not detect arbitrary in-game assignments:
-players who already assigned R2/L2 in the game (as in Phase 218) should keep it Off
-and use the response/dead-zone controls directly. A one-step rewrite of arbitrary
-custom game assignments remains a gap; no unverified save offsets are written.
+**Modern controls follows the game's player-one SIXAXIS assignments.** Yes means
+R2 accelerate, L2 brake, Cross gear up and Square gear down. F1 detects this exact
+mapping even when it was selected through the game's Options screen. Choosing No
+restores Cross accelerate, Square brake, R2 gear up and L2 gear down. A custom
+mapping displays No; choosing No explicitly from its dropdown restores these four
+defaults even if No was already displayed. Steering, other buttons, wheels, other
+play modes and player two stay unchanged. No host button alias remains, so physical
+menu buttons and pressure channels retain their normal meanings.
+
+The link waits for profile load, validates the pinned native controller layout,
+then changes only four pressure-action bytes and clears the four corresponding
+digital actions, matching the game's own assignment representation. Getter,
+setter and profile-load hooks serialize mapping access with the input poll. No
+save-file offsets or checksums are patched. Use the game's normal Save to persist
+the mapping; the TOML boolean is only an observation and never silently reapplies
+an old preset at boot. Unknown targets or unavailable layouts receive no writes.
 
 ## Feedback and lifecycle
 
@@ -126,9 +137,8 @@ with changed runtime and settings consumers recompiled privately.
 
 - `powershell -NoProfile -File scripts/test/controls_polish.ps1 -Runtime <private runtime> -Sdl <read-only SDL2.dll>`:
   **16,128** monotonic response cases (21 dead zones x 3 curves x 256 pressures),
-  endpoint/reference values, race/menu preset routing; **255** actual big-endian
-  guest trigger packets plus modern partial Cross/Square packets survive Phase
-  218 fix-up. Mock outputs verify packet flags/unused bytes, motor levels,
+  endpoint/reference values; **255** actual big-endian
+  guest trigger packets survive Phase 218 fix-up. Mock outputs verify packet flags/unused bytes, motor levels,
   400-ms renewal, stop/resume, failure suppression and missing exports.
   Real SDL virtual devices verify neutral disconnect, **five** replacements keeping
   their port and **three** worker reconnects. Master rollback and no-SDL XInput
@@ -137,7 +147,7 @@ with changed runtime and settings consumers recompiled privately.
   save/reload cases cover defaults, opt-ins, invalid types/ranges, environment
   precedence and original-file preservation. Probe compiled from the real settings
   and keymap sources; no guest/game execution.
-- `scripts/test/recomplauncher_manifest.py`: **16 settings / 19 keys** pass all
+- `scripts/test/recomplauncher_manifest.py`: **15 settings / 18 keys** pass all
   choices and preserve other file values; first-run preset unchanged. Actual
   RecompLauncher app acceptance remains open.
 - `scripts/test/controls_patch.py`: clean pinned main + controls apply, setup
@@ -163,8 +173,36 @@ with changed runtime and settings consumers recompiled privately.
   focus/overlay/exit clearing on hardware, USB/Bluetooth, wireless Xbox adapters,
   Steam Input/DS4Windows and DualSense Edge remain unverified.
 
-Hardware acceptance should cover both existing in-game R2/L2 assignments with the
-preset Off and standard Cross/Square assignments with it On, pressure sweeps,
+Hardware acceptance should cover the modern and default game assignments, pressure sweeps,
 menu/pause navigation, normal close, F1, focus loss and reconnects. Effects stay
 default-off until those results exist. Full release packaging and a long race/hitch
 comparison were not run for this input-only change.
+
+## Native mapping follow-up (2026-11-10)
+
+The previous test ZIP's race-only host alias is superseded by the native mapping
+link above. Measured default native action pairs for Cross/Square/L2/R2 are
+4/5/10/9; modern is 9/10/5/4, with digital action zero on these channels.
+Per-build addresses are pinned in `config/targets.json` and compile only into
+`gt5p_controls.cpp`, avoiding any generated PPU rebuild. The runtime overlay
+provides the pad-poll and screen callbacks; the main runtime patch is unchanged.
+
+`controls_mapping.cpp` exercises the production bridge against private big-endian
+memory: Yes/No, game-side edits detected without a host request, explicit default
+restoration from a custom No mapping, unrelated bytes preserved, five malformed
+layouts rejected before writing, and deferred profile load / disabled requests.
+These are synthetic native checks, separate from game and hardware acceptance.
+
+Real-window native acceptance used `controls_ui.ps1 -Mapping`'s route on a private
+fixture: F1 Yes shows the four modern assignments in the game's dialog (including
+the highlighted Cross / Shift Up field); changing Cross to Shift Down in-game
+makes F1 show No. Explicitly choosing the already-displayed No restores all four
+defaults, confirmed in the game's dialog, while the other displayed bindings stay.
+A custom 10/10/5/4 tuple survives the game's save and reload without a host command.
+A separate normal game Save after the F1/native 9/10/5/4 tuple completes successfully
+(`GAME_P2.DAT` 6,840 bytes, private fixture). Fresh parser/native/overlay checks pass;
+the current SDL inventory is zero controllers. No new tactile or driving claim is made.
+Fresh-process reload of that modern save also passes: with a new PC settings
+file (default false), F1 shows Yes and the native tuple is 9/10/5/4 without any
+host mapping request. This confirms persistence uses the game save, not a TOML
+preset replay. Evidence: `scratch/controls/native-mapping/{accept,save.log,reload}`.

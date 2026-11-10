@@ -342,7 +342,7 @@ void apply_env(const Gt5pSettings& s)
     if (!s.keyboard)        set_default_env("PAD_NO_KEYBOARD", "1");
     snprintf(buf, sizeof buf, "%d", (int)s.trigger_deadzone); set_default_env("PAD_TRIGGER_DEADZONE", buf);
     snprintf(buf, sizeof buf, "%d", (int)s.trigger_curve); set_default_env("PAD_TRIGGER_CURVE", buf);
-    snprintf(buf, sizeof buf, "%d", (int)s.modern_controls); set_default_env("PAD_MODERN_CONTROLS", buf);
+    /* Modern controls reflects the game; a saved observation is not an override. */
     snprintf(buf, sizeof buf, "%d", (int)s.adaptive_triggers); set_default_env("PAD_ADAPTIVE_TRIGGERS", buf);
     snprintf(buf, sizeof buf, "%d", (int)s.trigger_rumble); set_default_env("PAD_TRIGGER_RUMBLE", buf);
     snprintf(buf, sizeof buf, "%d", (int)s.sdl_rumble); set_default_env("PAD_SDL_RUMBLE", buf);
@@ -561,8 +561,8 @@ bool gt5p_settings_save(const Gt5pSettings& s, const std::string& path)
          "trigger_deadzone = " << s.trigger_deadzone << "\n"
          "# Trigger response: 0 linear, 1 gentle, 2 quick. [PAD_TRIGGER_CURVE] Restart to apply.\n"
          "trigger_curve = " << s.trigger_curve << "\n"
-         "# Standard game Cross/Square layout only: R2 throttle / L2 brake during races.\n"
-         "# Keep Off when already assigned R2/L2 in-game. [PAD_MODERN_CONTROLS]\n"
+         "# Last observed game mapping: R2 throttle, L2 brake, Cross gear up, Square gear down.\n"
+         "# Observation only: F1 Yes/No changes these assignments live; use the game Save.\n"
          "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n"
          "# PAD_ADAPTIVE_TRIGGERS: opt-in; unsupported devices ignore this. Restart to apply.\n"
          "adaptive_triggers = " << (s.adaptive_triggers ? "true" : "false") << "\n"
@@ -709,4 +709,14 @@ void gt5p_settings_load()
            g_path.c_str(), g_settings.resolution, g_settings.msaa,
            g_settings.vsync ? 1 : 0, g_settings.shader_cache ? 1 : 0,
            g_settings.sdl_controllers ? 1 : 0, g_settings.keyboard ? 1 : 0);
+}
+
+void gt5p_settings_modern_from_game(bool yes)
+{
+    if (gt5p_settings_overridden("PAD_MODERN_CONTROLS")) return;
+    std::lock_guard<std::mutex> lock(g_skip_mu);
+    if (g_file.modern_controls == yes) return;
+    g_file.modern_controls = g_settings.modern_controls = yes;
+    if (g_enabled && !g_path.empty() && !gt5p_settings_save(g_file, g_path))
+        fprintf(stderr, "[controls] could not save observed modern-controls state\n");
 }

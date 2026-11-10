@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "gt5p_settings.h"
+#include "gt5p_controls.h"
 #include "gt5p_debug_export.h"
 #include "gt5p_glyphs.h"
 #include "gt5p_keymap.h"
@@ -203,10 +204,11 @@ const std::vector<Item>& items()
           [](const Gt5pSettings& s) { return (int)s.trigger_curve; },
           [](Gt5pSettings& s, int v) { s.trigger_curve = v; }, nullptr },
         { L"CONTROLS", L"Modern controls",
-          L"R2 throttle / L2 brake in races with the game's STANDARD Cross throttle / Square brake assignments. Keep Off if already assigned R2/L2 in the game. Does not edit saves. Face buttons still work. Restart to apply.",
-          "PAD_MODERN_CONTROLS", kOnOff,
-          [](const Gt5pSettings& s) { return (int)s.modern_controls; },
-          [](Gt5pSettings& s, int v) { s.modern_controls = v; }, nullptr },
+          L"Uses the game's player-one button assignments: R2 accelerate, L2 brake, Cross gear up, Square gear down. Yes follows that mapping even when set in-game. No restores these four game defaults. Other bindings stay. Applies live; the game saves it with its normal save.",
+          "PAD_MODERN_CONTROLS", { {0, L"No"}, {1, L"Yes"} },
+          [](const Gt5pSettings& s) { int v=gt5p_modern_controls_state(); return v<0?(int)s.modern_controls:v; },
+          [](Gt5pSettings& s, int v) { s.modern_controls = v; },
+          [](int v) { gt5p_modern_controls_request(v); } },
         { L"FEEDBACK", L"DualSense fixed resistance",
           L"Experimental: fixed resistance on both DualSense triggers through SDL2, while focused and input is active. No vehicle telemetry. Bluetooth may need a controller power cycle before other apps can use DirectInput. Unsupported devices ignore it. Restart to apply.",
           "PAD_ADAPTIVE_TRIGGERS", kOnOff,
@@ -502,13 +504,21 @@ void change(int id, int dir)
 void set_value(int id, int v)
 {
     const Item& it = items()[id];
+    if (strcmp(it.env, "PAD_MODERN_CONTROLS") == 0 && gt5p_modern_controls_state() < 0) {
+        s_status = gt5p_modern_controls_state() == -2 ? L"Native controls link is unavailable." : L"Wait for the game to finish loading its profile.";
+        return;
+    }
     it.set(s_edit, v);
     const bool over = gt5p_settings_overridden(it.env);
     if (!gt5p_settings_enabled()) s_status = L"GT5P_NO_SETTINGS is set: changes are not saved.";
     else if (!gt5p_settings_store(s_edit)) s_status = L"Could not write " + widen(gt5p_settings_path());
     else s_status = L"Saved.";
     if (over) s_status += L"  " + widen(it.env) + L" is set in the environment and wins over this.";
-    else if (it.apply) { it.apply(v); s_status += L"  Applied."; }
+    else if (it.apply) {
+        it.apply(v);
+        s_status += strcmp(it.env, "PAD_MODERN_CONTROLS") == 0 ?
+            L"  Mapping requested. Use the game's normal Save to keep it." : L"  Applied.";
+    }
     else if (it.get(s_edit) != it.get(s_boot)) s_status += L"  Takes effect after a restart.";
 }
 
@@ -870,7 +880,8 @@ void paint(HDC dc)
         fill(dc, kFieldX, y, kFieldX + kFieldW, y + kFieldH, RGB(0, 4, 0));
         fill(dc, kFieldX, y + kFieldH - 1, kFieldX + kFieldW, y + kFieldH, RGB(99, 101, 107));
         text_in(dc, fRow, kFieldX + 14, y, kFieldX + kFieldW - 8, y + kFieldH - 2, over ? grey(100) : grey(204),
-                it.choices[choice_index(it)].label, DT_LEFT);
+                (!strcmp(it.env, "PAD_MODERN_CONTROLS") && gt5p_modern_controls_state() < 0) ?
+                    (gt5p_modern_controls_state() == -2 ? L"Unavailable" : L"Waiting for game") : it.choices[choice_index(it)].label, DT_LEFT);
         /* Notes sit in the row's empty left side. */
         if (later)
             text_in(dc, fTag, kPx0 + 30, y, kFieldX, y + kFieldH - 2, RGB(237, 60, 60), L"after restart", DT_LEFT);
@@ -1418,6 +1429,8 @@ void set_open(bool open)
     if (open) { pause_race_if_running(); g_pad_input_blocked = 1; }
     else s_release_wait = true;
     if (open) {
+        int modern = gt5p_modern_controls_state();
+        if (modern >= 0) gt5p_settings_modern_from_game(modern != 0);
         s_edit = gt5p_settings_file();
         s_sel = 1;          /* the page's first item */
         s_drop = false;
@@ -1513,7 +1526,7 @@ void drop_pick()
     s_drop = false;
     if (s_sel < 0 || s_sel >= (int)r.size() || r[s_sel] < 0) return;
     const Item& it = items()[r[s_sel]];
-    if (s_drop_sel >= 0 && s_drop_sel < (int)it.choices.size() && s_drop_sel != choice_index(it))
+    if (s_drop_sel >= 0 && s_drop_sel < (int)it.choices.size() && (s_drop_sel != choice_index(it) || !strcmp(it.env, "PAD_MODERN_CONTROLS")))
         set_value(r[s_sel], it.choices[s_drop_sel].value);
 }
 
@@ -1580,7 +1593,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         case VK_PRIOR: switch_section(-1); break;
         case VK_NEXT:  switch_section(+1); break;
         case VK_ESCAPE: case VK_BACK: back(); break;
-        case VK_F1: set_open(false); break;
+        case VK_F1: set_open(!s_open); break;
         default: return 0;
         }
         redraw();
@@ -1656,6 +1669,14 @@ DWORD WINAPI ui_thread(LPVOID)
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         if (!IsWindow(s_game)) return 0;
 
+        static int modern_was=-2;
+        int modern_now=gt5p_modern_controls_state();
+        if(modern_now>=0 && !gt5p_modern_controls_pending() && modern_now!=modern_was) {
+            modern_was=modern_now;
+            gt5p_settings_modern_from_game(modern_now!=0);
+            s_edit.modern_controls=modern_now!=0;
+            if(s_open)redraw();
+        }
         /* Escape from the game window: the quit question (not over the page,
          * which Escape closes). */
         if (InterlockedExchange(&s_quit_req, 0) && !s_open) set_quit(true);

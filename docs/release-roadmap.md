@@ -68,10 +68,10 @@ Evidence for finished work goes in [progress.md](progress.md).
   - DualSense adaptive triggers at a fixed resistance, through SDL;
   - Xbox trigger rumble.
   Development implementation on `feature/controls-polish`: F1 Controls/Feedback,
-  settings-neutral trigger shaping, a standard-layout host preset, and opt-in SDL2
+  settings-neutral trigger shaping, a native mapping-linked modern preset (R2 accelerate,
+  L2 brake, Cross gear up, Square gear down), and opt-in SDL2
   fixed DualSense resistance / game-signal Xbox trigger vibration. SDL3 is deferred;
-  a connected DualSense accepts enable/clear API requests, but tactile and driving acceptance remain open. Arbitrary custom game
-  assignment rewriting remains open. See [controls-polish.md](controls-polish.md)
+  a connected DualSense accepts enable/clear API requests, but tactile and driving acceptance remain open. F1 detects the in-game mapping and No restores only the four defaults. See [controls-polish.md](controls-polish.md)
   for exact switches, native evidence and hardware/transport gaps.
 - **Smaller items:**
   - texture-load warning indicator;

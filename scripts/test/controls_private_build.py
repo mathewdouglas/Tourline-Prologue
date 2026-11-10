@@ -11,6 +11,7 @@ is written. Use an x64 VS environment and run through C:\\tmp\\gt5p-testlock\\ru
 Outputs <output>/install/runtime/gt5p.exe (+ the reference DLLs) and <output>/decoder.dll.
 """
 import argparse
+import json
 import os
 from pathlib import Path
 import shutil
@@ -23,16 +24,20 @@ from despecialize_build import CLANG, compile_object, build_decoder  # noqa: E40
 
 RUNTIME_FILES = ('libs/video/rsx_d3d12_backend.c', 'libs/video/rsx_vp_decompiler.c', 'libs/video/rsx_fp_decompiler.c',
                  'libs/input/cellPad.c', 'runtime/syscalls/sys_ppu_thread.c')
-SRC_FILES = ('main.cpp', 'gt5p_opening.cpp', 'gt5p_present.cpp', 'gt5p_settings.cpp', 'gt5p_settings_ui.cpp',
+SRC_FILES = ('main.cpp', 'gt5p_opening.cpp', 'gt5p_controls.cpp', 'gt5p_present.cpp', 'gt5p_settings.cpp', 'gt5p_settings_ui.cpp',
              'gt5p_shaderbusy.cpp', 'gt5p_debug_export.cpp', 'gt5p_keymap.cpp', 'gt5p_glyphs.cpp')
 
 
 def compile_src(reference, name, objects):
     obj = r'CMakeFiles\gt5p.dir\src\%s.obj' % name
-    recipe = 'gt5p_settings.cpp' if name == 'gt5p_opening.cpp' else name
+    recipe = 'gt5p_settings.cpp' if name in ('gt5p_opening.cpp', 'gt5p_controls.cpp') else name
     recipe_obj = r'CMakeFiles\gt5p.dir\src\%s.obj' % recipe
     command = subprocess.check_output(['ninja', '-t', 'commands', recipe_obj], cwd=reference, text=True).splitlines()[-1]
     command = command.replace(recipe, name)
+    if name == 'gt5p_controls.cpp':
+        target = json.loads((ROOT / 'config/targets.json').read_text())['BCUS98158']
+        defines = ' '.join('/DGT5P_CONTROLS_' + k.upper() + '=' + target['controls_' + k] + 'u' for k in ('core', 'vtable', 'get', 'set', 'load'))
+        command = command.replace(' -c -- ', ' ' + defines + ' -c -- ')
     source = str(reference.parent / 'src' / name)
     assert source in command, source
     command = command.replace(source, str(ROOT / 'src' / name))

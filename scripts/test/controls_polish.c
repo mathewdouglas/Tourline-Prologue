@@ -161,14 +161,7 @@ static void test_shapes(void)
     CHECK(pad_trigger_response(128,0,0)==128);
     CHECK(pad_trigger_response(128,0,1)==64);
     CHECK(pad_trigger_response(128,0,2)==192);
-    PadHostState hs={0};hs.trigger_r2=128;hs.trigger_l2=64;hs.buttons=CELL_PAD_CTRL_R2|CELL_PAD_CTRL_L2;
-    pad_modern_controls(&hs);CHECK(hs.trigger_r2==128 && hs.press_cross==0);
-    pad_milestone_seen("RaceRoot.gpb");pad_modern_controls(&hs);
-    CHECK(hs.press_cross==128 && hs.press_square==64 && !hs.trigger_r2 && !hs.trigger_l2);
-    CHECK((hs.buttons&(CELL_PAD_CTRL_R2|CELL_PAD_CTRL_L2))==0);
-    pad_milestone_seen("OnboardMeterRoot.gpb");CHECK(s_controls_race);
-    pad_milestone_seen("TopRoot.gpb");CHECK(!s_controls_race);
-    printf("PASS: %d exhaustive monotonic pressure cases and modern race/menu routing\n",cases);
+    printf("PASS: %d exhaustive monotonic pressure cases (neutral default and curved endpoints)\n",cases);
 }
 
 static void test_packets(void)
@@ -184,14 +177,8 @@ static void test_packets(void)
         CHECK(vm_read16(0x10000+4+CELL_PAD_BTN_OFFSET_PRESS_L2*2)==n);
         CHECK(vm_read16(0x10000+4+CELL_PAD_BTN_OFFSET_PRESS_R2*2)==n);
     }
-    __atomic_store_n(&s_controls_race,1,__ATOMIC_RELAXED);
-    s_host_state[0].trigger_r2=128;s_host_state[0].trigger_l2=64;
-    pad_modern_controls(&s_host_state[0]);s_data_fresh[0]=1;
-    CHECK(cellPadGetData(0,(CellPadData*)(uintptr_t)0x10000)==0);
-    CHECK(vm_read16(0x10000+4+CELL_PAD_BTN_OFFSET_PRESS_CROSS*2)==128);
-    CHECK(vm_read16(0x10000+4+CELL_PAD_BTN_OFFSET_PRESS_SQUARE*2)==64);
     pad_unlock();free(vm_base);vm_base=NULL;
-    puts("PASS: 255 partial/full trigger guest packets and modern Cross/Square pressures survive fix-up");
+    puts("PASS: 255 partial/full trigger guest packets survive fix-up");
 }
 
 static void test_hardware(void)

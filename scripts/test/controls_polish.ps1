@@ -13,6 +13,17 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build
 & cmd /c "$dir/build.cmd"
 if ($LASTEXITCODE) { throw 'Compile failed' }
 $env:PAD_MODERN_CONTROLS='1'; $env:PAD_ADAPTIVE_TRIGGERS='1'; $env:PAD_TRIGGER_RUMBLE='1'; $env:PAD_SDL_RUMBLE='1'
+$compileMap = @"
+@echo off
+set "PATH=C:\Program Files (x86)\Microsoft Visual Studio\Installer;%PATH%"
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+"C:\Program Files\LLVM\bin\clang-cl.exe" /nologo /O2 /MD /EHsc /std:c++20 /D_CRT_SECURE_NO_WARNINGS /I"$Runtime/include" /I"$Runtime/runtime/ppu" /Fo"$dir/mapping.obj" /Fe"$dir/mapping.exe" "$PSScriptRoot/controls_mapping.cpp"
+"@
+$compileMap | Set-Content "$dir/build-map.cmd"
+& cmd /c "$dir/build-map.cmd"
+if ($LASTEXITCODE) { throw 'Mapping compile failed' }
+& "$dir/mapping.exe"
+if ($LASTEXITCODE) { throw 'Native mapping test failed' }
 foreach($mode in $(if ($Hardware) { @('hardware') } else { @('shapes','packets','effects','devices','ports','worker') })) {
  & "$dir/controls.exe" $mode
  if ($LASTEXITCODE) { throw "Failed $mode" }

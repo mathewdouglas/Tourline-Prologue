@@ -38,7 +38,7 @@ struct Gt5pSettings {
     bool keyboard        = true;    /* keyboard as pad 1 when no controller is connected */
     int trigger_deadzone = 0;       /* 0..20 percent; rescale the remaining travel */
     int trigger_curve = 0;          /* 0 linear, 1 gentle, 2 quick */
-    bool modern_controls = false;  /* host preset for standard Cross/Square game assignments */
+    bool modern_controls = false;  /* last observed game mapping; does not force it at boot */
     bool adaptive_triggers = false; /* fixed DualSense resistance, experimental hardware */
     bool trigger_rumble = false;    /* supported Xbox triggers: existing game motor signals */
     bool sdl_rumble = false;        /* forward game body motors through dynamic SDL2 */
@@ -116,3 +116,6 @@ void gt5p_skip_movie_from_game(bool skip);
 
 /* After ppu_recomp_register. Does nothing when gt5p_native_opening() is false. */
 void gt5p_opening_install();
+
+/* Mirror the actual game mapping for display; this never applies a preset. */
+void gt5p_settings_modern_from_game(bool yes);

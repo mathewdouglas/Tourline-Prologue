@@ -990,6 +990,8 @@ int main(int argc, char* argv[])
     printf("[HLE] ps3recomp NID registry: %u handlers\n", ps3_hle_count());
 
     ppu_recomp_register();
+    extern void gt5p_controls_install();
+    gt5p_controls_install();
     gt5p_opening_install();   /* must follow recomp register or the table overwrites it */
     ppu_install_thread_trampoline();
     if (!getenv("GT5P_NO_GUEST_CALLER")) g_ps3_guest_caller = gt5p_guest_caller;

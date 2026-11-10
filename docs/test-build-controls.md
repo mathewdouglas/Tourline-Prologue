@@ -1,4 +1,7 @@
-# Controls polish test build
+# Controls polish test build (previous host-preset candidate)
+
+This candidate predates the native mapping link described in [controls-polish.md](controls-polish.md).
+It remains available for comparison; it does not implement the linked Yes/No option.
 
 Local Windows x64 test ZIP built from `feature/controls-polish` implementation
 head `8dc4b5423dba09d4322890882704bcf6cdf67bdb`. No tag or release.

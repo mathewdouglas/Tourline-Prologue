@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/'scratc
   runenv=dict(env,GT5P_SETTINGS=str(p),**override)
   r=subprocess.run([probe,out],env=runenv,capture_output=True,text=True,check=True)
   assert 'CONTROLS '+expected in r.stdout,r.stdout
+  assert 'MODERN_ENV <unset>' in r.stdout, 'An observed TOML value became a boot command'
   assert p.read_text()==content
   r2=subprocess.run([probe],env=dict(runenv,GT5P_SETTINGS=str(out)),capture_output=True,text=True,check=True)
   assert 'CONTROLS '+expected in r2.stdout,r2.stdout

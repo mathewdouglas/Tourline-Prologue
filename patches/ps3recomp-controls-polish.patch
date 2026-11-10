@@ -1,8 +1,18 @@
 diff --git a/libs/input/cellPad.c b/libs/input/cellPad.c
-index c20a298..522663d 100644
+index c20a298..1c73cfd 100644
 --- a/libs/input/cellPad.c
 +++ b/libs/input/cellPad.c
-@@ -209,6 +209,54 @@ static void pad_rumble_levels(u8 small_on, u8 large, u16* lo, u16* hi)
+@@ -103,6 +103,9 @@ volatile u32 g_pad_menu_buttons;
+  * the title's input is blocked (gt5p_settings_ui.cpp: Start to pause a race
+  * before the settings page opens). */
+ volatile u32 g_pad_inject_buttons;
++/* Title-owned mapping bridge: plain guest-memory work on the polling thread. */
++void (*g_pad_controls_poll_hook)(void) = NULL;
++void (*g_pad_controls_screen_hook)(const char*) = NULL;
+ /* What port 0 is played with, for the port's button prompts: 0 nothing,
+  * 1 keyboard, 2 Xbox-style pad (XInput, or SDL's Xbox types), 3 PlayStation,
+  * 4 Nintendo, 5 another pad. A PAD_HOLD script does not count as a device.
+@@ -209,6 +212,38 @@ static void pad_rumble_levels(u8 small_on, u8 large, u16* lo, u16* hi)
      *hi = small_on ? 0xFFFFu : 0u;
  }
  
@@ -25,22 +35,6 @@ index c20a298..522663d 100644
 +    if (curve == 2) x = (x * (510u - x) + 127u) / 255u;
 +    return (u8)x;
 +}
-+static int s_controls_race;
-+/* Opt-in host preset for the game's standard Cross/Square driving layout.
-+ * Face buttons remain available (including pause-menu confirmation). Saves and
-+ * the game's assignment table are never rewritten. */
-+static void pad_modern_controls(PadHostState* hs)
-+{
-+    static int on = -1;
-+    if (on < 0) on = pad_control_int("PAD_MODERN_CONTROLS", 1);
-+    if (!on || !__atomic_load_n(&s_controls_race, __ATOMIC_RELAXED)) return;
-+    if (hs->trigger_r2 > hs->press_cross) hs->press_cross = hs->trigger_r2;
-+    if (hs->trigger_l2 > hs->press_square) hs->press_square = hs->trigger_l2;
-+    hs->buttons &= ~(CELL_PAD_CTRL_L2 | CELL_PAD_CTRL_R2);
-+    if (hs->trigger_r2) hs->buttons |= CELL_PAD_CTRL_CROSS;
-+    if (hs->trigger_l2) hs->buttons |= CELL_PAD_CTRL_SQUARE;
-+    hs->trigger_l2 = hs->trigger_r2 = 0;
-+}
 +static void pad_shape_triggers(PadHostState* hs)
 +{
 +    static int dz = -1, curve;
@@ -57,18 +51,15 @@ index c20a298..522663d 100644
  /* ---------------------------------------------------------------------------
   * XInput backend
   * -----------------------------------------------------------------------*/
-@@ -327,6 +375,10 @@ void pad_milestone_seen(const char* path)
+@@ -327,6 +362,7 @@ void pad_milestone_seen(const char* path)
      if (on < 0) { const char* e = getenv("PAD_MILESTONES"); on = (e && *e == '0') ? 0 : 1; }
      if (!path) return;
      const char* b = strrchr(path, '/'); b = b ? b + 1 : path;
-+    if (!strcmp(b, "RaceRoot.gpb")) __atomic_store_n(&s_controls_race, 1, __ATOMIC_RELAXED);
-+    else if (strcmp(b, "DLSGadgetRoot.gpb") && strcmp(b, "OnboardMeterRoot.gpb") &&
-+             strcmp(b, "QuickArcadeRoot.gpb") && (strstr(b, "Root.gpb") || strstr(b, "Template.gpb")))
-+        __atomic_store_n(&s_controls_race, 0, __ATOMIC_RELAXED);
++    if (g_pad_controls_screen_hook) g_pad_controls_screen_hook(b);
      if (g_pad_milestone_hook) g_pad_milestone_hook(b);
      if (g_pad_screen_hook) g_pad_screen_hook(b);
      if (!on) return;
-@@ -929,12 +981,79 @@ static struct {
+@@ -929,12 +965,79 @@ static struct {
      void* (*GameControllerGetJoystick)(void*);
      int   (*JoystickInstanceID)(void*);
      const char* (*GetError)(void);
@@ -148,7 +139,7 @@ index c20a298..522663d 100644
  
  /* SDL_GameControllerType, else the name, to a g_pad_device_family code. */
  static int pad_sdl_family(void* gc)
-@@ -991,6 +1110,10 @@ static int pad_sdl_dyn_init(void)
+@@ -991,6 +1094,10 @@ static int pad_sdl_dyn_init(void)
      PAD_SDL_FN(GetError, "SDL_GetError")
  #undef PAD_SDL_FN
      *(FARPROC*)&s_sdl.GameControllerGetType = GetProcAddress(m, "SDL_GameControllerGetType");
@@ -159,7 +150,7 @@ index c20a298..522663d 100644
      /* Watch OS device notifications in SDL's joystick thread; the owner below
       * pumps SDL events and reads input for our native (non-SDL) window. */
      s_sdl.SetHint("SDL_JOYSTICK_THREAD", "1");
-@@ -1005,6 +1128,7 @@ static int pad_sdl_dyn_init(void)
+@@ -1005,6 +1112,7 @@ static int pad_sdl_dyn_init(void)
      printf("[cellPad] SDL2 loaded: controllers are read through SDL%c", 10);
      fflush(stdout);
      s_sdl_ok = 1;
@@ -167,7 +158,7 @@ index c20a298..522663d 100644
      return 1;
  }
  
-@@ -1056,6 +1180,9 @@ static void pad_poll_sdl_dyn(void)
+@@ -1056,6 +1164,9 @@ static void pad_poll_sdl_dyn(void)
          if (s_sdl_pad[i] && !s_sdl.GameControllerGetAttached(s_sdl_pad[i])) {
              s_sdl.GameControllerClose(s_sdl_pad[i]);
              s_sdl_pad[i] = NULL;
@@ -177,7 +168,7 @@ index c20a298..522663d 100644
              last_scan = 0;
              printf("[cellPad] port %d: controller removed\n", i);
              fflush(stdout);
-@@ -1070,6 +1197,10 @@ static void pad_poll_sdl_dyn(void)
+@@ -1070,6 +1181,10 @@ static void pad_poll_sdl_dyn(void)
          hs->analog_lx = hs->analog_ly = hs->analog_rx = hs->analog_ry = 128;
          if (!gc || !s_sdl.GameControllerGetAttached(gc)) {
              if (gc) { s_sdl.GameControllerClose(gc); s_sdl_pad[i] = NULL;
@@ -188,7 +179,7 @@ index c20a298..522663d 100644
                        printf("[cellPad] port %d: controller removed%c", i, 10); fflush(stdout); }
              hs->connected = 0;
              continue;
-@@ -1111,6 +1242,7 @@ static void pad_poll_sdl_dyn(void)
+@@ -1111,6 +1226,7 @@ static void pad_poll_sdl_dyn(void)
          hs->press_square   = (btns & CELL_PAD_CTRL_SQUARE)   ? 255 : 0;
          hs->press_l1       = (btns & CELL_PAD_CTRL_L1)       ? 255 : 0;
          hs->press_r1       = (btns & CELL_PAD_CTRL_R1)       ? 255 : 0;
@@ -196,7 +187,7 @@ index c20a298..522663d 100644
      }
  }
  
-@@ -1129,7 +1261,7 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
+@@ -1129,7 +1245,7 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
  {
      int ok = pad_sdl_dyn_init();
      if (!ok) { SetEvent((HANDLE)ready); return 0; }
@@ -205,7 +196,7 @@ index c20a298..522663d 100644
          s_sdl.PumpEvents();
          /* Input is read directly, so discard queued SDL events after pumping. */
          s_sdl.FlushEvents(0, 0xFFFFu);
-@@ -1143,6 +1275,8 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
+@@ -1143,6 +1259,8 @@ static DWORD WINAPI pad_sdl_worker(void* ready)
          if (ready) { SetEvent((HANDLE)ready); ready = NULL; }
          Sleep(PAD_POLL_INTERVAL_MS);
      }
@@ -214,7 +205,7 @@ index c20a298..522663d 100644
  }
  
  static int pad_sdl_dyn_read(void)
-@@ -1166,7 +1300,7 @@ static int pad_sdl_dyn_read(void)
+@@ -1166,7 +1284,7 @@ static int pad_sdl_dyn_read(void)
          started = 1;
          HANDLE ready = CreateEventW(NULL, TRUE, FALSE, NULL);
          HANDLE thread = ready ? CreateThread(NULL, 0, pad_sdl_worker, ready, 0, NULL) : NULL;
@@ -223,17 +214,18 @@ index c20a298..522663d 100644
          if (ready) CloseHandle(ready);
          if (!thread) return 0;
      }
-@@ -1248,6 +1382,9 @@ static void pad_poll_backend(void)
+@@ -1248,6 +1366,10 @@ static void pad_poll_backend(void)
      unsigned long long now = pad_now_ms();
      if (s_last_ms && now - s_last_ms < PAD_POLL_INTERVAL_MS) goto done;
      s_last_ms = now;
++    if (g_pad_controls_poll_hook) g_pad_controls_poll_hook();
 +#if PAD_BACKEND_XINPUT
 +    __atomic_store_n(&s_effect_poll_ms, now, __ATOMIC_RELAXED);
 +#endif
      /* A real pad streams reports at roughly this rate whether or not anything
       * changed, and libpad buffers them; a fresh sweep is a fresh report for
       * every port. cellPadGetData hands each one out exactly once. */
-@@ -1261,6 +1398,7 @@ static void pad_poll_backend(void)
+@@ -1261,6 +1383,7 @@ static void pad_poll_backend(void)
  #elif PAD_BACKEND_SDL2
      pad_poll_sdl2();
  #endif
@@ -241,17 +233,17 @@ index c20a298..522663d 100644
  #ifdef _WIN32
      /* A PAD_HOLD script drives port 0 even with a controller plugged in;
       * otherwise an unattended run depends on what is connected. */
-@@ -1307,7 +1445,8 @@ static void pad_poll_backend(void)
+@@ -1307,7 +1430,8 @@ static void pad_poll_backend(void)
  #if PAD_BACKEND_XINPUT
        if (s_guide) all |= 1u << 16;
  #endif
 -      g_pad_menu_buttons = all;
 +      g_pad_menu_buttons = all; /* F1 always navigates with physical buttons. */
-+      for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) pad_modern_controls(&s_host_state[i]);
++
        if (g_pad_input_blocked)
            for (int i = 0; i < PAD_MAX_HOST_PORTS; i++) {
                PadHostState* hs = &s_host_state[i];
-@@ -1373,6 +1512,10 @@ s32 cellPadEnd(void)
+@@ -1373,6 +1497,10 @@ s32 cellPadEnd(void)
          return CELL_PAD_ERROR_NOT_OPENED;
  
      pad_lock();
@@ -262,7 +254,7 @@ index c20a298..522663d 100644
      pad_shutdown_backend();
      pad_unlock();
  
-@@ -2017,6 +2160,12 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
+@@ -2017,6 +2145,12 @@ s32 cellPadSetActDirect(u32 port_no, CellPadActParam* param)
      u16 lo, hi;
      pad_rumble_levels(param->motor[CELL_PAD_ACTUATOR_PARAM_SMALL],
                        param->motor[CELL_PAD_ACTUATOR_PARAM_LARGE], &lo, &hi);
