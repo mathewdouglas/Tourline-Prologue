@@ -465,6 +465,12 @@ void relaunch()
 void set_open(bool open);
 void set_value(int id, int v);
 
+/* Debug export and the pipeline actions have no environment name. */
+bool same_env(const Item& it, const char* name)
+{
+    return it.env && !strcmp(it.env, name);
+}
+
 void reset_keys();
 
 bool s_feedback_waiting;
@@ -527,7 +533,7 @@ void change(int id, int dir)
 void set_value(int id, int v)
 {
     const Item& it = items()[id];
-    if (strcmp(it.env, "PAD_MODERN_CONTROLS") == 0 && gt5p_modern_controls_state() < 0) {
+    if (same_env(it, "PAD_MODERN_CONTROLS") && gt5p_modern_controls_state() < 0) {
         s_status = gt5p_modern_controls_state() == -2 ? L"Native controls link is unavailable." : L"Wait for the game to finish loading its profile.";
         return;
     }
@@ -539,7 +545,7 @@ void set_value(int id, int v)
     if (over) s_status += L"  " + widen(it.env) + L" is set in the environment and wins over this.";
     else if (it.apply) {
         it.apply(v);
-        s_status += strcmp(it.env, "PAD_MODERN_CONTROLS") == 0 ?
+        s_status += same_env(it, "PAD_MODERN_CONTROLS") ?
             L"  Mapping requested. Use the game's normal Save to keep it." : L"  Applied.";
     }
     else if (it.get(s_edit) != it.get(s_boot)) s_status += L"  Takes effect after a restart.";
@@ -903,7 +909,7 @@ void paint(HDC dc)
         fill(dc, kFieldX, y, kFieldX + kFieldW, y + kFieldH, RGB(0, 4, 0));
         fill(dc, kFieldX, y + kFieldH - 1, kFieldX + kFieldW, y + kFieldH, RGB(99, 101, 107));
         text_in(dc, fRow, kFieldX + 14, y, kFieldX + kFieldW - 8, y + kFieldH - 2, over ? grey(100) : grey(204),
-                (!strcmp(it.env, "PAD_MODERN_CONTROLS") && gt5p_modern_controls_state() < 0) ?
+                (same_env(it, "PAD_MODERN_CONTROLS") && gt5p_modern_controls_state() < 0) ?
                     (gt5p_modern_controls_state() == -2 ? L"Unavailable" : L"Waiting for game") : it.choices[choice_index(it)].label, DT_LEFT);
         /* Notes sit in the row's empty left side. */
         if (later)
@@ -1549,7 +1555,7 @@ void drop_pick()
     s_drop = false;
     if (s_sel < 0 || s_sel >= (int)r.size() || r[s_sel] < 0) return;
     const Item& it = items()[r[s_sel]];
-    if (s_drop_sel >= 0 && s_drop_sel < (int)it.choices.size() && (s_drop_sel != choice_index(it) || !strcmp(it.env, "PAD_MODERN_CONTROLS")))
+    if (s_drop_sel >= 0 && s_drop_sel < (int)it.choices.size() && (s_drop_sel != choice_index(it) || same_env(it, "PAD_MODERN_CONTROLS")))
         set_value(r[s_sel], it.choices[s_drop_sel].value);
 }
 

@@ -215,3 +215,9 @@ player felt two probe pulses. The F1 button then logged an accepted body pulse
 (`low=24576 high=24576 result=0 test=1`). Race strength and timing remain a play
 test: the 721 guest motor requests were captured with body output disabled.
 The early test builds above predate these corrections.
+
+A play of the vibration test package stopped in a null read while F1 was drawing
+the Debug page. Debug export has no environment name. The modern-controls label
+compared that empty name with `strcmp`. Drawing the row, changing it, and
+confirming it now treat a missing name as not the modern-controls row. The
+vibration path was not the faulting code.

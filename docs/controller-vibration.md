@@ -107,5 +107,10 @@ those commands were not forwarded to the controller. USB DualSense, DualSense
 Edge, Xbox trigger/body motors, Steam Input and DS4Windows remain unverified.
 No invented ABS, wheel-slip, RPM or other vehicle signal is used.
 
+A later play of that package stopped during startup with a null read. The fault
+was F1 drawing the Debug page: Debug export has no environment name, and the
+modern-controls label passed it to `strcmp`. The vibration path was not on the
+faulting stack. Rows with no environment name are now skipped by that check.
+
 Local test ZIP, head `79ecafc`, is recorded in
 [test-build-controls.md](test-build-controls.md). It is not a release.

@@ -79,6 +79,9 @@ Evidence for finished work goes in [progress.md](progress.md).
   accepted 250 ms body pulse (`low=24576 high=24576 result=0`). The corrected HSR
   route delivers 721 nonzero guest motor requests with body output left disabled.
   Race strength and timing still need a play test. See [controller-vibration.md](controller-vibration.md).
+  A startup crash while F1 drew the Debug page was a null environment name on
+  Debug export, not the vibration path. Rows with no environment name are no
+  longer passed to that modern-controls check.
 - **Smaller items:**
   - texture-load warning indicator;
   - keyboard alongside a connected controller;
